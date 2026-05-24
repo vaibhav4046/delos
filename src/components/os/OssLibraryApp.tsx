@@ -137,15 +137,6 @@ const PROJECTS: OssProject[] = [
     tags: ["serving", "long-context"],
     why: "Reference for the 'context-flood' chaos mode — DelOS critic compresses runs so they stay under LongLive-shape windows.",
   },
-  {
-    id: "contra",
-    name: "Contra · clear-code-projects",
-    tagline: "Side-scrolling run-n-gun in Python — DelOS Arcade entry.",
-    url: "https://github.com/clear-code-projects/Contra",
-    category: "games",
-    tags: ["game", "pygame", "arcade"],
-    why: "Listed in DelOS Arcade — runs natively when judges export the Tauri build. Web port queued behind DelDoom.",
-  },
 ];
 
 export function OssLibraryApp() {

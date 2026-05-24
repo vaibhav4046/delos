@@ -54,7 +54,7 @@ const actionSchema = z.object({
     "assistant", "identity", "ingest", "terminal", "browser", "builder",
     "cohort", "cores", "arena", "voice", "cowork", "mission", "marketplace",
     "oss", "analytics", "files", "notes", "calendar", "calc", "sysinfo",
-    "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom", "contra",
+    "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom",
     "settings", "about", "claude", "chatgpt", "perplexity",
   ]).optional(),
   payload: z.string().max(800).optional(),
@@ -106,7 +106,7 @@ Map this to ONE action. Available intents:
    • calendar — Calendar ("calendar", "schedule")
    • calc — Calculator ("calculator", "math")
    • sysinfo — System info ("system info", "specs")
-   • snake / tictactoe / minesweeper / game2048 / doom / memory / contra — games ("snake", "tic tac toe", "minesweeper", "2048", "doom", "memory match", "contra", "play contra", "run n gun")
+   • snake / tictactoe / minesweeper / game2048 / doom / memory — games ("snake", "tic tac toe", "minesweeper", "2048", "doom", "memory match")
    • settings — Settings ("settings", "preferences", "config")
    • about — About DelOS ("about", "version", "info")
    • claude / chatgpt / perplexity — retro AI chat apps.

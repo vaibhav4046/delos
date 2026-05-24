@@ -27,7 +27,6 @@ import { CoresApp } from "@/components/os/CoresApp";
 import { CodebaseApp } from "@/components/os/CodebaseApp";
 import { IngestApp } from "@/components/os/IngestApp";
 import { OssLibraryApp } from "@/components/os/OssLibraryApp";
-import { ContraApp } from "@/components/os/ContraApp";
 import { OnboardingPortal, hasOnboarded } from "@/components/os/OnboardingPortal";
 import { setTenantId as setTenantIdGlobal } from "@/lib/useTenant";
 import { useViewport } from "@/lib/useViewport";
@@ -175,12 +174,6 @@ const SYSTEM_APPS: Record<string, DockItem> = {
     label: "OSS Library",
     icon: "LibraryBig",
     spawn: () => ({ id: "oss", title: "OSS Library", icon: "LibraryBig", width: 560, height: 600, content: <OssLibraryApp /> }),
-  },
-  contra: {
-    id: "contra",
-    label: "Contra",
-    icon: "Crosshair",
-    spawn: () => ({ id: "contra", title: "Contra · DelOS Arcade", icon: "Crosshair", width: 560, height: 420, content: <ContraApp /> }),
   },
   notes: {
     id: "notes",
@@ -684,8 +677,8 @@ export default function OSPage() {
       "ingest", "terminal", "browser", "marketplace", "oss", "analytics",
       // Files & notes (5)
       "files", "notes", "calendar", "calc", "sysinfo",
-      // Games (7) — contra is the tribute run-n-gun
-      "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom", "contra",
+      // Games (6)
+      "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom",
       // System (2)
       "settings", "about",
     ],

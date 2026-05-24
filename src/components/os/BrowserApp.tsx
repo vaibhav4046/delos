@@ -35,8 +35,6 @@ const DEFAULT_BOOKMARKS: Bookmark[] = [
   // Tools
   { id: "hydra", title: "HydraDB", url: "https://hydradb.com", category: "tools" },
   { id: "groq", title: "Groq Console", url: "https://console.groq.com", category: "tools" },
-  // Games
-  { id: "contra", title: "Contra (run-n-gun)", url: "https://github.com/clear-code-projects/Contra", category: "games" },
 ];
 
 const CATEGORY_LABELS: Record<BookmarkCategory, string> = {
