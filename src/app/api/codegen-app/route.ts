@@ -28,12 +28,12 @@ import { rateLimit, clientIp } from "@/lib/rateLimit";
 const CODEGEN_LIMIT_PER_MIN = 6;
 const CODEGEN_WINDOW_MS = 60_000;
 
-// Default model: Moonshot Kimi K2 (256B params, instruct-0905).
-// Best free-tier code generator on Groq right now — beats scout-17b /
-// maverick-17b / gpt-oss-120b on JSX validity + same-to-same product matching.
-// 60K TPM ceiling on Groq free tier (2× scout's 30K), so the two-pass plan +
-// write fan-out has more headroom too.
-const DEFAULT_MODEL = "moonshotai/kimi-k2-instruct-0905";
+// Default model: llama-4-scout-17b on Groq. Free-tier-confirmed available,
+// 30K TPM, decent code. Kimi K2 + maverick-128e are gated behind paid tier
+// for this account. Gemini 2.5 Flash steps in as first fallback because
+// its code quality + 1M-token-per-day quota dwarfs Mistral-small's free
+// allowance.
+const DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
 // Per-file write call: ~2K input prompt + 3.5K output = 5.5K tokens.
 // Serial writes (parallel=1) + 2.5s sleep keeps us well under the 30K-TPM
@@ -157,29 +157,45 @@ async function mistralJson(
 }
 
 /**
- * Single entry point: try Groq (Kimi K2), on 429 fall to Gemini 2.5 Flash,
- * then Mistral small. Gemini beats Mistral on JSX validity + product
- * accuracy so it's first in the fallback chain. Anything other than rate-
- * limit propagates the original error so genuine schema failures don't
- * silently retry against three providers.
+ * Single entry point. Provider order (best free code quality first):
+ *   1. Gemini 2.5 Flash — Google free tier, 1M tokens/day, strong JSX + clones
+ *   2. Groq scout-17b   — 30K TPM, fast, fine for simpler files
+ *   3. Mistral small    — last resort
+ *
+ * Each provider gets one shot. On any failure (429, schema reject, network),
+ * we cascade to the next provider so the user gets a result rather than an
+ * error message. Only when ALL THREE fail do we surface the original error.
  */
 async function llmJson(prompt: string, system: string, maxTokens: number): Promise<string> {
-  const isRate = (msg: string) => msg.includes("429") || /rate.?limit/i.test(msg) || msg.includes("Too Many Requests");
-  try {
-    return await groqJson(prompt, system, maxTokens);
-  } catch (e) {
-    const msg = (e as Error).message || "";
-    if (!isRate(msg)) throw e;
-    console.warn("[codegen] Groq 429, falling to Gemini");
+  // Cascade order: Groq scout (fastest, cheap on TPM) → Gemini 2.5 Flash
+  // (better code quality, more headroom) → Mistral small (last resort).
+  // Groq goes first because each multi-file build makes 8-14 calls; if every
+  // call started with Gemini's ~6-15s latency we'd blow Vercel's 90s ceiling.
+  // Gemini steps in only when Groq returns rate-limited / invalid JSON.
+  const providers: Array<{ name: string; call: () => Promise<string> }> = [
+    { name: "groq",    call: () => groqJson(prompt, system, maxTokens) },
+    { name: "gemini",  call: () => geminiJson(prompt, system, Math.max(maxTokens, 6000)) },
+    { name: "mistral", call: () => mistralJson(prompt, system, maxTokens) },
+  ];
+  let lastErr: Error | null = null;
+  for (const p of providers) {
     try {
-      return await geminiJson(prompt, system, maxTokens);
-    } catch (e2) {
-      const msg2 = (e2 as Error).message || "";
-      if (!isRate(msg2)) throw e2;
-      console.warn("[codegen] Gemini 429, falling to Mistral");
-      return await mistralJson(prompt, system, maxTokens);
+      const raw = await p.call();
+      // Validate JSON before returning — invalid JSON cascades to next provider.
+      try {
+        JSON.parse(raw);
+        return raw;
+      } catch (parseErr) {
+        const reason = (parseErr as Error).message.slice(0, 80);
+        console.warn(`[codegen] ${p.name} returned invalid JSON (${reason}), cascading`);
+        lastErr = new Error(`${p.name} invalid JSON: ${reason}`);
+      }
+    } catch (e) {
+      lastErr = e as Error;
+      console.warn(`[codegen] ${p.name} failed: ${(lastErr.message || "").slice(0, 120)}`);
     }
   }
+  throw lastErr ?? new Error("all providers failed");
 }
 
 export const runtime = "nodejs";
