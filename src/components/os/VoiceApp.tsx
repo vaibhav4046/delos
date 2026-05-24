@@ -239,6 +239,13 @@ export function VoiceApp() {
       case "open_app":
         if (action.app) {
           window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: action.app } }));
+          // If the user said "open browser show me X" or "open kanban" (which
+          // we route to browser), pre-fill the browser's search with the
+          // payload so the user lands on a useful page instead of /docs.
+          if (action.app === "browser" && payload) {
+            await new Promise((r) => setTimeout(r, 300));
+            window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "browser.search", query: payload } }));
+          }
         }
         break;
       case "close_window":

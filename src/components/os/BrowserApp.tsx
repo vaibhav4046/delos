@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as Icons from "lucide-react";
+import { onIntent } from "@/lib/intentBus";
 
 type Bookmark = { id: string; title: string; url: string };
 type SearchHit = { title: string; url: string; snippet: string };
@@ -112,6 +113,14 @@ export function BrowserApp() {
         if (v.history?.length) setHistory(v.history);
       }
     } catch {}
+  }, []);
+
+  // Voice intent: { kind: "browser.search", query: "..." }
+  useEffect(() => {
+    return onIntent("browser.search" as never, ((i: { query: string }) => {
+      if (i.query) navigate(i.query);
+    }) as never);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
