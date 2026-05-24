@@ -112,14 +112,30 @@ function Hero({ apps }: { apps: number }) {
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-12 sm:pt-20 pb-12 sm:pb-20 grid lg:grid-cols-2 gap-10 items-center">
         <div>
-          <div className="inline-flex items-center gap-2 mb-5 pill pill-info pill-pop" style={{ fontSize: 11 }}>
-            <span className="w-1.5 h-1.5 accent-pulse" style={{ background: "var(--accent)" }} />
+          {/* Eyebrow per Anthropic Design package — pixel font reserved for tracked-out
+             accent labels only, not the main headline. */}
+          <div className="eyebrow mb-5">
+            <span className="dot" />
             AGENTS UNDER PRESSURE · HYDRADB HACKATHON 2026
           </div>
-          <h1 className="font-pixel text-4xl sm:text-5xl md:text-6xl xl:text-7xl leading-[1.04] mb-5 tracking-wider">
-            <span className="shimmer">DelOS</span> —<br />
-            the AI <span style={{ color: "var(--accent)" }}>operating</span><br />
-            <span style={{ color: "var(--danger)" }}>system</span>.
+          {/* Editorial headline: Inter heavy, tight tracking, serif italic accent on
+             "flow" to match design.html V1. Sizes scale fluidly for mobile/tablet/desktop. */}
+          <h1
+            className="leading-[0.98] mb-5"
+            style={{
+              fontFamily: "var(--font-sans)",
+              fontWeight: 600,
+              letterSpacing: "-0.04em",
+              fontSize: "clamp(40px, 8vw, 88px)",
+            }}
+          >
+            The AI operating system{" "}
+            <span style={{ color: "var(--muted-2)" }}>where</span><br />
+            agents{" "}
+            <em style={{ fontFamily: "Georgia, ui-serif, serif", color: "var(--accent)", fontStyle: "italic", fontWeight: 400 }}>
+              flow
+            </em>{" "}
+            under pressure.
           </h1>
           <p className="text-base sm:text-lg text-[color:var(--muted)] max-w-xl leading-relaxed">
             Browser-OS where <span style={{ color: "var(--fg)" }}>memory</span>,{" "}
