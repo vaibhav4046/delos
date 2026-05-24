@@ -36,7 +36,11 @@ async function autoSeedIfEmpty(tenantId: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const q = req.nextUrl.searchParams.get("q") ?? "recent runs";
+  // Cap query length at 240 chars · pen-test caught a 5000-char string being
+  // echoed back unbounded. Tight cap prevents reflection-amplification + DOS
+  // via embedded payloads, and matches HydraDB's effective recall window.
+  const rawQ = req.nextUrl.searchParams.get("q") ?? "recent runs";
+  const q = rawQ.slice(0, 240);
   // BOLA fix (QA report BUG-1) — tenantId is resolved server-side from the
   // signed session cookie, never from the query string. Anonymous callers
   // are scoped to a per-IP anon tenant so they only see their own writes.

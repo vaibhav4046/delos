@@ -18,9 +18,34 @@ import { TWITTER_CLONE } from "@/lib/clone-templates/twitter";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+// Sanitize on read · reject path-traversal + control chars before persistence.
+// Strips C0 control codes, parent-traversal (..), path separators, then
+// collapses whitespace. Pen-test caught `../../etc/passwd` being accepted
+// as inspiration and used verbatim as the spec name — refused now.
+function sanitizeName(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    const code = ch.charCodeAt(0);
+    if (code < 0x20 || code === 0x7f) continue;
+    out += ch;
+  }
+  return out
+    .replace(/\.\.+/g, "")
+    .replace(/[\\/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const safeName = z
+  .string()
+  .min(2)
+  .max(80)
+  .transform(sanitizeName)
+  .refine((s) => s.length >= 2, { message: "name became empty after sanitization" });
+
 const Req = z.object({
-  inspiration: z.string().min(2).max(80),
-  features: z.array(z.string()).max(20).optional(),
+  inspiration: safeName,
+  features: z.array(z.string().max(80)).max(20).optional(),
 });
 
 const TEMPLATES: Record<string, () => z.infer<typeof CloneSpec>> = {

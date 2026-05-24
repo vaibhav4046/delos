@@ -149,7 +149,10 @@ intent firing the App Builder.
 Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }`;
 
   try {
-    const obj = await withModels(overrides, () =>
+    // Self-timeout shorter than Vercel maxDuration (15s) so we ALWAYS return
+    // structured JSON instead of being killed mid-stream and returning the
+    // Vercel HTML 504 page. 11s leaves ~4s headroom for network + response.
+    const llmCall = withModels(overrides, () =>
       generateJson({
         model: models.executor,
         schema: actionSchema,
@@ -157,6 +160,12 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
         temperature: 0.1,
       }),
     );
+    const obj = await Promise.race([
+      llmCall,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("voice_command_timeout")), 11_000),
+      ),
+    ]);
     return Response.json(obj);
   } catch (e) {
     // Voice mis-classification should NEVER 500 the client — the mic loop

@@ -105,6 +105,21 @@ Return JSON only.
     );
     return Response.json({ ok: true, plan, contextUsed: ingestHits.length + credHits.length });
   } catch (e) {
-    return Response.json({ ok: false, error: (e as Error).message }, { status: 500 });
+    // Sanitize upstream error before responding so we never leak provider
+    // retry-windows ("retry in 12m33.408s"), org_ ids, or model billing URLs.
+    // Map rate-limit to 429 instead of 500 so clients can back off correctly.
+    const raw = (e as Error).message;
+    const isRateLimit = /rate[_ ]?limit/i.test(raw);
+    const safeError = isRateLimit
+      ? "rate_limited · upstream model quota exhausted · retry shortly or switch model in Settings"
+      : /timeout|aborted/i.test(raw)
+        ? "upstream_timeout · try a shorter goal or different model"
+        : /malformed|invalid_value|validation/i.test(raw)
+          ? "spec_validation_failed · model returned unparseable JSON · try again"
+          : "coordinator_error";
+    return Response.json(
+      { ok: false, error: safeError },
+      { status: isRateLimit ? 429 : 500 },
+    );
   }
 }
