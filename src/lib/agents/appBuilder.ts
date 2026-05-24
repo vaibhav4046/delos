@@ -69,12 +69,15 @@ ${exampleSpec}
 
 RULES:
 - Output ONE JSON object matching the schema.
-- Keep UI tight: 2-6 nodes deep typically, no more than ~25 nodes total.
-- Use icon names that exist in lucide-react (PascalCase).
-- For interactive apps that need LLM help, use { kind: "agent", ... }.
+- Aim for 6–14 visible widgets — empty/tiny apps feel broken. Wrap groups in "card" with a heading "text" h3 so the layout reads as designed, not raw.
+- Add a "text" h1 title at the top + a one-line h3 subtitle/tagline ("Stay focused 25 minutes at a time.") so judges can grok the app in 2s.
+- Use icon names that exist in lucide-react (PascalCase). Mention the icon once near the title via { kind: "image", icon: "...", size: 28 }.
+- Use { kind: "pill", text, tone } for status badges (e.g. "Running", "Paused", "Streak 3 days") — they look much more polished than raw text.
+- For interactive apps that need LLM help, use { kind: "agent", ... } with a specific, scoped promptTemplate.
 - For math, prefer { kind: "tool", tool: "calc", argsTemplate: { expr: "{{a}}+{{b}}" }, saveAs: "result" }.
 - Variables for {{interpolation}} come from initialState + bound inputs + tool saveAs results.
-- Be opinionated about design: choose 1-2 sentences for any prose. Keep label text short.
+- Keep button labels short (1–3 words). Group primary + secondary buttons in a "row" with gap 2.
+- Match THIS app's domain in every label and string — never re-use copy from unrelated products. "Pomodoro timer" must say "Start Session", not "Add to Cart".
 
 Return ONLY the JSON object.`;
 

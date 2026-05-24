@@ -10,9 +10,12 @@ function flakeRoll(ctx: { chaos: Set<string> }): boolean {
   return Math.random() < 0.6;
 }
 
-const webSearch: Tool<{ query: string; topK?: number }, { results: Array<{ title: string; url: string; snippet: string }> }> = {
+const webSearch: Tool<
+  { query: string; topK?: number },
+  { results: Array<{ title: string; url: string; snippet: string }>; abstract?: string; abstractSource?: string; abstractUrl?: string }
+> = {
   name: "web_search",
-  description: "Search the public web. Returns top-K results.",
+  description: "Search the public web. Returns top-K results plus DuckDuckGo's instant answer when available.",
   tags: ["search", "web", "research"],
   schema: z.object({ query: z.string().min(1), topK: z.number().int().positive().max(10).optional() }),
   async run({ query, topK = 5 }, ctx) {
@@ -29,16 +32,36 @@ const webSearch: Tool<{ query: string; topK?: number }, { results: Array<{ title
         ].slice(0, topK),
       };
     }
-    const j = await r.json().catch(() => null);
-    const related = (j?.RelatedTopics ?? []) as Array<{ Text?: string; FirstURL?: string }>;
-    const results = related
+    const j = (await r.json().catch(() => null)) as {
+      RelatedTopics?: Array<{ Text?: string; FirstURL?: string; Topics?: Array<{ Text?: string; FirstURL?: string }> }>;
+      AbstractText?: string;
+      AbstractSource?: string;
+      AbstractURL?: string;
+      Heading?: string;
+    } | null;
+    // Flatten nested topic groups so we don't drop the rich category results.
+    const flatTopics: Array<{ Text?: string; FirstURL?: string }> = [];
+    for (const t of j?.RelatedTopics ?? []) {
+      if (Array.isArray(t.Topics)) flatTopics.push(...t.Topics);
+      else flatTopics.push(t);
+    }
+    const results = flatTopics
       .filter((x) => x.Text && x.FirstURL)
       .slice(0, topK)
-      .map((x) => ({ title: x.Text!.slice(0, 80), url: x.FirstURL!, snippet: x.Text! }));
+      .map((x) => ({ title: x.Text!.slice(0, 100), url: x.FirstURL!, snippet: x.Text! }));
     if (results.length === 0) {
-      results.push({ title: `No instant results for ${query}`, url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}`, snippet: "Falling back to query URL." });
+      results.push({
+        title: `No instant results for ${query}`,
+        url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
+        snippet: "Falling back to query URL.",
+      });
     }
-    return { results };
+    return {
+      results,
+      abstract: j?.AbstractText || undefined,
+      abstractSource: j?.AbstractSource || undefined,
+      abstractUrl: j?.AbstractURL || undefined,
+    };
   },
 };
 

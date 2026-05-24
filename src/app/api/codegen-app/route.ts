@@ -352,24 +352,50 @@ export async function POST(req: NextRequest) {
         ? "React 18 + Vite + TypeScript + Tailwind"
         : "Node.js 22 + TypeScript + Hono/Express for API only (no frontend)";
 
+  // Detect whether the user explicitly named a product/brand to clone.
+  // If they did → high-fidelity brand-match mode. If they didn't → generic
+  // app mode (clean modern design, NOT a brand pastiche). Same plan path,
+  // different framing — the old prompt was hardcoded brand-mode which made
+  // a "Pomodoro timer landing page" come out with PrimeBadge + FocusPicker
+  // components leaked in from the Amazon/Perplexity training examples.
+  const brandPatterns = /\b(amazon|perplexity|chatgpt|claude|gpt|uber|lyft|netflix|disney|hulu|prime\s*video|twitter|x\.com|github|gitlab|youtube|spotify|apple\s*music|airbnb|stripe|notion|slack|figma|discord|tinder|bumble|robinhood|coinbase|linear|miro|google|gmail|microsoft|teams|zoom|tiktok|instagram|whatsapp|telegram|reddit|hacker\s*news|hn|product\s*hunt|vercel|netlify|cloudflare|aws|gcp|azure|openai)\b/i;
+  const isBrandClone = brandPatterns.test(userPrompt);
+
   try {
     // --- PASS 1: PLAN ---
     // Ask the model to lay out the file structure with a short brief for each.
     // No actual code yet — the brief is what each WRITE call gets as context.
-    const planPrompt = `You are a senior staff engineer planning a SAME-TO-SAME clone of a real product.
+    const planPrompt = isBrandClone
+      ? `You are a senior staff engineer planning a SAME-TO-SAME clone of the specific real product named in the user request below.
 
 USER REQUEST:
 ${userPrompt}
 
 STACK: ${stackHint}
 
-This must look like the real product, not a generic prototype. Specifically:
-- HONOR every color/layout/copy detail in the user request — exact hex codes, exact section names ("Prime badge", "Recommendation rail", "Focus picker"), exact nav structure.
-- Match the brand's visual hierarchy: hero shape, header strip, sidebar widths, button styling, typography weights.
-- Mock data must use the product's CONVENTIONS: Amazon → product titles + 4.5-star ratings + "Sponsored" labels; ChatGPT → "Today / Yesterday / Previous 7 Days" buckets; Perplexity → numbered [1][2][3] citations + sources panel; Claude → conversation chips + Anthropic burnt orange.
-- 10+ realistic items per list — real product names, prices, descriptions.
+This must look like THE EXACT product named above — not a generic prototype, and NEVER a different product. If the user said "Pomodoro" do not invent Amazon components; if they said "Amazon" do not invent ChatGPT components.
+
+- HONOR every color/layout/copy detail in the user request — exact hex codes the user specified, exact section names they listed, exact nav structure.
+- Match THIS brand's visual hierarchy: hero shape, header strip, sidebar widths, button styling, typography weights.
+- Mock data must use THIS product's conventions only. Don't blend conventions from other products.
+- 10+ realistic items per list — real-shaped names, prices, descriptions tailored to the target product.
 - Interactive components with state: forms, modals, search filters, like buttons, dropdowns, tabs.
-- Inline-mocked services (no external APIs needed) so the project runs standalone.
+- Inline-mocked services (no external APIs needed) so the project runs standalone.`
+      : `You are a senior staff engineer planning a polished, working web app from the user's brief.
+
+USER REQUEST:
+${userPrompt}
+
+STACK: ${stackHint}
+
+This is a GENERIC app (no specific brand named). Design it with a clean, modern aesthetic — do NOT copy Amazon, Perplexity, ChatGPT, Claude, Uber, or any other product's chrome unless the user asked for it. Pick an appropriate color palette for the app's purpose and use it consistently.
+
+- Component names must describe the THIS app's domain, not be lifted from other products. If the user asked for a Pomodoro timer, the components are Timer/SessionList/SettingsPanel — NOT PrimeBadge, RecommendationRail, or FocusPicker.
+- Match the app's purpose with the right primitives: a productivity app uses checklists/timers/streaks; a marketing landing page uses hero/features/CTA/footer; an analytics tool uses charts/filters/metric cards.
+- Mock data must be domain-appropriate (timer session logs for a Pomodoro app; not "Sponsored product" rows).
+- 6+ realistic items per list, written in the app's voice.
+- Interactive components with state, real handlers, no stubs.
+- Inline mocks only; runs standalone.`;
 
 Output the FILE PLAN — 8 to 14 files. For each file:
 - path : exact path including extension (e.g. "app/page.tsx", "app/components/MapMock.tsx")
@@ -433,7 +459,9 @@ Purpose: ${planEntry.purpose}
 Language: ${planEntry.language ?? "tsx"}
 
 RULES (strict):
-- SAME-TO-SAME clone. Match the real product's exact colors (hex codes from the user request), exact layout proportions, exact copy ("Prime", "Sponsored", "Reply to Claude", "Ask anything", etc.).
+- ${isBrandClone
+        ? "SAME-TO-SAME clone of the specific product named in the user request. Match exact colors (hex codes from the user request), exact layout proportions, exact copy from THAT product only. Do not blend in chrome from other products."
+        : "Generic polished app — match the user's described domain. Do NOT add brand-specific chrome (\"Prime\", \"Reply to Claude\", \"Ask anything\", etc.) unless the user explicitly asked for that product. Component copy must match THIS app's purpose."}
 - Write COMPLETE, syntactically valid code. No \`...\` ellipses, no \`// TODO\`, no \`/* implement later */\`, no \`throw new Error("not implemented")\`.
 - JSX hygiene (Sandpack will fail otherwise): EVERY JSX attribute must have an explicit value — \`alt=""\` not \`alt=\`, \`disabled={true}\` not \`disabled=\`. Map keys must be unique strings or stable ids, not duplicated values. Close every tag. No stray commas in arrays. No trailing commas after JSX attrs.
 - EXPORT RULE (Sandpack default-import resolution): every component file MUST use \`export default function ComponentName(...)\`. Sibling files import via \`import ComponentName from "./ComponentName"\` (default import). Do NOT use named exports for components. Mixing default + named breaks resolution and the preview shows "Element type is invalid: expected a string ... but got: object".

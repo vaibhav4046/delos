@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as Icons from "lucide-react";
 
 type Bookmark = { id: string; title: string; url: string };
+type SearchHit = { title: string; url: string; snippet: string };
 
 const DEFAULT_BOOKMARKS: Bookmark[] = [
   { id: "del", title: "DelOS", url: "/" },
@@ -34,7 +35,16 @@ function normalize(u: string): string {
   if (v.startsWith("/")) return v;
   if (/^https?:\/\//i.test(v)) return v;
   if (v.includes(".") && !v.includes(" ")) return "https://" + v;
-  return `https://duckduckgo.com/?q=${encodeURIComponent(v)}`;
+  // Render search internally via the "search:" pseudo-scheme. Avoids hitting
+  // the iframe-blocked duckduckgo.com page and lets us show real results.
+  return `search:${v}`;
+}
+
+function isSearchUrl(u: string): boolean {
+  return u.startsWith("search:");
+}
+function extractSearchQuery(u: string): string {
+  return u.startsWith("search:") ? u.slice("search:".length) : "";
 }
 
 // Known X-Frame-Options: DENY / SAMEORIGIN sites. Trying to iframe these
@@ -76,16 +86,22 @@ function isLikelyEmbedBlocked(url: string): boolean {
 }
 
 export function BrowserApp() {
-  // Default to same-origin /docs so the user sees real content on first open
-  // instead of a blocked external site. Bookmarks still let them jump anywhere.
-  const [url, setUrl] = useState("/docs");
-  const [input, setInput] = useState("/docs");
+  // Default to a built-in DelOS Search homepage so the first impression is
+  // a real product, not "blocked iframe" or "doc viewer".
+  const [url, setUrl] = useState("search:");
+  const [input, setInput] = useState("");
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(DEFAULT_BOOKMARKS);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const [iframeError, setIframeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [searchAnswer, setSearchAnswer] = useState<string>("");
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const currentQuery = useMemo(() => extractSearchQuery(url), [url]);
 
   useEffect(() => {
     try {
@@ -106,10 +122,15 @@ export function BrowserApp() {
     const u = normalize(target);
     if (!u) return;
     setUrl(u);
-    setInput(u);
-    // Proactive check: if this is a known X-Frame-Options blocker, show the
-    // embed-block card immediately instead of rendering a blank iframe.
-    if (isLikelyEmbedBlocked(u)) {
+    setInput(u.startsWith("search:") ? u.slice("search:".length) : u);
+    if (isSearchUrl(u)) {
+      // Built-in search results view — no iframe, no X-Frame-Options drama.
+      setIframeError(null);
+      setLoading(false);
+      void runSearch(extractSearchQuery(u));
+    } else if (isLikelyEmbedBlocked(u)) {
+      // Proactive check: if this is a known X-Frame-Options blocker, show the
+      // embed-block card immediately instead of rendering a blank iframe.
       setIframeError(
         "This site blocks iframe embedding (X-Frame-Options). Open it in a new tab to use it.",
       );
@@ -124,6 +145,36 @@ export function BrowserApp() {
       setHistoryIdx(next.length - 1);
       return next.slice(-50);
     });
+  }
+
+  async function runSearch(q: string) {
+    const query = q.trim();
+    if (!query) {
+      setSearchHits([]);
+      setSearchAnswer("");
+      setSearchError(null);
+      return;
+    }
+    setSearchBusy(true);
+    setSearchError(null);
+    setSearchHits([]);
+    setSearchAnswer("");
+    try {
+      // Use the existing web_search tool — DuckDuckGo Instant Answer, free, no key.
+      const r = await fetch("/api/tool", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "web_search", args: { query, topK: 8 } }),
+      });
+      const j = (await r.json()) as { ok: boolean; data?: { results?: SearchHit[]; abstract?: string }; error?: string };
+      if (!j.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
+      setSearchHits(j.data?.results ?? []);
+      setSearchAnswer(j.data?.abstract ?? "");
+    } catch (e) {
+      setSearchError((e as Error).message);
+    } finally {
+      setSearchBusy(false);
+    }
   }
 
   function back() {
@@ -219,26 +270,181 @@ export function BrowserApp() {
         ))}
       </div>
 
-      <div className="flex-1 relative" style={{ background: "var(--surface)", border: "2px solid var(--surface-2)" }}>
-        {iframeError && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center p-4" style={{ background: "var(--overlay)" }}>
-            <div className="card-pixel text-center max-w-sm">
-              <div className="font-pixel text-sm mb-2" style={{ color: "var(--danger)" }}>★ EMBED BLOCKED</div>
-              <p className="text-[color:var(--muted)] text-[11px] mb-3">{iframeError}</p>
-              <button onClick={openExternal} className="btn-pixel">OPEN IN NEW TAB ↗</button>
-            </div>
-          </div>
+      <div className="flex-1 relative overflow-auto" style={{ background: "var(--surface)", border: "2px solid var(--surface-2)" }}>
+        {isSearchUrl(url) ? (
+          <SearchView
+            query={currentQuery}
+            hits={searchHits}
+            answer={searchAnswer}
+            busy={searchBusy}
+            error={searchError}
+            onNavigate={(target) => navigate(target)}
+            onRunQuery={(q) => navigate(q)}
+          />
+        ) : (
+          <>
+            {iframeError && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center p-4" style={{ background: "var(--overlay)" }}>
+                <div className="card-pixel text-center max-w-sm">
+                  <div className="font-pixel text-sm mb-2" style={{ color: "var(--danger)" }}>★ EMBED BLOCKED</div>
+                  <p className="text-[color:var(--muted)] text-[11px] mb-3">{iframeError}</p>
+                  <button onClick={openExternal} className="btn-pixel">OPEN IN NEW TAB ↗</button>
+                </div>
+              </div>
+            )}
+            <iframe
+              ref={iframeRef}
+              src={url}
+              title="DelOS Browser"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+              referrerPolicy="no-referrer-when-downgrade"
+              onLoad={() => { setLoading(false); }}
+              style={{ width: "100%", height: "100%", border: 0, background: "var(--bg)" }}
+            />
+          </>
         )}
-        <iframe
-          ref={iframeRef}
-          src={url}
-          title="DelOS Browser"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-          referrerPolicy="no-referrer-when-downgrade"
-          onLoad={() => { setLoading(false); }}
-          style={{ width: "100%", height: "100%", border: 0, background: "var(--bg)" }}
-        />
       </div>
+    </div>
+  );
+}
+
+const QUICK_QUERIES = [
+  "Latest in multi-agent orchestration",
+  "Graph databases for AI memory",
+  "Best Next.js 16 patterns",
+  "HydraDB vs Neo4j benchmarks",
+  "Voice agent architecture",
+  "Cohort racing LLMs",
+];
+
+function SearchView({
+  query,
+  hits,
+  answer,
+  busy,
+  error,
+  onNavigate,
+  onRunQuery,
+}: {
+  query: string;
+  hits: SearchHit[];
+  answer: string;
+  busy: boolean;
+  error: string | null;
+  onNavigate: (target: string) => void;
+  onRunQuery: (q: string) => void;
+}) {
+  const [draft, setDraft] = useState(query);
+  useEffect(() => { setDraft(query); }, [query]);
+
+  return (
+    <div className="p-4 space-y-3 min-h-full" style={{ color: "var(--fg)" }}>
+      <div className="font-pixel text-2xl tracking-widest" style={{ color: "var(--accent)" }}>
+        ★ DEL <span style={{ color: "var(--success)" }}>SEARCH</span>
+      </div>
+      <p className="font-mono text-[11px]" style={{ color: "var(--muted)" }}>
+        Real web search via DuckDuckGo · plus Wikipedia + HN via the DelOS MCP demo. Type below or pick a quick query.
+      </p>
+      <div className="flex gap-2">
+        <input
+          className="input-pixel flex-1"
+          style={{ padding: "8px 12px", fontSize: 13 }}
+          placeholder="Search the web…"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && draft.trim() && onRunQuery(draft.trim())}
+        />
+        <button
+          className="btn-pixel"
+          disabled={!draft.trim() || busy}
+          onClick={() => draft.trim() && onRunQuery(draft.trim())}
+        >
+          {busy ? "…" : "SEARCH"}
+        </button>
+      </div>
+
+      {!query && (
+        <div className="space-y-2 pt-2">
+          <div className="font-pixel text-[11px] tracking-widest" style={{ color: "var(--accent)" }}>★ POPULAR</div>
+          <div className="flex flex-wrap gap-1">
+            {QUICK_QUERIES.map((q) => (
+              <button
+                key={q}
+                onClick={() => onRunQuery(q)}
+                className="pill pill-muted cursor-pointer"
+                style={{ fontSize: 11 }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {busy && (
+        <div className="font-mono text-[11px] flex items-center gap-2" style={{ color: "var(--muted)" }}>
+          <span className="inline-block w-2 h-2 animate-pulse" style={{ background: "var(--accent)" }} />
+          searching…
+        </div>
+      )}
+
+      {error && (
+        <div className="card-pixel text-[11px]" style={{ borderColor: "var(--danger)", color: "var(--danger)" }}>
+          {error}
+        </div>
+      )}
+
+      {!busy && query && answer && (
+        <div
+          className="card-pixel space-y-1"
+          style={{ borderColor: "var(--accent)" }}
+        >
+          <div className="font-pixel text-[11px] tracking-widest" style={{ color: "var(--accent)" }}>
+            ★ INSTANT ANSWER
+          </div>
+          <p className="font-mono text-[12px] leading-relaxed">{answer}</p>
+        </div>
+      )}
+
+      {!busy && query && hits.length > 0 && (
+        <div className="space-y-2 pt-1">
+          <div className="font-pixel text-[11px] tracking-widest" style={{ color: "var(--accent)" }}>
+            ★ RESULTS ({hits.length})
+          </div>
+          <ul className="space-y-2">
+            {hits.map((h, i) => (
+              <li key={`${h.url}-${i}`} className="card-pixel">
+                <button
+                  className="block w-full text-left"
+                  onClick={() => onNavigate(h.url)}
+                >
+                  <div className="font-pixel text-sm truncate" style={{ color: "var(--accent)" }}>
+                    {h.title}
+                  </div>
+                  <div
+                    className="font-mono text-[10px] truncate"
+                    style={{ color: "var(--success)" }}
+                  >
+                    {h.url}
+                  </div>
+                  <div
+                    className="font-mono text-[11px] leading-relaxed mt-1"
+                    style={{ color: "var(--fg)" }}
+                  >
+                    {h.snippet.slice(0, 240)}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!busy && query && hits.length === 0 && !error && !answer && (
+        <div className="card-pixel font-mono text-[11px]" style={{ color: "var(--muted)" }}>
+          No results from DuckDuckGo Instant Answer for &quot;{query}&quot;. Try a different phrasing.
+        </div>
+      )}
     </div>
   );
 }
