@@ -62,8 +62,23 @@ export function CodebaseApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: usePrompt }),
       });
-      const j = (await r.json()) as { ok: boolean; project?: Project; error?: string };
-      if (!j.ok || !j.project) throw new Error(j.error ?? `HTTP ${r.status}`);
+      // Read as text first so we can recover from non-JSON error pages
+      // (e.g. Vercel function-timeout HTML which used to throw a raw
+      // "Unexpected token 'A', \"An error o...\" is not valid JSON" in the
+      // UI). Now we surface a clean message + the first 200 chars of the
+      // body so the user sees what actually happened.
+      const raw = await r.text();
+      let j: { ok?: boolean; project?: Project; error?: string } | null = null;
+      try { j = JSON.parse(raw); } catch {}
+      if (!r.ok || !j || !j.ok || !j.project) {
+        const why = j?.error
+          || (r.status === 504
+            ? "Codegen timed out — the spec for that prompt is too large. Try a smaller scope (e.g. \"a hero + 4 feature cards\" instead of \"a full SaaS\")."
+            : r.status === 429
+              ? "Codegen rate-limited. Wait ~60s, then try again."
+              : raw.slice(0, 200));
+        throw new Error(`HTTP ${r.status} · ${why}`);
+      }
       setProject(j.project);
       setSelectedPath(j.project.files[0]?.path ?? null);
       broadcastAgent("critic", "done");

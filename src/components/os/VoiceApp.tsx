@@ -92,7 +92,16 @@ export function VoiceApp() {
     } finally {
       setPhase("idle");
       if (continuousRef.current) {
-        setTimeout(() => stt.start({ continuous: false }), 800);
+        // Make absolutely sure TTS is off before re-opening the mic, or the
+        // browser STT picks up the spoken reply as the next "user" turn and
+        // the follow-up dies in a feedback loop ("agent: hi → mic hears
+        // hi → agent: hi again").
+        stopSpeaking();
+        // Slightly longer gap (1.2s) so any tail audio + STT readiness flush.
+        setTimeout(() => {
+          // Re-check continuous flag at fire time — user may have toggled off.
+          if (continuousRef.current) stt.start({ continuous: false });
+        }, 1200);
       }
     }
   }
