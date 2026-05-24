@@ -38,6 +38,7 @@ export function Dock({
   onLaunch,
   onClose,
   onMinimize,
+  autoHide = true,
 }: {
   order: string[];
   apps: Record<string, DockApp>;
@@ -48,12 +49,20 @@ export function Dock({
   // hover-X close so users aren't trapped with an open window they can't dismiss.
   onClose?: (id: string) => void;
   onMinimize?: (id: string) => void;
+  // When true, dock slides offscreen if cursor is far from bottom edge.
+  // Disabled on Welcome mat / when no windows are open so first-time users
+  // see the app row immediately.
+  autoHide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [mx, setMx] = useState<number | null>(null);
   const [bouncing, setBouncing] = useState<string | null>(null);
   const [scrollW, setScrollW] = useState(0);
   const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  // Dock visible by default; auto-hides into bottom edge when cursor is far away
+  // and at least one window is open. Hover the bottom 80px strip to reveal.
+  const [revealed, setRevealed] = useState(true);
+  const revealLockRef = useRef(false);
 
   const All = Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>;
   const open = new Set(openIds);
@@ -100,6 +109,42 @@ export function Dock({
 
   const onLeave = useCallback(() => setMx(null), []);
 
+  // Global pointer watcher · reveals dock when cursor enters the bottom 96px
+  // reveal-strip. Throttles to rAF so movement stays cheap on slow machines.
+  // When autoHide is false (welcome mat, no windows) dock stays revealed.
+  useEffect(() => {
+    if (!autoHide) { setRevealed(true); return; }
+    let raf = 0;
+    let lastY = 9999;
+    const onPointer = (e: PointerEvent) => {
+      lastY = e.clientY;
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        const vh = window.innerHeight;
+        const inStrip = lastY >= vh - 96;
+        // Sticky reveal · once revealed, stay revealed until cursor leaves a
+        // larger 128px exit-strip. Prevents flicker at the seam.
+        setRevealed((prev) => (prev ? lastY >= vh - 128 : inStrip));
+      });
+    };
+    const onKey = (e: KeyboardEvent) => {
+      // ⌘D · toggle dock pin · power-user override
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        revealLockRef.current = !revealLockRef.current;
+        setRevealed(revealLockRef.current ? true : revealed);
+      }
+    };
+    window.addEventListener("pointermove", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointermove", onPointer);
+      window.removeEventListener("keydown", onKey);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, [autoHide, revealed]);
+
   function handleClick(key: string, app: DockApp) {
     setBouncing(key);
     setTimeout(() => setBouncing(null), 520);
@@ -118,15 +163,26 @@ export function Dock({
     setMenu({ key, x: e.clientX, y: e.clientY });
   }
 
+  // Slide dock fully offscreen when hidden · 24px peek-strip lets the user
+  // remember it's there. cubic-bezier ease-out feels like a real OS, not CSS.
+  const hidden = !revealed;
+  const dockTranslate = hidden ? "translate3d(0, calc(100% - 6px), 0)" : "translate3d(0, 0, 0)";
+
   return (
     <footer
       className="absolute bottom-0 left-0 right-0 z-[100] flex items-end justify-center px-2 sm:px-4 py-2 sm:py-3 pointer-events-none"
-      style={{ background: "transparent" }}
+      style={{
+        background: "transparent",
+        transform: dockTranslate,
+        transition: "transform 280ms cubic-bezier(0.32, 0.72, 0, 1)",
+        willChange: "transform",
+      }}
     >
       <div
         ref={ref}
         onPointerMove={onMove}
         onPointerLeave={onLeave}
+        onMouseEnter={() => setRevealed(true)}
         data-app-dock
         className="flex items-end gap-1 sm:gap-2 px-3 sm:px-4 py-2 sm:py-3 overflow-x-auto pointer-events-auto max-w-[calc(100vw-1rem)]"
         style={{

@@ -23,7 +23,9 @@ export function Logo({
         className="font-pixel tracking-wider"
         style={{
           fontSize,
-          color: "var(--fg)",
+          // Prefer wallpaper-tone fg (set on .delos-root[data-wall-tone="…"]).
+          // Falls back to theme fg outside the OS shell (landing, pitch, etc.).
+          color: "var(--wp-fg, var(--fg))",
           letterSpacing: "0.04em",
           lineHeight: 1,
           whiteSpace: "nowrap",

@@ -749,8 +749,18 @@ input:disabled, textarea:disabled, select:disabled {
    vapor-horizon) flip logo + dock overlay to dark text for readability.
    Applied at .delos-root scope via data-wall-tone attribute.
    =========================== */
-.delos-root[data-wall-tone="light"] .delos-logo {
-  filter: brightness(0) saturate(100%);
+/* Wallpaper-tone foreground token. Decoupled from --fg (which follows theme)
+   so a light theme on a dark wallpaper still reads correctly. Used by Logo,
+   WelcomeMat, hint stickies, and anything painted directly on wallpaper. */
+.delos-root[data-wall-tone="dark"] {
+  --wp-fg: #f4f1de;
+  --wp-fg-rgb: 244, 241, 222;
+  --wp-on-fg: #0b0b14;
+}
+.delos-root[data-wall-tone="light"] {
+  --wp-fg: #0E0E1B;
+  --wp-fg-rgb: 14, 14, 27;
+  --wp-on-fg: #f4f1de;
 }
 .delos-root[data-wall-tone="light"] .desktop-mat,
 .delos-root[data-wall-tone="light"] .topbar-text {

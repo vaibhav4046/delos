@@ -969,6 +969,10 @@ export default function OSPage() {
               onLaunch={spawnSystemApp}
               onClose={closeWin}
               onMinimize={minimizeWin}
+              // Stay pinned while desktop is empty (Welcome mat) — onboarding
+              // needs the app row visible. Once any window is open the dock
+              // auto-hides and peek-reveals on cursor approach.
+              autoHide={windows.filter((w) => !w.minimized).length > 0}
             />
           </div>
 
@@ -1119,13 +1123,13 @@ function WelcomeMat({
         </div>
         <h1
           className="font-pixel text-2xl sm:text-3xl tracking-widest mt-2 wallpaper-text-shadow"
-          style={{ color: "var(--fg)" }}
+          style={{ color: "var(--wp-fg, var(--fg))" }}
         >
           WELCOME TO DEL<span style={{ color: "var(--accent)" }}>OS</span>
         </h1>
         <p
-          className="text-[color:var(--muted)] font-mono text-[11px] sm:text-xs mt-3 max-w-md mx-auto wallpaper-text-shadow"
-          style={{ background: "rgba(var(--bg-rgb), 0.5)", padding: "6px 12px", borderRadius: 4, display: "inline-block" }}
+          className="font-mono text-[11px] sm:text-xs mt-3 max-w-md mx-auto wallpaper-text-shadow wall-readable"
+          style={{ padding: "6px 12px", borderRadius: 4, display: "inline-block" }}
         >
           browser-OS · agents build the apps · ⌘K palette · right-click desktop · drag windows · double-click title to max
         </p>
@@ -1152,7 +1156,7 @@ function WelcomeMat({
                 onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
               >
                 <Cmp size={26} color="var(--accent)" />
-                <span className="font-pixel text-[9px] tracking-wider" style={{ color: "var(--fg)" }}>{a.label.toUpperCase()}</span>
+                <span className="font-pixel text-[9px] tracking-wider" style={{ color: "var(--wp-fg, var(--fg))" }}>{a.label.toUpperCase()}</span>
               </button>
             );
           })}

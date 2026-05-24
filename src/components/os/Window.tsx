@@ -86,6 +86,15 @@ export function Window({
     const target = e.currentTarget as HTMLElement;
     target.setPointerCapture?.(e.pointerId);
     setResizing(true);
+    // rAF-throttle the pointermove → onResize chain. Without this each native
+    // mousemove event triggers a React setState + reconcile + motion animate,
+    // which feels chunky on 60Hz panels and visibly stutters on 120Hz.
+    let raf = 0;
+    let latest: { x: number; y: number; width: number; height: number } | null = null;
+    const flush = () => {
+      raf = 0;
+      if (latest) onResize?.(latest);
+    };
 
     function onMove(ev: PointerEvent) {
       const dx = ev.clientX - startX;
@@ -106,11 +115,14 @@ export function Window({
       // Clamp to viewport
       if (x + width > bounds.width) width = bounds.width - x;
       if (y + height > bounds.height - 56) height = bounds.height - 56 - y;
-      onResize?.({ x, y, width, height });
+      latest = { x, y, width, height };
+      if (!raf) raf = window.requestAnimationFrame(flush);
     }
     function onUp() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      if (raf) window.cancelAnimationFrame(raf);
+      if (latest) onResize?.(latest); // commit final frame
       setResizing(false);
     }
     window.addEventListener("pointermove", onMove);
@@ -149,7 +161,7 @@ export function Window({
             ? { x: targetX, y: targetY, scale: 0.6, opacity: 0 }
             : { x: targetX, y: targetY, scale: 1, opacity: 1, width: targetW, height: targetH }
         }
-        transition={resizing ? { duration: 0 } : { type: "spring", stiffness: 320, damping: 22, mass: 0.6 }}
+        transition={resizing ? { duration: 0 } : { type: "spring", stiffness: 380, damping: 30, mass: 0.5 }}
         onDragEnd={(_, info) => {
           if (maximized) return;
           const nx = win.x + info.offset.x;
@@ -184,6 +196,10 @@ export function Window({
           boxShadow: focused
             ? "0 0 0 2px var(--bg), 0 0 0 4px var(--accent), 8px 8px 0 0 var(--shadow)"
             : "0 0 0 2px var(--bg), 0 0 0 4px var(--surface-2), 6px 6px 0 0 var(--shadow)",
+          // Hint the compositor — drag/resize is the only time these change.
+          // Without this Chrome promotes layers reactively, which adds a frame
+          // of lag at drag start. With it, layer exists upfront → instant feel.
+          willChange: "transform, width, height",
         }}
       >
         <div
