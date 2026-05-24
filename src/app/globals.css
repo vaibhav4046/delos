@@ -50,6 +50,15 @@
   --cyan-lo: #2BA9CC;
   --cyan-glow: rgba(93,230,255,0.16);
 
+  /* DelOS v2.1 design-pdf tokens — third accent (magenta) for streaming /
+     merged states, amber for warning-but-not-bad, and a serif italic stack
+     for hero-accent words like "flow". */
+  --magenta: #FF6BD6;
+  --magenta-hi: #FF9CE3;
+  --magenta-glow: rgba(255,107,214,0.18);
+  --amber: #FFB020;
+  --serif-italic: var(--font-serif-google), 'Playfair Display', 'EB Garamond', Georgia, serif;
+
   /* Borders — semi-transparent so they sit nicely on any surface */
   --border-subtle: rgba(255,255,255,0.05);
   --border: rgba(255,255,255,0.09);
@@ -297,6 +306,18 @@ img[src$=".svg"] { image-rendering: pixelated; }
 .pill-bad { border-color: var(--danger); color: var(--danger); }
 .pill-info { border-color: var(--accent); color: var(--accent); }
 .pill-muted { border-color: var(--muted); color: var(--muted); }
+/* DelOS v2.1 — status pill variants from the design PDF (streaming /
+   merged / breaker-open / connected). Magenta dot pulses for streaming. */
+.pill-cyan { border-color: var(--cyan); color: var(--cyan); }
+.pill-magenta { border-color: var(--magenta); color: var(--magenta); }
+.pill-streaming::before { content: "●"; margin-right: 4px; color: var(--magenta); animation: pillPulse 1.4s ease-in-out infinite; }
+.pill-streaming { border-color: var(--magenta); color: var(--magenta); }
+.pill-merged::before { content: "▶"; margin-right: 4px; color: var(--cyan); }
+.pill-merged { border-color: var(--cyan); color: var(--cyan); }
+.pill-breaker-open::before { content: "⨯"; margin-right: 4px; color: var(--danger); }
+.pill-breaker-open { border-color: var(--danger); color: var(--danger); }
+@keyframes pillPulse { 0%,100% { opacity: 0.55 } 50% { opacity: 1 } }
+.font-serif-italic { font-family: var(--serif-italic); font-style: italic; }
 
 .coin {
   display: inline-block;

@@ -131,7 +131,12 @@ function Hero({ apps }: { apps: number }) {
             The AI operating system{" "}
             <span style={{ color: "var(--muted-2)" }}>where</span>{" "}
             agents{" "}
-            <span style={{ color: "var(--accent)" }}>flow</span>{" "}
+            <span
+              className="font-serif-italic"
+              style={{ color: "var(--accent)", fontWeight: 600, letterSpacing: "0.005em" }}
+            >
+              flow
+            </span>{" "}
             under pressure.
           </h1>
           <p

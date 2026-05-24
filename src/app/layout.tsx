@@ -1,11 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Pixelify_Sans, Inter, JetBrains_Mono } from "next/font/google";
+import { Pixelify_Sans, Inter, JetBrains_Mono, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { GlobalCmdK } from "@/components/GlobalCmdK";
 
 const pixel = Pixelify_Sans({ subsets: ["latin"], variable: "--font-pixel-google", display: "swap" });
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans-google", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-google", display: "swap" });
+// DelOS v2.1 design PDF — serif italic accent for hero words like "flow".
+const serif = Playfair_Display({ subsets: ["latin"], style: ["italic"], variable: "--font-serif-google", display: "swap" });
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://delrio.vercel.app"),
@@ -46,7 +48,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${pixel.variable} ${inter.variable} ${mono.variable}`}>
+    <html lang="en" className={`${pixel.variable} ${inter.variable} ${mono.variable} ${serif.variable}`}>
       <head>
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
       </head>
