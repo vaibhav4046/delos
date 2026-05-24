@@ -277,6 +277,44 @@ async function togetherJson(
 }
 
 /**
+ * DeepSeek — OpenAI-compatible at api.deepseek.com. Free tier sub-cent
+ * pricing, very strong code (deepseek-chat / deepseek-coder). Set
+ * DEEPSEEK_API_KEY to enable.
+ */
+async function deepseekJson(
+  prompt: string,
+  system: string,
+  maxTokens: number,
+  model = "deepseek-chat",
+): Promise<string> {
+  const key = process.env.DEEPSEEK_API_KEY;
+  if (!key) throw new Error("no DeepSeek key — set DEEPSEEK_API_KEY to enable");
+  const r = await fetch("https://api.deepseek.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`deepseek ${r.status}: ${errText.slice(0, 240)}`);
+  }
+  const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
+  return j.choices[0]?.message?.content ?? "";
+}
+
+/**
  * Mistral fallback — last resort. Different provider, different rate-limit
  * bucket. mistral-small-latest is free-tier, JSON-mode supported, ok code.
  */
@@ -332,6 +370,10 @@ async function llmJson(prompt: string, system: string, maxTokens: number): Promi
   const providers: Array<{ name: string; call: () => Promise<string> }> = [
     { name: "groq",       call: () => groqJson(prompt, system, maxTokens) },
     { name: "cerebras",   call: () => cerebrasJson(prompt, system, maxTokens) },
+    // DeepSeek deepseek-chat — best code quality of any free-tier provider
+    // in our benchmark. Steps in early so the codegen has a strong second
+    // option before falling to OpenRouter / Gemini.
+    { name: "deepseek",   call: () => deepseekJson(prompt, system, maxTokens) },
     // OpenRouter qwen-3-coder — coder specialist. Pricier latency
     // than Groq but better JSX quality. Steps in on Groq 429.
     { name: "openrouter", call: () => openRouterJson(prompt, system, maxTokens) },
