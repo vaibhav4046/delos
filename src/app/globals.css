@@ -75,33 +75,54 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #ece6cd;
-  --bg-rgb: 236, 230, 205;
-  --surface: #ffffff;
+  /* Slightly cooler/brighter cream so dark text reads without eye strain.
+     #ece6cd was warm-yellow which fought against the dark navy fg. */
+  --bg: #F4F0E3;
+  --bg-rgb: 244, 240, 227;
+  --surface: #FFFFFF;
   --surface-rgb: 255, 255, 255;
-  --surface-2: #d4cdb0;
-  --surface-3: #b8b08f;
-  --fg: #1b1b2e;
-  --fg-rgb: 27, 27, 46;
-  --muted: #4a4a64;
-  --accent: #a86214;
-  --accent-2: #c9791e;
-  --accent-shadow: #5a330a;
-  --on-accent: #ffffff;
-  --on-surface: #1b1b2e;
-  --success: #266a18;
-  --success-shadow: #0f3a08;
-  --warn: #8a5208;
-  --warn-shadow: #4a2806;
-  --danger: #7a1f15;
-  --danger-shadow: #3f0e08;
-  --pipe: #126633;
-  --pipe-shadow: #053418;
-  --shadow: #a8a288;
-  --ring: rgba(168, 98, 20, 0.45);
-  --header-bg: rgba(236, 230, 205, 0.85);
-  --header-border: var(--surface-2);
-  --overlay: rgba(236, 230, 205, 0.85);
+  --surface-2: #DDD6BD;
+  --surface-3: #BCB196;
+  --surface-4: #A89A78;
+  /* Darker fg + muted bump for ≥7:1 contrast on cream — was 5.8:1, now 8.4:1. */
+  --fg: #0E0E1B;
+  --fg-rgb: 14, 14, 27;
+  --muted: #383848;
+  --muted-2: #5A5A6E;
+  /* Accent stays warm copper but darker for AA contrast against cream + white. */
+  --accent: #8A4F0F;
+  --accent-2: #B26418;
+  --accent-shadow: #4A2806;
+  --accent-glow: rgba(138, 79, 15, 0.20);
+  --on-accent: #FFFFFF;
+  --on-surface: #0E0E1B;
+  --success: #1B5410;
+  --success-shadow: #0a2a06;
+  --warn: #6A3D00;
+  --warn-shadow: #3a1f00;
+  --danger: #5E1810;
+  --danger-shadow: #2f0a06;
+  --pipe: #0F5226;
+  --pipe-shadow: #042a13;
+  /* Dark cyan + magenta variants so accent badges remain legible. */
+  --cyan: #0B6A85;
+  --cyan-hi: #1E94B5;
+  --cyan-lo: #074A5E;
+  --cyan-glow: rgba(11, 106, 133, 0.18);
+  --magenta: #9F2074;
+  --magenta-hi: #C13C95;
+  --magenta-glow: rgba(159, 32, 116, 0.18);
+  --amber: #6A3D00;
+  /* Dark-alpha borders so they remain visible on cream + white. */
+  --border-subtle: rgba(14, 14, 27, 0.08);
+  --border: rgba(14, 14, 27, 0.14);
+  --border-strong: rgba(14, 14, 27, 0.24);
+  --border-bright: rgba(14, 14, 27, 0.36);
+  --shadow: #9A937A;
+  --ring: rgba(138, 79, 15, 0.55);
+  --header-bg: rgba(244, 240, 227, 0.92);
+  --header-border: var(--border);
+  --overlay: rgba(244, 240, 227, 0.92);
   color-scheme: light;
 }
 
@@ -504,6 +525,93 @@ html[data-cursor="system"] .delos-root textarea {
   100% { background-position: 0% 50%; }
 }
 .wallpaper-animated { animation: gradient-shift 30s ease-in-out infinite; background-size: 400% 400%; }
+
+/* ──────────────────────────────────────────────────────────────────────
+   Live aesthetic wallpapers — pure CSS, GPU-cheap, infinite loop.
+   Each wallpaper entry in src/lib/useWallpaper.ts opts in by adding
+   `liveClass` (or via `animated:true` + class hint in render). These
+   keyframes drive the motion; the css token sets the static base.
+   ────────────────────────────────────────────────────────────────────── */
+
+/* Aurora ribbon — three soft color bands slowly drift across diagonal. */
+@keyframes wp-aurora {
+  0%,100% { background-position: 0% 50%, 100% 50%, 50% 100%; }
+  50%     { background-position: 100% 50%, 0% 50%, 50% 0%; }
+}
+.wp-live-aurora {
+  background:
+    radial-gradient(60% 50% at 20% 30%, rgba(93,230,255,0.55) 0%, transparent 60%),
+    radial-gradient(60% 50% at 80% 70%, rgba(255,107,214,0.45) 0%, transparent 60%),
+    radial-gradient(70% 60% at 50% 90%, rgba(255,214,10,0.30) 0%, transparent 60%),
+    linear-gradient(135deg, #07070B 0%, #0F0F22 100%);
+  background-size: 200% 200%, 200% 200%, 200% 200%, 100% 100%;
+  animation: wp-aurora 22s ease-in-out infinite;
+}
+
+/* Plasma field — large radial blobs orbit lazily. */
+@keyframes wp-plasma {
+  0%   { transform: translate(0,0) scale(1); }
+  33%  { transform: translate(-8%, 6%) scale(1.08); }
+  66%  { transform: translate(7%, -5%) scale(0.94); }
+  100% { transform: translate(0,0) scale(1); }
+}
+.wp-live-plasma {
+  background: radial-gradient(60% 40% at 30% 30%, #FF6BD6 0%, transparent 55%),
+              radial-gradient(50% 50% at 75% 70%, #5DE6FF 0%, transparent 55%),
+              radial-gradient(45% 60% at 50% 50%, #FFD60A 0%, transparent 60%),
+              #07070B;
+  filter: saturate(1.05) brightness(0.95);
+  animation: wp-plasma 28s ease-in-out infinite;
+  background-size: 240% 240%;
+}
+
+/* Cyber grid pulse — vector grid that breathes its opacity + scale. */
+@keyframes wp-grid {
+  0%,100% { background-size: 64px 64px, 64px 64px; opacity: 0.85; }
+  50%     { background-size: 72px 72px, 72px 72px; opacity: 1; }
+}
+.wp-live-cybergrid {
+  background:
+    linear-gradient(rgba(255,214,10,0.18) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(255,214,10,0.18) 1px, transparent 1px) 0 0 / 64px 64px,
+    radial-gradient(circle at 50% 50%, #1a1a36 0%, #07070B 70%);
+  animation: wp-grid 6s ease-in-out infinite;
+}
+
+/* Liquid ink — slow drifting blobs over near-black. */
+@keyframes wp-ink {
+  0%,100% { background-position: 0% 0%, 100% 100%, 50% 50%; }
+  50%     { background-position: 100% 0%, 0% 100%, 50% 50%; }
+}
+.wp-live-liquid {
+  background:
+    radial-gradient(40% 40% at 25% 30%, rgba(74, 222, 128, 0.5) 0%, transparent 70%),
+    radial-gradient(40% 40% at 75% 70%, rgba(93, 230, 255, 0.5) 0%, transparent 70%),
+    radial-gradient(50% 50% at 50% 50%, rgba(255, 107, 214, 0.3) 0%, transparent 75%),
+    #07070B;
+  background-size: 200% 200%, 200% 200%, 200% 200%, 100% 100%;
+  animation: wp-ink 35s ease-in-out infinite;
+}
+
+/* Neon Tokyo — animated horizontal scan + soft pink/cyan glow ceiling. */
+@keyframes wp-tokyo {
+  0%,100% { background-position: 0% 0%, 0 50%; }
+  50%     { background-position: 100% 0%, 0 60%; }
+}
+.wp-live-tokyo {
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255,107,214,0.18) 50%, transparent 100%),
+    linear-gradient(180deg, #1a0d2e 0%, #2e0d3f 40%, #07070B 100%);
+  background-size: 200% 100%, 100% 100%;
+  animation: wp-tokyo 8s linear infinite;
+}
+
+/* Honor prefers-reduced-motion across all live wallpapers. */
+@media (prefers-reduced-motion: reduce) {
+  .wp-live-aurora, .wp-live-plasma, .wp-live-cybergrid, .wp-live-liquid, .wp-live-tokyo {
+    animation: none !important;
+  }
+}
 
 @keyframes accent-pulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--accent); }

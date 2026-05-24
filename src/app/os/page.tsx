@@ -840,7 +840,10 @@ export default function OSPage() {
 
       {booted && (
         <>
-          <div className={`absolute inset-0 ${wallAnimated ? "wallpaper-animated" : ""}`} style={{ background: wallCss }} />
+          <div
+            className={`absolute inset-0 ${wallEntry.liveClass ?? (wallAnimated ? "wallpaper-animated" : "")}`}
+            style={wallEntry.liveClass ? undefined : { background: wallCss }}
+          />
           {wallEntry.video && (
             <>
               {/* Video wallpaper — muted, looping, blurred, no sound. Renders

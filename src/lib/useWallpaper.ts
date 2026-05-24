@@ -30,7 +30,15 @@ const WINXP_BLISS = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/
 
 const MAC_AQUA = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'><defs><linearGradient id='aqua' x1='0' y1='0' x2='0' y2='1'><stop offset='0%25' stop-color='%23cbe8ff'/><stop offset='50%25' stop-color='%237ab0e0'/><stop offset='100%25' stop-color='%232070d8'/></linearGradient></defs><rect width='400' height='400' fill='url(%23aqua)'/><g opacity='0.3'><line x1='0' y1='50' x2='400' y2='50' stroke='%23ffffff' stroke-width='2'/><line x1='0' y1='90' x2='400' y2='90' stroke='%23ffffff' stroke-width='1'/><line x1='0' y1='150' x2='400' y2='150' stroke='%23ffffff' stroke-width='2'/></g></svg>") center/cover`;
 
-export const WALLPAPERS: Array<{ id: string; label: string; css: string; animated?: boolean; pairsWith?: "dark" | "light"; video?: string; videoBlur?: number; videoOverlay?: string }> = [
+export const WALLPAPERS: Array<{ id: string; label: string; css: string; animated?: boolean; pairsWith?: "dark" | "light"; video?: string; videoBlur?: number; videoOverlay?: string; liveClass?: string }> = [
+  // Live aesthetic wallpapers — pure CSS animations defined in globals.css.
+  // Use liveClass to opt into a named GPU-cheap loop instead of a static
+  // background. Each respects prefers-reduced-motion automatically.
+  { id: "live-aurora",    label: "Aurora (live)",       css: "", liveClass: "wp-live-aurora",    animated: true, pairsWith: "dark" },
+  { id: "live-plasma",    label: "Plasma (live)",       css: "", liveClass: "wp-live-plasma",    animated: true, pairsWith: "dark" },
+  { id: "live-cybergrid", label: "Cyber Grid (live)",   css: "", liveClass: "wp-live-cybergrid", animated: true, pairsWith: "dark" },
+  { id: "live-liquid",    label: "Liquid Ink (live)",   css: "", liveClass: "wp-live-liquid",    animated: true, pairsWith: "dark" },
+  { id: "live-tokyo",     label: "Neon Tokyo (live)",   css: "", liveClass: "wp-live-tokyo",     animated: true, pairsWith: "dark" },
   // Video wallpaper · drop file at public/hero-loop.mp4 (mp4 + webm both fine).
   // Renders muted + looping + playsInline, blurred + dimmed + accent-tinted
   // so foreground OS chrome stays readable. Falls back to midnight gradient
