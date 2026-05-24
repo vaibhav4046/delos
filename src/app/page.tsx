@@ -546,7 +546,6 @@ function Footer() {
             <li><Link href="/os?guest=1">DelOS</Link></li>
             <li><Link href="/play">Chaos demo</Link></li>
             <li><Link href="/memory">Memory browser</Link></li>
-            <li><Link href="/pricing">Pricing</Link></li>
           </ul>
         </div>
         <div>

@@ -17,7 +17,6 @@ const ROUTES: Array<{ id: string; label: string; hint: string; href: string; ico
   { id: "extension", label: "Chrome Extension", hint: "side panel install", href: "/extension", icon: "Chrome" },
   { id: "demo", label: "Open Canned Demo", hint: "offline-safe trace replay", href: "/demo", icon: "Film" },
   { id: "docs", label: "API Docs", hint: "every endpoint + event schema", href: "/docs", icon: "Book" },
-  { id: "pricing", label: "Pricing", hint: "Free / Pro / Enterprise", href: "/pricing", icon: "DollarSign" },
   { id: "status", label: "Status", hint: "uptime probes", href: "/status", icon: "Heart" },
   { id: "home", label: "Home", hint: "landing", href: "/", icon: "Home" },
 ];
