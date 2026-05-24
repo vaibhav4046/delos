@@ -4,6 +4,7 @@ import { safeAddMemory, ensureTenant } from "@/lib/hydra";
 import { env } from "@/lib/env";
 import { z } from "zod";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -30,7 +31,7 @@ async function groundWithWiki(topic: string): Promise<string | null> {
 
 export async function POST(req: Request) {
   const parsed = Req.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+  if (!parsed.success) return zodErr(parsed.error);
   const { topic, tenantId, depth } = parsed.data;
   await ensureTenant(tenantId);
 

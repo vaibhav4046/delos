@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { resolveModel } from "@/lib/llm";
 import { MODEL_KEYS, type ModelKey } from "@/lib/llm.catalog";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
@@ -79,7 +80,7 @@ async function runOne(modelKey: ModelKey, prompt: string, timeoutMs: number): Pr
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const parsed = Req.safeParse(body);
-  if (!parsed.success) return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+  if (!parsed.success) return zodErr(parsed.error);
 
   // Subset tasks + models
   const taskFilter = parsed.data.tasks;

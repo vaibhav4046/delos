@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 15;
 
@@ -119,7 +120,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const parsed = Req.safeParse(body);
   if (!parsed.success) {
-    return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+    return zodErr(parsed.error);
   }
   const { prompt, aspect } = parsed.data;
   const svg = genSvg(prompt, aspect);

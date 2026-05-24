@@ -6,6 +6,7 @@ import { runQuickAgent } from "@/lib/agents/quick";
 import { generateJson } from "@/lib/agents/jsonGen";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
   }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return Response.json({ error: parsed.error.message }, { status: 400 });
+    return zodErr(parsed.error);
   }
   const { goal, members } = parsed.data;
   const judgeKey = parsed.data.judge ?? ("mistral:mistral-large-latest" as ModelKey);

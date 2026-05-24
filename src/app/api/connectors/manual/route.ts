@@ -12,6 +12,7 @@ import { getServerSession } from "@/lib/session";
 import { encryptSecret, redactToken } from "@/lib/secrets";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 
 // Connector-credential paste is a target for brute-force probing — cap to
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+    return zodErr(parsed.error);
   }
   const { connector, token, workspace } = parsed.data;
   const session = await getServerSession();

@@ -4,6 +4,7 @@ import { generateJson } from "@/lib/agents/jsonGen";
 import { models, withModels, type ModelOverrides, type ModelKey } from "@/lib/llm";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 15;
 
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest) {
   }
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
+  if (!parsed.success) return zodErr(parsed.error);
 
   const overrides: ModelOverrides | undefined = parsed.data.models
     ? Object.fromEntries(Object.entries(parsed.data.models).filter(([, v]) => v) as Array<[string, ModelKey]>)

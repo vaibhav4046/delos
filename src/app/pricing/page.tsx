@@ -24,8 +24,12 @@ const tiers = [
     price: "$19",
     tag: "per month",
     featured: true,
-    cta: "Start 14-day trial",
-    href: "#",
+    // BUG-6 (red-team report): old href was "#" — looked clickable but
+    // jumped to top of page. We do not have payment infra yet (acknowledged
+    // in pricing copy), so the Pro CTA now points to the Discord waitlist
+    // instead of a dead anchor. Once Stripe is wired, swap to /api/checkout.
+    cta: "Join Pro waitlist",
+    href: "https://discord.gg/UYsxv9PNU",
     lines: [
       "Everything in Free",
       "Hosted HydraDB tenant (no setup)",

@@ -5,6 +5,7 @@ import { resolveModel, withModels, type ModelKey } from "@/lib/llm";
 import { callTool, listTools } from "@/lib/mcp/client";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
   }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return new Response(JSON.stringify({ error: parsed.error.message }), { status: 400 });
+    return zodErr(parsed.error);
   }
   const { messages, model, system, withSearch, searchMcpUrl } = parsed.data;
 

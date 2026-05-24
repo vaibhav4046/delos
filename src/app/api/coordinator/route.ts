@@ -9,6 +9,7 @@ import { safeRecall } from "@/lib/hydra";
 import { generateJson } from "@/lib/agents/jsonGen";
 import { models, withModels, getEffectiveTemperature, withTemperature, type ModelOverrides, type ModelKey } from "@/lib/llm";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -49,7 +50,7 @@ const planSchema = z.object({
 export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+    return zodErr(parsed.error);
   }
   const { goal, tenantId, identity, models: overrides, temperature } = parsed.data;
   const tid = tenantId || env.DELRIO_TENANT_ID;

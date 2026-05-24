@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { buildRegistry } from "@/lib/tools/builtin";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 
 // Accept both `tool` (canonical) and `name` (alias for OpenAI-style invocations).
@@ -18,7 +19,7 @@ const bodySchema = z
 export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return Response.json({ error: parsed.error.message }, { status: 400 });
+    return zodErr(parsed.error);
   }
   const toolName = parsed.data.tool ?? parsed.data.name!;
   const reg = buildRegistry();

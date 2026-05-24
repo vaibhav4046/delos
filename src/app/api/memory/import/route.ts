@@ -4,6 +4,7 @@ import { z } from "zod";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { getServerSession } from "@/lib/session";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
   }
   const body = await req.json().catch(() => ({}));
   const parsed = Req.safeParse(body);
-  if (!parsed.success) return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+  if (!parsed.success) return zodErr(parsed.error);
   // Lock writes to the caller's session tenant. Unauth callers can't write
   // into other tenants' memory by passing a chosen tenantId.
   const session = await getServerSession();

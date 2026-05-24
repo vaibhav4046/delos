@@ -22,6 +22,7 @@ import { safeAddMemory } from "@/lib/hydra";
 import { env } from "@/lib/env";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
+import { zodErr } from "@/lib/apiAuth";
 // Codegen is the heaviest paid path. Cap to keep one attacker from draining
 // the shared Groq TPM budget. 6/min is well above a legit user's cadence;
 // the 429 below already kicks in earlier when Groq TPM is hit.
@@ -510,7 +511,7 @@ export async function POST(req: NextRequest) {
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return Response.json({ error: parsed.error.message }, { status: 400 });
+    return zodErr(parsed.error);
   }
   const userPrompt = parsed.data.prompt;
   const stack = parsed.data.stack ?? "nextjs";

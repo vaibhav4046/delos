@@ -6,6 +6,7 @@ import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { safeAddMemory } from "@/lib/hydra";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 
 const fileSchema = z.object({
@@ -26,7 +27,7 @@ const bodySchema = z.object({
 export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+    return zodErr(parsed.error);
   }
   const { root, count, digest, tenantId } = parsed.data;
   const tid = tenantId || env.DELRIO_TENANT_ID;

@@ -11,6 +11,7 @@ import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { sendMail, renderMagicLinkEmail } from "@/lib/mail";
 import { createHash, randomBytes } from "node:crypto";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 
 const bodySchema = z.object({
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+    return zodErr(parsed.error);
   }
   const { email, mode } = parsed.data;
 

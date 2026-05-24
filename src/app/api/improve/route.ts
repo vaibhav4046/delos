@@ -5,6 +5,7 @@ import { listRuns } from "@/lib/runLog";
 import { env } from "@/lib/env";
 import { z } from "zod";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -23,7 +24,7 @@ const Req = z.object({
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const parsed = Req.safeParse(body);
-  if (!parsed.success) return Response.json({ ok: false, error: parsed.error.message }, { status: 400 });
+  if (!parsed.success) return zodErr(parsed.error);
   const { tenantId, windowHours } = parsed.data;
   await ensureTenant(tenantId);
 

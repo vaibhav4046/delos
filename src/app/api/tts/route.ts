@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "@/lib/env";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
+import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     );
   }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
+  if (!parsed.success) return zodErr(parsed.error);
   const { text, voiceId, modelId, stability, similarity, style, apiKey } = parsed.data;
 
   // Prefer client-supplied (BYOK) key. Falls back to server env. 503 if neither.
