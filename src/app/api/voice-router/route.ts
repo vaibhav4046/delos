@@ -22,7 +22,7 @@ const Req = z.object({
   surface: z.enum(["web", "chrome", "mobile"]).default("web"),
 });
 
-const INTENTS = ["open","close","tile","theme","wallpaper","run","build","build_clone","cohort","summarize","screenshot","browser_action","answer","chain","unknown"] as const;
+const INTENTS = ["open","close","tile","theme","wallpaper","run","build","build_clone","cohort","summarize","screenshot","browser_action","gmail_list","gmail_draft","gmail_send","notion_create","pdf_parse","answer","chain","unknown"] as const;
 type IntentName = typeof INTENTS[number];
 
 // Use `as z.ZodType<unknown>` annotation so the lazy self-reference type-checks.
@@ -91,6 +91,22 @@ function localMatch(t: string): { intent: IntentName; params?: Record<string, un
   // Cohort
   m = s.match(/^(cohort|race) (.+)$/);
   if (m) return { intent: "cohort", params: { prompt: m[2].trim() }, speak: `Running cohort race.` };
+  // Gmail — read / list
+  m = s.match(/^(read|show|check|list)\s+(my\s+)?(gmail|inbox|emails?)(?:\s+(.+))?$/);
+  if (m) return { intent: "gmail_list", params: { q: m[4]?.trim() ?? "", limit: 10 }, speak: "Reading your inbox." };
+  // Gmail — draft
+  m = s.match(/^draft (?:an? )?email to ([\w._+-]+@[\w.-]+\.\w+)\s+(?:saying|about|with|that)\s+(.+)$/i);
+  if (m) return { intent: "gmail_draft", params: { to: m[1], body: m[2], subject: m[2].slice(0, 60) }, speak: `Drafting an email to ${m[1]}.` };
+  m = s.match(/^email ([\w._+-]+@[\w.-]+\.\w+)\s+(?:saying|about|with|that)\s+(.+)$/i);
+  if (m) return { intent: "gmail_draft", params: { to: m[1], body: m[2], subject: m[2].slice(0, 60) }, speak: `Drafting an email to ${m[1]}.` };
+  // Notion — create page
+  m = s.match(/^create (?:a )?notion (?:page|doc) (?:titled |called |about )?(.+?)(?:\s+with\s+(.+))?$/i);
+  if (m) return { intent: "notion_create", params: { title: m[1].trim(), content: m[2]?.trim() ?? m[1].trim() }, speak: `Creating a Notion page titled ${m[1]}.` };
+  m = s.match(/^(?:write|save) (?:this )?to notion (?:as |titled |called )?(.+)$/i);
+  if (m) return { intent: "notion_create", params: { title: m[1].trim(), content: m[1].trim() }, speak: `Saving to Notion as ${m[1]}.` };
+  // PDF parse
+  m = s.match(/^(?:parse|read|summari[sz]e)\s+(?:the\s+)?pdf\s+(?:at\s+)?(\S+)$/i);
+  if (m) return { intent: "pdf_parse", params: { url: m[1] }, speak: "Parsing the PDF." };
   // Browser actions in chrome surface
   m = s.match(/^(open|go to|visit) (.+)$/);
   if (m) return { intent: "browser_action", params: { kind: "navigate", target: m[2].trim() }, speak: `Opening ${m[2]}.` };

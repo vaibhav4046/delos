@@ -9,7 +9,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https://fonts.gstatic.com",
-  "connect-src 'self' https://api.groq.com https://api.mistral.ai https://generativelanguage.googleapis.com https://api.hydradb.com https://api.elevenlabs.io https://en.wikipedia.org https://duckduckgo.com https://api.duckduckgo.com https://api.coingecko.com https://api.frankfurter.app https://api.dictionaryapi.dev https://icanhazdadjoke.com https://api.open-meteo.com https://geocoding-api.open-meteo.com https://api.github.com https://hacker-news.firebaseio.com https://ip-api.com",
+  "connect-src 'self' https://api.groq.com https://api.mistral.ai https://generativelanguage.googleapis.com https://api.hydradb.com https://api.elevenlabs.io https://en.wikipedia.org https://duckduckgo.com https://api.duckduckgo.com https://api.coingecko.com https://api.frankfurter.app https://api.dictionaryapi.dev https://icanhazdadjoke.com https://api.open-meteo.com https://geocoding-api.open-meteo.com https://api.github.com https://hacker-news.firebaseio.com https://ip-api.com https://gmail.googleapis.com https://oauth2.googleapis.com https://api.notion.com",
   "frame-src 'self' https:",
   "media-src 'self' blob:",
   "object-src 'none'",
