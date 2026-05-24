@@ -403,8 +403,11 @@ export const BUILTIN_APPS: AppSpec[] = [
   },
 
   {
+    // Honest naming — AppSpec runtime has no setInterval primitive yet, so
+    // calling this "Stopwatch" misleads users. Renamed to "Tick Counter"
+    // with explicit "manual" copy until real interval support lands.
     id: "stopwatch",
-    name: "Stopwatch",
+    name: "Tick Counter",
     icon: "Clock",
     width: 340,
     height: 320,
@@ -413,7 +416,7 @@ export const BUILTIN_APPS: AppSpec[] = [
       kind: "col",
       gap: 3,
       children: [
-        { kind: "text", value: "Stopwatch", size: "h2" },
+        { kind: "text", value: "Tick Counter (manual)", size: "h2" },
         { kind: "text", value: "{{elapsed}} ticks", size: "h3" },
         {
           kind: "row",

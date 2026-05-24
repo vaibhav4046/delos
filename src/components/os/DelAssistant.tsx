@@ -742,7 +742,8 @@ export function DelAssistant() {
               rows={2}
               placeholder={pendingClarify ? "Or write your own answer…" : "Ask anything…  (Shift+Enter = newline)"}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              maxLength={8000}
+              onChange={(e) => setInput(e.target.value.slice(0, 8000))}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

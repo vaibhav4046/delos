@@ -2,6 +2,16 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as Icons from "lucide-react";
 
+// Shared focus guard for global keydown listeners. Returns true when the
+// event target is an editable surface, so games never hijack typing.
+function isTypingTarget(t: EventTarget | null): boolean {
+  if (!t || !(t instanceof HTMLElement)) return false;
+  const tag = t.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (t.isContentEditable) return true;
+  return false;
+}
+
 // ============ SNAKE ============
 const SNAKE_GRID = 16;
 const SNAKE_TICK_MS = 130;
@@ -23,6 +33,9 @@ export function SnakeGame() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Focus guard — never hijack keys while user is typing in any input/textarea.
+      // Catastrophic chat-input garbling bug surfaced during QA otherwise.
+      if (isTypingTarget(e.target)) return;
       const k = e.key.toLowerCase();
       if ((k === "w" || k === "arrowup") && dirRef.current !== "D") setDir("U");
       if ((k === "s" || k === "arrowdown") && dirRef.current !== "U") setDir("D");
@@ -567,6 +580,9 @@ export function Game2048() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Focus guard — see SnakeGame comment. preventDefault below was eating
+      // every w/a/s/d character typed into any input on the page.
+      if (isTypingTarget(e.target)) return;
       let dir: "L" | "R" | "U" | "D" | null = null;
       if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") dir = "L";
       else if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") dir = "R";

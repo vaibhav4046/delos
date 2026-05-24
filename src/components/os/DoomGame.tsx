@@ -893,6 +893,9 @@ export function DoomGame() {
   // Keyboard
   useEffect(() => {
     function kd(e: KeyboardEvent) {
+      // Focus guard — never hijack while user is typing in any input on the page.
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.tagName === "SELECT" || tgt.isContentEditable)) return;
       const k = e.key.toLowerCase();
       const trapKeys = ["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"," ","shift","escape","p","e","r","m","1","2","3","4","5","6","7","tab"];
       if (trapKeys.includes(k)) {

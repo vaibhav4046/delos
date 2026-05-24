@@ -67,10 +67,16 @@ export async function generateJson<T>(args: {
       const obj = JSON.parse(json);
       const parsed = args.schema.safeParse(obj);
       if (parsed.success) return parsed.data;
-      lastErr = parsed.error.message.slice(0, 300);
+      // Squash multi-line Zod blobs into a single readable line so error
+      // events shown to users never look like raw stack traces.
+      const issue = parsed.error.issues?.[0];
+      lastErr = issue
+        ? `${issue.message} (at \`${issue.path.join(".") || "root"}\`)`
+        : "schema mismatch";
     } catch (e) {
-      lastErr = (e as Error).message;
+      lastErr = `invalid JSON: ${(e as Error).message.slice(0, 120)}`;
     }
   }
-  throw new Error(`generateJson failed after ${attempts} attempts: ${lastErr}`);
+  // User-facing message. Keep concise — Terminal / Builder render this directly.
+  throw new Error(`Model returned malformed output after ${attempts} attempts (${lastErr}). Retry or switch model in Settings.`);
 }
