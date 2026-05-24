@@ -111,13 +111,22 @@ Map this to ONE action. Available intents:
    • claude / chatgpt / perplexity — retro AI chat apps.
 - run_mission: open terminal AND immediately run the mission. payload = the goal sentence.
 - build_app: open builder AND start building. payload = the app description.
+  ALSO use build_app when the user asks for a productivity widget by name —
+  kanban, pomodoro, tip calculator, habit tracker, expense tracker, contacts,
+  chat room, stopwatch, poll booth, weather widget, notes, markdown editor.
+  e.g. "open kanban" → build_app, payload="Kanban board with todo / doing /
+  done columns". "make me a pomodoro" → build_app, payload="Pomodoro timer".
 - run_cohort: open cohort AND start running with the goal. payload = the question.
 - recall_memory: ask Del Assistant to recall something from memory. payload = the question / search query.
 - change_wallpaper: cycle wallpaper. no payload.
 - close_window: close focused window. no payload.
 - navigate: navigate to a route. payload = "/", "/play", "/memory", "/os".
-- answer: just speak a direct answer (greetings, simple math, simple fact). payload = answer text.
-- unknown: couldn't map.
+- answer: just speak a direct answer (greetings, simple math like "what is 2+2",
+  simple fact, current time/date, "tell me a joke", greetings). payload = the
+  spoken answer text. ALWAYS use this for math, greetings, and one-word
+  factual questions instead of returning unknown.
+- unknown: ONLY use this if the input is gibberish or empty. Default to answer
+  for short factual / greeting questions.
 
 Always include a short spoken "reply" (1 sentence, friendly) the system will speak back to the user confirming what it's doing.
 
