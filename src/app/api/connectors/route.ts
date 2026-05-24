@@ -7,6 +7,11 @@ type Connector = {
   id: string;
   name: string;
   category: "knowledge" | "communication" | "storage" | "calendar" | "social" | "code" | "database";
+  /** Plain-English purpose surfaced in the Ingest app. Helps users answer
+   *  "what does this connector actually DO for me?" — Notion's purpose differs
+   *  from Gmail's, which differs from Microsoft's. Without this, all connector
+   *  cards looked alike. */
+  purpose: string;
   available: boolean;
   reason?: string;
   requires: string[];
@@ -15,6 +20,21 @@ type Connector = {
   docsUrl?: string;
   // If set, clicking "Connect" launches OAuth flow at this DelOS path.
   oauthInit?: string;
+};
+
+const PURPOSES: Record<string, string> = {
+  notion: "Pull workspace pages + databases. Agents read your notes / docs and write back updates.",
+  gmail: "Read inbox + send mail through agents. Compose drafts, summarize threads, auto-reply with approval.",
+  gdrive: "Index docs / sheets / slides. Agents cite Drive files in answers.",
+  gcal: "See your calendar. Agents schedule meetings, find free slots, draft invites.",
+  microsoft: "Microsoft 365 sign-in + Outlook / OneDrive / Teams context. Same as Google identity but for work tenants on Azure AD.",
+  slack: "Read channels, post messages with approval. Surface @mentions in mission control.",
+  github: "Browse repos + PRs + issues. Agents triage issues, draft PR descriptions, summarize diffs.",
+  linear: "Read tickets, file new ones from voice. Bring Linear context into mission planning.",
+  supabase: "Query your Supabase rows. Agents read schema + run safe SELECTs for context.",
+  x: "Read your X timeline + post threads (with approval). Surface mentions, draft replies.",
+  hydradb: "DelOS's own memory store. Agents recall prior runs, ingested file paths, decisions.",
+  elevenlabs: "Premium voice synthesis. Voice agent speaks replies via Sarah / Rachel / custom voices.",
 };
 
 function present(...keys: string[]): { ok: boolean; missing: string[] } {
@@ -39,6 +59,7 @@ export async function GET() {
       id: "notion",
       name: "Notion",
       category: "knowledge",
+      purpose: PURPOSES.notion,
       ...probe(
         "notion",
         // Live if either legacy integration token OR OAuth client creds are set.
@@ -57,6 +78,7 @@ export async function GET() {
       id: "gmail",
       name: "Gmail",
       category: "communication",
+      purpose: PURPOSES.gmail,
       ...probe("gmail", present("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")),
       requires: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"],
       scopes: ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"],
@@ -68,6 +90,7 @@ export async function GET() {
       id: "gdrive",
       name: "Google Drive",
       category: "storage",
+      purpose: PURPOSES.gdrive,
       ...probe("gdrive", present("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")),
       requires: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"],
       scopes: ["https://www.googleapis.com/auth/drive.readonly"],
@@ -78,6 +101,7 @@ export async function GET() {
       id: "gcal",
       name: "Google Calendar",
       category: "calendar",
+      purpose: PURPOSES.gcal,
       ...probe("gcal", present("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")),
       requires: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"],
       scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
@@ -85,9 +109,22 @@ export async function GET() {
       docsUrl: "https://developers.google.com/calendar/api/quickstart/js",
     },
     {
+      id: "microsoft",
+      name: "Microsoft 365",
+      category: "communication",
+      purpose: PURPOSES.microsoft,
+      ...probe("microsoft", present("MS_CLIENT_ID", "MS_OAUTH_REDIRECT_URI")),
+      requires: ["MS_CLIENT_ID", "MS_OAUTH_REDIRECT_URI"],
+      scopes: ["openid", "email", "profile", "User.Read"],
+      setupUrl: "https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+      docsUrl: "https://learn.microsoft.com/en-us/azure/active-directory/develop/v2-overview",
+      oauthInit: "/api/auth/oauth/microsoft",
+    },
+    {
       id: "slack",
       name: "Slack",
       category: "communication",
+      purpose: PURPOSES.slack,
       ...probe("slack", present("SLACK_BOT_TOKEN")),
       requires: ["SLACK_BOT_TOKEN"],
       scopes: ["chat:write", "channels:read", "channels:history"],
@@ -98,6 +135,7 @@ export async function GET() {
       id: "github",
       name: "GitHub",
       category: "code",
+      purpose: PURPOSES.github,
       ...probe("github", present("GITHUB_TOKEN")),
       requires: ["GITHUB_TOKEN"],
       scopes: ["repo", "read:user"],
@@ -108,6 +146,7 @@ export async function GET() {
       id: "linear",
       name: "Linear",
       category: "knowledge",
+      purpose: PURPOSES.linear,
       ...probe("linear", present("LINEAR_API_KEY")),
       requires: ["LINEAR_API_KEY"],
       setupUrl: "https://linear.app/settings/api",
@@ -117,6 +156,7 @@ export async function GET() {
       id: "supabase",
       name: "Supabase",
       category: "database",
+      purpose: PURPOSES.supabase,
       ...probe("supabase", present("SUPABASE_URL", "SUPABASE_ANON_KEY")),
       requires: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
       setupUrl: "https://supabase.com/dashboard/new",
@@ -126,6 +166,7 @@ export async function GET() {
       id: "x",
       name: "X (Twitter)",
       category: "social",
+      purpose: PURPOSES.x,
       ...probe("x", present("X_BEARER_TOKEN")),
       requires: ["X_BEARER_TOKEN"],
       setupUrl: "https://developer.twitter.com/en/portal/dashboard",
@@ -135,6 +176,7 @@ export async function GET() {
       id: "hydradb",
       name: "HydraDB",
       category: "database",
+      purpose: PURPOSES.hydradb,
       ...probe("hydradb", present("HYDRA_DB_API_KEY")),
       requires: ["HYDRA_DB_API_KEY"],
       docsUrl: "https://hydradb.com",
@@ -143,6 +185,7 @@ export async function GET() {
       id: "elevenlabs",
       name: "ElevenLabs (voice)",
       category: "communication",
+      purpose: PURPOSES.elevenlabs,
       ...probe("elevenlabs", present("ELEVENLABS_API_KEY")),
       requires: ["ELEVENLABS_API_KEY"],
       docsUrl: "https://elevenlabs.io/docs",

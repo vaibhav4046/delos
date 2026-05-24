@@ -554,8 +554,30 @@ export default function OSPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Dock order grouped by category. Reading left-to-right:
+  //   ★ AI agents      assistant / identity / cohort / arena / voice / cowork
+  //   ★ Builders       builder / codebase / cores / mission
+  //   ★ Tools          ingest / terminal / browser / marketplace / analytics
+  //   ★ Files & notes  files / notes / calendar / calc / sysinfo
+  //   ★ Games          snake / tictactoe / memory / minesweeper / game2048 / doom
+  //   ★ System         settings / about
+  // No visual separators yet — order alone tightens the cognitive load enough
+  // that "what does this app do" is answered by its neighbors.
   const dockOrder = useMemo(
-    () => ["assistant", "identity", "ingest", "terminal", "browser", "builder", "codebase", "cohort", "cores", "arena", "voice", "cowork", "mission", "marketplace", "analytics", "files", "notes", "calendar", "calc", "sysinfo", "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom", "settings", "about"],
+    () => [
+      // AI agents (6)
+      "assistant", "identity", "cohort", "arena", "voice", "cowork",
+      // Builders (4)
+      "builder", "codebase", "cores", "mission",
+      // Tools (5)
+      "ingest", "terminal", "browser", "marketplace", "analytics",
+      // Files & notes (5)
+      "files", "notes", "calendar", "calc", "sysinfo",
+      // Games (6)
+      "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom",
+      // System (2)
+      "settings", "about",
+    ],
     [],
   );
   const All = Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>;

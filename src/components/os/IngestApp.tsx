@@ -26,7 +26,7 @@ export function IngestApp() {
   const [files, setFiles] = useState<IndexedFile[]>([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<IndexedFile[]>([]);
-  const [connectors, setConnectors] = useState<Array<{ id: string; name: string; available: boolean; oauthInit?: string; reason?: string }>>([]);
+  const [connectors, setConnectors] = useState<Array<{ id: string; name: string; available: boolean; oauthInit?: string; reason?: string; purpose?: string; category?: string }>>([]);
 
   useEffect(() => {
     setSupported(supportsFsAccess());
@@ -37,7 +37,7 @@ export function IngestApp() {
     }
     fetch("/api/connectors")
       .then((r) => r.json())
-      .then((d: { connectors?: Array<{ id: string; name: string; available: boolean; oauthInit?: string; reason?: string }> }) => setConnectors(d.connectors ?? []))
+      .then((d: { connectors?: Array<{ id: string; name: string; available: boolean; oauthInit?: string; reason?: string; purpose?: string; category?: string }> }) => setConnectors(d.connectors ?? []))
       .catch(() => {});
   }, []);
 
@@ -119,23 +119,32 @@ export function IngestApp() {
           </div>
         )}
 
-        {files.length > 0 && (
+        {files.length > 0 ? (
           <div className="space-y-1">
-            <input
-              className="input-pixel"
-              placeholder="search file name or text preview…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <div className="space-y-1 max-h-64 overflow-y-auto" style={{ background: "var(--bg)", padding: 6 }}>
+            <div className="flex items-center justify-between">
+              <input
+                className="input-pixel flex-1"
+                placeholder="search file name or text preview…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <span className="font-mono text-[10px] ml-2" style={{ color: "var(--muted)" }}>
+                {results.length} / {files.length}
+              </span>
+            </div>
+            <div className="space-y-0.5 max-h-80 overflow-y-auto rounded" style={{ background: "var(--bg)", padding: 8, border: "1px solid var(--surface-2)" }}>
               {results.map((f, i) => (
                 <div
                   key={`${f.path}-${i}`}
-                  className="font-mono"
-                  style={{ fontSize: 10, color: f.kind === "directory" ? "var(--accent)" : "var(--fg)" }}
+                  className="font-mono flex items-center gap-2"
+                  style={{ fontSize: 10, color: f.kind === "directory" ? "var(--accent)" : "var(--fg)", padding: "2px 0" }}
                   title={f.textPreview ?? f.path}
                 >
-                  {f.kind === "directory" ? "▸" : "·"} {f.path} {f.kind === "file" && `(${formatSize(f.size)})`}
+                  <span style={{ width: 12, opacity: 0.7 }}>{f.kind === "directory" ? "▸" : "·"}</span>
+                  <span className="flex-1 truncate">{f.path}</span>
+                  {f.kind === "file" && (
+                    <span style={{ color: "var(--muted)", fontSize: 9 }}>{formatSize(f.size)}</span>
+                  )}
                 </div>
               ))}
               {results.length === 0 && (
@@ -145,6 +154,12 @@ export function IngestApp() {
               )}
             </div>
           </div>
+        ) : (
+          !busy && supported !== false && (
+            <p className="font-mono text-[10px]" style={{ color: "var(--muted)" }}>
+              No directory indexed yet. Click <strong style={{ color: "var(--accent)" }}>connect desktop</strong> above to pick a folder. Indexed file names appear here.
+            </p>
+          )
         )}
       </div>
 
@@ -162,12 +177,12 @@ export function IngestApp() {
               key={c.id}
               className="card-pixel"
               style={{
-                padding: 6,
+                padding: 8,
                 borderColor: c.available ? "var(--success)" : "var(--surface-2)",
                 background: c.available ? "rgba(34,197,94,0.08)" : "var(--surface)",
               }}
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-1">
                 <span className="font-pixel text-[10px] tracking-wider" style={{ color: c.available ? "var(--success)" : "var(--fg)" }}>
                   {c.name}
                 </span>
@@ -175,8 +190,13 @@ export function IngestApp() {
                   {c.available ? "live" : "off"}
                 </span>
               </div>
+              {c.purpose && (
+                <p className="font-mono text-[9px] leading-snug mb-1" style={{ color: c.available ? "var(--fg)" : "var(--muted)" }}>
+                  {c.purpose}
+                </p>
+              )}
               {!c.available && c.reason && (
-                <p className="font-mono text-[9px] mt-0.5" style={{ color: "var(--muted)" }}>
+                <p className="font-mono text-[9px] mt-0.5" style={{ color: "var(--warn)" }}>
                   {c.reason}
                 </p>
               )}
