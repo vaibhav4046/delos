@@ -1,9 +1,13 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
+
+const TTS_LIMIT_PER_MIN = 30;
+const TTS_WINDOW_MS = 60_000;
 
 const bodySchema = z.object({
   text: z.string().min(1).max(4000),
@@ -28,6 +32,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const ip = clientIp(req);
+  const lim = rateLimit(`tts:ip:${ip}`, TTS_LIMIT_PER_MIN, TTS_WINDOW_MS);
+  if (!lim.ok) {
+    return Response.json(
+      { error: "Too many TTS requests. Try again shortly." },
+      { status: 429, headers: lim.headers },
+    );
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
   const { text, voiceId, modelId, stability, similarity, style, apiKey } = parsed.data;
