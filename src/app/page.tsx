@@ -118,26 +118,30 @@ function Hero({ apps }: { apps: number }) {
             <span className="dot" />
             AGENTS UNDER PRESSURE · HYDRADB HACKATHON 2026
           </div>
-          {/* Editorial headline: Inter heavy, tight tracking, serif italic accent on
-             "flow" to match design.html V1. Sizes scale fluidly for mobile/tablet/desktop. */}
+          {/* Pixel headline — Pixelify Sans across the whole hero so the brand voice
+             stays consistent with the OS dock, badges, and HUD type. */}
           <h1
-            className="leading-[0.98] mb-5"
+            className="font-pixel leading-[1.02] mb-5"
             style={{
-              fontFamily: "var(--font-sans)",
-              fontWeight: 600,
-              letterSpacing: "-0.04em",
-              fontSize: "clamp(40px, 8vw, 88px)",
+              fontWeight: 700,
+              letterSpacing: "0.005em",
+              fontSize: "clamp(34px, 6.8vw, 76px)",
             }}
           >
             The AI operating system{" "}
             <span style={{ color: "var(--muted-2)" }}>where</span><br />
             agents{" "}
-            <em style={{ fontFamily: "Georgia, ui-serif, serif", color: "var(--accent)", fontStyle: "italic", fontWeight: 400 }}>
-              flow
-            </em>{" "}
+            <span style={{ color: "var(--accent)" }}>flow</span>{" "}
             under pressure.
           </h1>
-          <p className="text-base sm:text-lg text-[color:var(--muted)] max-w-xl leading-relaxed">
+          <p
+            className="font-pixel text-[color:var(--muted)] max-w-xl"
+            style={{
+              fontSize: "clamp(15px, 1.6vw, 19px)",
+              lineHeight: 1.45,
+              letterSpacing: "0.01em",
+            }}
+          >
             Browser-OS where <span style={{ color: "var(--fg)" }}>memory</span>,{" "}
             <span style={{ color: "var(--fg)" }}>tools</span>,{" "}
             <span style={{ color: "var(--fg)" }}>recovery</span>, and{" "}
