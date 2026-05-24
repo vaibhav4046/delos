@@ -70,10 +70,15 @@ function localMatch(t: string): { intent: IntentName; params?: Record<string, un
   // Mission / build
   m = s.match(/^(run|start) mission (.+)$/);
   if (m) return { intent: "run", params: { goal: m[2].trim() }, speak: `Running mission.` };
-  m = s.match(/^build (?:an? )?clone (?:of |for )?(.+)$/);
-  if (m) return { intent: "build_clone", params: { inspiration: m[1].trim() }, speak: `Building a ${m[1]} clone.` };
-  m = s.match(/^build (?:an? )?(.+)$/);
-  if (m && !s.startsWith("build clone")) return { intent: "build", params: { spec: m[1].trim() }, speak: `Building ${m[1]}.` };
+  // "build a Twitter clone" / "build me a Notion clone" / "build a clone of X"
+  m = s.match(/^build (?:me )?(?:an? )?(?:clone (?:of |for )?(.+)|(.+?)\s+clone\b)$/);
+  if (m) {
+    const target = (m[1] || m[2] || "").trim();
+    return { intent: "build_clone", params: { inspiration: target }, speak: `Building a ${target} clone.` };
+  }
+  // Generic build (non-clone)
+  m = s.match(/^build (?:me )?(?:an? )?(.+)$/);
+  if (m) return { intent: "build", params: { spec: m[1].trim() }, speak: `Building ${m[1]}.` };
   // Cohort
   m = s.match(/^(cohort|race) (.+)$/);
   if (m) return { intent: "cohort", params: { prompt: m[2].trim() }, speak: `Running cohort race.` };
