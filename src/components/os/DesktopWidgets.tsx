@@ -1,10 +1,114 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 
 // Pinnable desktop widgets — sticky notes, clock, weather, FX, crypto.
 // Live data via free, no-key APIs (Open-Meteo, Frankfurter, CoinGecko).
 // All client-side fetches; degrade silently if offline.
+
+// ── Widget layout persistence ────────────────────────────────────────────────
+// Each widget reads its (x, y, visible) state from localStorage so the user's
+// arrangement survives reloads. Default positions stack vertically on the
+// right edge, matching the v2.0 layout — no migration shock.
+type WidgetId = "clock" | "weather" | "crypto" | "fx";
+type WidgetLayout = { x: number; y: number; visible: boolean };
+const WIDGET_LAYOUT_KEY = "delos.widgets.layout.v1";
+const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayout> = {
+  clock:   { x: 0, y: 60,  visible: true },
+  weather: { x: 0, y: 140, visible: true },
+  crypto:  { x: 0, y: 222, visible: true },
+  fx:      { x: 0, y: 304, visible: true },
+};
+
+function loadLayout(): Record<WidgetId, WidgetLayout> {
+  if (typeof window === "undefined") return DEFAULT_LAYOUT;
+  try {
+    const raw = localStorage.getItem(WIDGET_LAYOUT_KEY);
+    if (!raw) return DEFAULT_LAYOUT;
+    const stored = JSON.parse(raw) as Partial<Record<WidgetId, WidgetLayout>>;
+    return { ...DEFAULT_LAYOUT, ...stored };
+  } catch {
+    return DEFAULT_LAYOUT;
+  }
+}
+
+function saveLayout(l: Record<WidgetId, WidgetLayout>) {
+  try { localStorage.setItem(WIDGET_LAYOUT_KEY, JSON.stringify(l)); } catch {}
+}
+
+// Draggable shell wrapping each widget. Reads/writes position from localStorage
+// so layout survives reloads. Right-edge by default; user-drag flips to free
+// absolute positioning. Close × hides the widget; re-add from the + menu.
+function WidgetFrame({
+  id,
+  layout,
+  onLayout,
+  children,
+  defaultWidth,
+}: {
+  id: WidgetId;
+  layout: WidgetLayout;
+  onLayout: (next: WidgetLayout) => void;
+  children: React.ReactNode;
+  defaultWidth?: number;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  // Free-positioned once user drags. Until then anchor to the right edge so
+  // the default vertical stack still works on every viewport width.
+  const free = layout.x !== 0;
+  return (
+    <motion.div
+      ref={ref}
+      drag
+      dragMomentum={false}
+      dragElastic={0}
+      onDragEnd={(_, info) => {
+        const node = ref.current;
+        if (!node) return;
+        // Translate from drag offset to absolute viewport coords. Clamp so the
+        // widget header (top 24px) stays grabbable from inside the viewport.
+        const rect = node.getBoundingClientRect();
+        const nextX = Math.max(8, Math.min(window.innerWidth - 80, rect.left));
+        const nextY = Math.max(56, Math.min(window.innerHeight - 80, rect.top));
+        onLayout({ ...layout, x: nextX, y: nextY });
+        void info;
+      }}
+      className="absolute pointer-events-auto group"
+      style={
+        free
+          ? { left: layout.x, top: layout.y, minWidth: defaultWidth ?? 160, cursor: "grab" }
+          : { right: 16, top: layout.y, minWidth: defaultWidth ?? 160, cursor: "grab" }
+      }
+    >
+      {/* Close × · appears on hover so it doesn't fight the widget content */}
+      <button
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => onLayout({ ...layout, visible: false })}
+        aria-label={`Hide ${id} widget`}
+        className="absolute opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{
+          right: -6,
+          top: -6,
+          width: 18,
+          height: 18,
+          background: "var(--danger)",
+          color: "var(--on-accent, #fff)",
+          border: "1px solid var(--bg)",
+          fontSize: 11,
+          fontWeight: 800,
+          cursor: "pointer",
+          lineHeight: 1,
+          padding: 0,
+          zIndex: 2,
+        }}
+        title={`Hide ${id}`}
+      >
+        ×
+      </button>
+      {children}
+    </motion.div>
+  );
+}
 
 type StickyNote = { id: string; text: string; x: number; y: number; color: "yellow" | "pink" | "cyan" | "green" };
 
@@ -48,10 +152,21 @@ export function DesktopWidgets() {
   const [notes, setNotes] = useState<StickyNote[]>([]);
   const [time, setTime] = useState(new Date());
   const [dragId, setDragId] = useState<string | null>(null);
+  const [layout, setLayout] = useState<Record<WidgetId, WidgetLayout>>(DEFAULT_LAYOUT);
+  const [addMenu, setAddMenu] = useState(false);
 
   useEffect(() => {
     setNotes(loadNotes());
+    setLayout(loadLayout());
   }, []);
+
+  function setWidgetLayout(id: WidgetId, next: WidgetLayout) {
+    setLayout((p) => {
+      const merged = { ...p, [id]: next };
+      saveLayout(merged);
+      return merged;
+    });
+  }
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -61,6 +176,29 @@ export function DesktopWidgets() {
   useEffect(() => {
     if (notes.length > 0) saveNotes(notes);
   }, [notes]);
+
+  // External sticky-note add · Cowork dispatches this when a goal asks to
+  // "save" / "remember" something. Lets cross-app workflows drop artifacts
+  // straight to the desktop without opening the notes UI manually.
+  useEffect(() => {
+    function onAddNote(e: Event) {
+      const detail = (e as CustomEvent).detail as { text?: string; color?: StickyNote["color"] };
+      if (!detail?.text) return;
+      const colors: StickyNote["color"][] = ["yellow", "pink", "cyan", "green"];
+      setNotes((p) => [
+        ...p,
+        {
+          id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          text: detail.text!,
+          x: 80 + Math.random() * 240,
+          y: 140 + Math.random() * 220,
+          color: detail.color ?? colors[p.length % colors.length],
+        },
+      ]);
+    }
+    window.addEventListener("delos-add-note", onAddNote as EventListener);
+    return () => window.removeEventListener("delos-add-note", onAddNote as EventListener);
+  }, []);
 
   function addNote() {
     const colors: StickyNote["color"][] = ["yellow", "pink", "cyan", "green"];
@@ -180,61 +318,124 @@ export function DesktopWidgets() {
         );
       })}
 
-      {/* Add note button — bottom-right above dock */}
-      <button
-        onClick={addNote}
-        className="absolute pointer-events-auto"
-        style={{
-          right: 16,
-          bottom: 80,
-          width: 44,
-          height: 44,
-          background: "var(--accent)",
-          color: "var(--on-accent)",
-          border: "2px solid var(--shadow)",
-          boxShadow: "3px 3px 0 var(--shadow)",
-          fontSize: 22,
-          fontWeight: 800,
-          cursor: "pointer",
-          fontFamily: "monospace",
-        }}
-        title="Add sticky note"
-        aria-label="Add sticky note"
-      >
-        +
-      </button>
-
-      {/* Clock widget — top right under header */}
-      <div
-        className="absolute pointer-events-auto"
-        style={{
-          right: 16,
-          top: 60,
-          background: "rgba(var(--bg-rgb), 0.88)",
-          backdropFilter: "blur(14px) saturate(160%)",
-          border: "2px solid var(--surface-2)",
-          padding: "12px 16px",
-          minWidth: 160,
-          textAlign: "center",
-          boxShadow: "3px 3px 0 var(--shadow)",
-        }}
-      >
-        <div
-          className="font-pixel tracking-wider"
-          style={{ color: "var(--fg)", fontSize: 24, lineHeight: 1, marginBottom: 4 }}
+      {/* Add menu · click + to reveal sticky note + 4 widget toggles */}
+      <div className="absolute pointer-events-auto" style={{ right: 16, bottom: 80 }}>
+        {addMenu && (
+          <div
+            className="absolute"
+            style={{
+              right: 0,
+              bottom: 52,
+              background: "rgba(var(--bg-rgb), 0.95)",
+              backdropFilter: "blur(14px) saturate(160%)",
+              border: "2px solid var(--surface-2)",
+              boxShadow: "4px 4px 0 var(--shadow)",
+              minWidth: 180,
+              padding: 6,
+            }}
+          >
+            <div className="font-pixel text-[9px] tracking-widest mb-1.5" style={{ color: "var(--muted)" }}>
+              ★ ADD TO DESKTOP
+            </div>
+            <button
+              onClick={() => { addNote(); setAddMenu(false); }}
+              className="w-full text-left font-mono text-[11px] flex items-center justify-between gap-2 hover:bg-[color:var(--surface-2)]"
+              style={{ padding: "4px 6px", border: "none", background: "transparent", color: "var(--fg)", cursor: "pointer" }}
+            >
+              <span>+ Sticky note</span>
+            </button>
+            {(["clock", "weather", "crypto", "fx"] as WidgetId[]).map((id) => {
+              const on = layout[id].visible;
+              return (
+                <button
+                  key={id}
+                  onClick={() => { setWidgetLayout(id, { ...layout[id], visible: !on }); }}
+                  className="w-full text-left font-mono text-[11px] flex items-center justify-between gap-2 hover:bg-[color:var(--surface-2)]"
+                  style={{ padding: "4px 6px", border: "none", background: "transparent", color: on ? "var(--success)" : "var(--muted)", cursor: "pointer" }}
+                >
+                  <span>{on ? "✓" : "  "} {id.charAt(0).toUpperCase() + id.slice(1)}</span>
+                  <span style={{ fontSize: 9, opacity: 0.6 }}>{on ? "ON" : "off"}</span>
+                </button>
+              );
+            })}
+            <button
+              onClick={() => {
+                setLayout(DEFAULT_LAYOUT);
+                saveLayout(DEFAULT_LAYOUT);
+                setAddMenu(false);
+              }}
+              className="w-full text-left font-mono text-[10px] mt-1 hover:bg-[color:var(--surface-2)]"
+              style={{ padding: "4px 6px", border: "none", background: "transparent", color: "var(--accent)", cursor: "pointer", borderTop: "1px solid var(--surface-2)" }}
+            >
+              ↺ Reset layout
+            </button>
+          </div>
+        )}
+        <button
+          onClick={() => setAddMenu((v) => !v)}
+          style={{
+            width: 44,
+            height: 44,
+            background: "var(--accent)",
+            color: "var(--on-accent)",
+            border: "2px solid var(--shadow)",
+            boxShadow: "3px 3px 0 var(--shadow)",
+            fontSize: 22,
+            fontWeight: 800,
+            cursor: "pointer",
+            fontFamily: "monospace",
+          }}
+          title="Add widget · sticky note · toggle visibility"
+          aria-label="Add widget menu"
         >
-          {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </div>
-        <div className="font-mono" style={{ color: "var(--muted)", fontSize: 9, letterSpacing: "0.1em" }}>
-          {time.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
-        </div>
+          {addMenu ? "×" : "+"}
+        </button>
       </div>
+
+      {/* Clock widget — draggable, closable */}
+      {layout.clock.visible && (
+        <WidgetFrame id="clock" layout={layout.clock} onLayout={(l) => setWidgetLayout("clock", l)} defaultWidth={160}>
+          <div
+            style={{
+              background: "rgba(var(--bg-rgb), 0.88)",
+              backdropFilter: "blur(14px) saturate(160%)",
+              border: "2px solid var(--surface-2)",
+              padding: "12px 16px",
+              minWidth: 160,
+              textAlign: "center",
+              boxShadow: "3px 3px 0 var(--shadow)",
+            }}
+          >
+            <div
+              className="font-pixel tracking-wider"
+              style={{ color: "var(--fg)", fontSize: 24, lineHeight: 1, marginBottom: 4 }}
+            >
+              {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            <div className="font-mono" style={{ color: "var(--muted)", fontSize: 9, letterSpacing: "0.1em" }}>
+              {time.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+            </div>
+          </div>
+        </WidgetFrame>
+      )}
 
       {/* Live data stack — weather · FX · crypto. Each falls back to "—" on
           network failure so OS stays usable offline. */}
-      <WeatherWidget />
-      <CryptoWidget />
-      <FxWidget />
+      {layout.weather.visible && (
+        <WidgetFrame id="weather" layout={layout.weather} onLayout={(l) => setWidgetLayout("weather", l)} defaultWidth={160}>
+          <WeatherWidget />
+        </WidgetFrame>
+      )}
+      {layout.crypto.visible && (
+        <WidgetFrame id="crypto" layout={layout.crypto} onLayout={(l) => setWidgetLayout("crypto", l)} defaultWidth={160}>
+          <CryptoWidget />
+        </WidgetFrame>
+      )}
+      {layout.fx.visible && (
+        <WidgetFrame id="fx" layout={layout.fx} onLayout={(l) => setWidgetLayout("fx", l)} defaultWidth={160}>
+          <FxWidget />
+        </WidgetFrame>
+      )}
     </div>
   );
 }
@@ -448,10 +649,7 @@ function WeatherWidget() {
   const icon = data ? weatherIcon(data.code) : "—";
   return (
     <div
-      className="absolute pointer-events-auto"
       style={{
-        right: 16,
-        top: 140,
         background: "rgba(var(--bg-rgb), 0.88)",
         backdropFilter: "blur(14px) saturate(160%)",
         border: "2px solid var(--surface-2)",
@@ -550,10 +748,7 @@ function CryptoWidget() {
 
   return (
     <div
-      className="absolute pointer-events-auto"
       style={{
-        right: 16,
-        top: 222,
         background: "rgba(var(--bg-rgb), 0.88)",
         backdropFilter: "blur(14px) saturate(160%)",
         border: "2px solid var(--surface-2)",
@@ -613,10 +808,7 @@ function FxWidget() {
 
   return (
     <div
-      className="absolute pointer-events-auto"
       style={{
-        right: 16,
-        top: 304,
         background: "rgba(var(--bg-rgb), 0.88)",
         backdropFilter: "blur(14px) saturate(160%)",
         border: "2px solid var(--surface-2)",

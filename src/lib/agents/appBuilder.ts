@@ -116,11 +116,64 @@ RULES:
 
 Return ONLY the JSON object.`;
 
-  return await generateJson({
-    model: models.planner,
-    schema: appSpecSchema,
-    prompt,
-    temperature: getEffectiveTemperature(0.4),
-    maxRetries: 3,
-  });
+  // Try the LLM first. If it fails (rate limit, schema fail after retries,
+  // network) fall back to a generic placeholder app so the user always sees
+  // a window appear instead of an error toast. The placeholder reflects the
+  // user's prompt so it still feels intentional, not generic.
+  try {
+    return await generateJson({
+      model: models.planner,
+      schema: appSpecSchema,
+      prompt,
+      temperature: getEffectiveTemperature(0.4),
+      maxRetries: 3,
+    });
+  } catch (e) {
+    return placeholderSpec(userPrompt, (e as Error).message);
+  }
+}
+
+// Domain-agnostic fallback app. Renders the user's prompt as the title,
+// shows a polite note explaining the LLM rate-limit, and includes a copy
+// button + a refresh suggestion. Better UX than a red toast that vanishes.
+function placeholderSpec(userPrompt: string, errMsg: string): AppSpec {
+  const cleanName = userPrompt
+    .replace(/^(build|make|create)\s+(me\s+)?(a|an|the)?\s*/i, "")
+    .replace(/^(app|application|tool|widget)\s+(named|called|for)\s+/i, "")
+    .slice(0, 40)
+    .trim() || "Quick Note";
+  const id = `placeholder-${Date.now().toString(36)}`;
+  const rateLimited = /rate[_ ]?limit/i.test(errMsg);
+  const note = rateLimited
+    ? "LLM quota hit — placeholder app generated. Switch model in Settings → Models or wait a few minutes."
+    : "Builder couldn't compile a custom spec — placeholder app generated.";
+  return {
+    id,
+    name: cleanName.length > 30 ? cleanName.slice(0, 27) + "…" : cleanName,
+    icon: "Sparkles",
+    width: 380,
+    height: 320,
+    initialState: { count: 0, note: "" },
+    root: {
+      kind: "col",
+      gap: 3,
+      children: [
+        { kind: "row", gap: 2, children: [
+          { kind: "image", icon: "Sparkles", size: 24 },
+          { kind: "text", value: cleanName, size: "h1" },
+        ]},
+        { kind: "text", value: "Placeholder app · ready to edit.", size: "h3" },
+        { kind: "divider" },
+        { kind: "card", children: [
+          { kind: "text", value: note, size: "body" },
+        ]},
+        { kind: "row", gap: 2, children: [
+          { kind: "button", label: "Tap me", variant: "primary", actions: [{ kind: "inc", key: "count", by: 1 }] },
+          { kind: "text", value: "Taps: {{count}}", size: "h3" },
+        ]},
+        { kind: "input", bind: "note", placeholder: "Jot a note…", type: "textarea" },
+        { kind: "text", value: "{{note}}", size: "body" },
+      ],
+    },
+  };
 }

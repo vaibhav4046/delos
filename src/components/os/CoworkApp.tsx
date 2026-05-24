@@ -296,6 +296,84 @@ Produce the final deliverable now.`,
     return (j.text ?? "").trim();
   }
 
+  // Real-world side-effects · maps a finalized cowork output to an actual
+  // connector call (Gmail draft / Notion page / desktop note). Returns a
+  // short status line that gets appended to the run output so users can
+  // verify what landed where. Never throws — fails open with a status string.
+  async function applySideEffect(g: string, output: string, domain: Domain): Promise<string | null> {
+    const lower = g.toLowerCase();
+
+    // Gmail draft · "draft an email", "email boss", "write to recruiter"
+    const wantsGmail = domain === "email" || /\b(gmail|inbox|email|draft|reply to|message to)\b/.test(lower);
+    if (wantsGmail) {
+      const subjectMatch = output.match(/(?:^|\n)\s*subject\s*[:\-]\s*(.+?)(?:\n|$)/i);
+      const subject = (subjectMatch?.[1] || g.slice(0, 80)).trim();
+      const body = output.replace(/(?:^|\n)\s*subject\s*[:\-].+?\n/i, "").trim();
+      const recipientMatch = g.match(/(?:to|email)\s+([\w._-]+@[\w.-]+\.[a-z]{2,})/i);
+      const to = recipientMatch?.[1] || "me@example.com";
+      try {
+        const r = await fetch("/api/connectors/gmail/draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to, subject, body }),
+        });
+        if (r.ok) return `✓ Saved to Gmail drafts → ${to} · subject: "${subject.slice(0, 60)}"`;
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        return `× Gmail draft failed: ${j.error ?? r.status}. Connect Gmail in Settings → Connectors.`;
+      } catch (e) {
+        return `× Gmail draft failed: ${(e as Error).message}`;
+      }
+    }
+
+    // Notion page · "create notion page", "save to notion", "notion doc"
+    const wantsNotion = domain === "notion" || /\b(notion|page|doc(ument)?|wiki)\b/.test(lower);
+    if (wantsNotion) {
+      const title = g
+        .replace(/^(create|save|write|make|build)\s+(a\s+)?(notion\s+)?(page|doc|document)?\s*(for|about|on|titled|named)?\s*/i, "")
+        .slice(0, 80)
+        .trim() || "Untitled · DelOS";
+      try {
+        const r = await fetch("/api/connectors/notion/create-page", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, content: output }),
+        });
+        if (r.ok) {
+          const j = (await r.json()) as { url?: string };
+          return `✓ Notion page created: "${title.slice(0, 60)}"${j.url ? ` · ${j.url}` : ""}`;
+        }
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        return `× Notion page failed: ${j.error ?? r.status}. Connect Notion in Settings → Connectors.`;
+      } catch (e) {
+        return `× Notion page failed: ${(e as Error).message}`;
+      }
+    }
+
+    // Local desktop note · "save", "remember", "note", "stash"
+    if (/\b(save|remember|stash|pin|note this)\b/.test(lower)) {
+      try {
+        window.dispatchEvent(new CustomEvent("delos-add-note", {
+          detail: { text: output.slice(0, 400), color: "yellow" },
+        }));
+        return "✓ Saved as desktop sticky note";
+      } catch {
+        return null;
+      }
+    }
+
+    // OS organize · "tile windows", "close all", "open mission control"
+    if (/\b(organize|clean up|tile|cascade|arrange)\b.*\b(windows|desktop|apps)\b/.test(lower)) {
+      try {
+        window.dispatchEvent(new CustomEvent("delos-tile-all"));
+        return "✓ Desktop tiled · windows arranged in grid";
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
   async function run() {
     const g = goal.trim();
     if (!g || running) return;
@@ -357,6 +435,20 @@ Produce the final deliverable now.`,
       }
       run.output = output;
       run.status = "done";
+
+      // Real-world side-effects · cowork's output isn't just text on screen
+      // anymore. If the goal is an email-draft / notion-page / save-note
+      // task, fire the corresponding connector endpoint so the artifact
+      // shows up in the user's actual Gmail / Notion / desktop.
+      try {
+        const sideEffect = await applySideEffect(g, output, domain);
+        if (sideEffect) {
+          run.output = output + "\n\n" + sideEffect;
+        }
+      } catch (e) {
+        run.output = output + `\n\n(side-effect error: ${(e as Error).message})`;
+      }
+
       setCurrentRun({ ...run });
       setRecent((p) => [{ ...run }, ...p].slice(0, 12));
     } catch (e) {
