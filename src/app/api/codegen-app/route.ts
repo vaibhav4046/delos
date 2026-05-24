@@ -121,6 +121,51 @@ async function geminiJson(
 }
 
 /**
+ * OpenRouter — aggregator for ~50 free models including qwen3-coder,
+ * llama-3.3-70b, hermes-3-405b, gpt-oss-120b, deepseek-v3, glm-4.5-air, etc.
+ * Single endpoint, many model choices. Set OPENROUTER_API_KEY (free tier
+ * at openrouter.ai) and the cascade picks it up.
+ *
+ * Default routes to qwen-3-coder (best free coder on the platform per
+ * benchmarks). Caller can override via the optional model arg.
+ */
+async function openRouterJson(
+  prompt: string,
+  system: string,
+  maxTokens: number,
+  model = "qwen/qwen-3-coder:free",
+): Promise<string> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) throw new Error("no OpenRouter key — set OPENROUTER_API_KEY to enable");
+  const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      // OpenRouter requires HTTP-Referer or X-Title for app identification.
+      "HTTP-Referer": "https://delrio.vercel.app",
+      "X-Title": "DelOS Codebase Builder",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`openrouter ${r.status}: ${errText.slice(0, 240)}`);
+  }
+  const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
+  return j.choices[0]?.message?.content ?? "";
+}
+
+/**
  * Mistral fallback — last resort. Different provider, different rate-limit
  * bucket. mistral-small-latest is free-tier, JSON-mode supported, ok code.
  */
@@ -173,9 +218,12 @@ async function llmJson(prompt: string, system: string, maxTokens: number): Promi
   // call started with Gemini's ~6-15s latency we'd blow Vercel's 90s ceiling.
   // Gemini steps in only when Groq returns rate-limited / invalid JSON.
   const providers: Array<{ name: string; call: () => Promise<string> }> = [
-    { name: "groq",    call: () => groqJson(prompt, system, maxTokens) },
-    { name: "gemini",  call: () => geminiJson(prompt, system, Math.max(maxTokens, 6000)) },
-    { name: "mistral", call: () => mistralJson(prompt, system, maxTokens) },
+    { name: "groq",       call: () => groqJson(prompt, system, maxTokens) },
+    // OpenRouter qwen-3-coder — free, coder specialist. Pricier latency
+    // than Groq but better JSX quality. Steps in on Groq 429.
+    { name: "openrouter", call: () => openRouterJson(prompt, system, maxTokens) },
+    { name: "gemini",     call: () => geminiJson(prompt, system, Math.max(maxTokens, 6000)) },
+    { name: "mistral",    call: () => mistralJson(prompt, system, maxTokens) },
   ];
   let lastErr: Error | null = null;
   for (const p of providers) {

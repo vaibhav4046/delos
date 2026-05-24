@@ -211,14 +211,21 @@ function buildLevel(idx: number): LevelSpec {
   const map = LEVELS[idx];
   const enemies: LevelSpec["enemies"] = [];
   const pickups: LevelSpec["pickups"] = [];
-  // Procedural enemy/pickup placement — find empty tiles
   const empties: Array<[number, number]> = [];
   for (let y = 1; y < map.length - 1; y++) {
     for (let x = 1; x < map[0].length - 1; x++) {
       if (map[y][x] === 0) empties.push([x, y]);
     }
   }
-  // Shuffle deterministic per level
+  // Player spawn — first empty near top-left corner. Compute BEFORE enemy
+  // placement so we can sort empties by distance to spawn.
+  let sx = 1.5, sy = 1.5;
+  outer: for (let y = 1; y < map.length; y++) {
+    for (let x = 1; x < map[0].length; x++) {
+      if (map[y][x] === 0) { sx = x + 0.5; sy = y + 0.5; break outer; }
+    }
+  }
+  // Deterministic rand per level
   const rand = (seed: number) => {
     let s = seed;
     return () => {
@@ -227,12 +234,32 @@ function buildLevel(idx: number): LevelSpec {
     };
   };
   const r = rand(idx * 1000 + 7);
-  empties.sort(() => r() - 0.5);
+  // Bug fix: enemies were placed in a fully shuffled empties list — so on
+  // most levels the entire enemy roster spawned at the far end of the map.
+  // Player saw an empty corridor for the first 10+ seconds, then enemies
+  // "suddenly appeared" once they patrolled close. Now: place the FIRST
+  // two enemies in the closest-to-spawn-but-not-adjacent tiles (visible
+  // within a few steps on first render) and shuffle the rest.
+  const sorted = [...empties].sort((a, b) => {
+    const da = Math.hypot(a[0] + 0.5 - sx, a[1] + 0.5 - sy);
+    const db = Math.hypot(b[0] + 0.5 - sx, b[1] + 0.5 - sy);
+    return da - db;
+  });
+  // Skip empties within 2.5 tiles of spawn (avoid spawn-camping the player)
+  const nearEnemySlots = sorted.filter(([x, y]) => {
+    const d = Math.hypot(x + 0.5 - sx, y + 0.5 - sy);
+    return d > 2.5 && d < 9; // sweet spot — visible but not on top of you
+  }).slice(0, 2);
+  // Remaining empties (excluding picked near slots + the spawn tile)
+  const usedKeys = new Set(nearEnemySlots.map(([x, y]) => `${x},${y}`));
+  usedKeys.add(`${Math.floor(sx)},${Math.floor(sy)}`);
+  const remaining = empties.filter(([x, y]) => !usedKeys.has(`${x},${y}`));
+  remaining.sort(() => r() - 0.5);
+  const orderedEmpties = [...nearEnemySlots, ...remaining];
   const enemyCount = 3 + idx; // 3..12
-  for (let i = 0; i < Math.min(enemyCount, empties.length); i++) {
-    const [x, y] = empties[i];
+  for (let i = 0; i < Math.min(enemyCount, orderedEmpties.length); i++) {
+    const [x, y] = orderedEmpties[i];
     let type: EnemyType;
-    // Mix all 5 enemy types based on level + index
     if (idx >= 9 && i === 0) type = "baron";
     else if (idx >= 6 && i === 1) type = "caco";
     else if (idx >= 4 && i % 4 === 3) type = "soldier";
@@ -242,18 +269,10 @@ function buildLevel(idx: number): LevelSpec {
     enemies.push({ x: x + 0.5, y: y + 0.5, type, hp });
   }
   const pickupCount = Math.max(2, 4 - Math.floor(idx / 3));
-  for (let i = 0; i < pickupCount && enemyCount + i < empties.length; i++) {
-    const [x, y] = empties[enemyCount + i];
+  for (let i = 0; i < pickupCount && enemyCount + i < orderedEmpties.length; i++) {
+    const [x, y] = orderedEmpties[enemyCount + i];
     const type: Pickup["type"] = i === 0 ? "health" : i === 1 ? "ammo" : "armor";
     pickups.push({ x: x + 0.5, y: y + 0.5, type });
-  }
-  // Spawn at first empty near top-left corner
-  let sx = 1.5, sy = 1.5;
-  for (let y = 1; y < map.length; y++) {
-    for (let x = 1; x < map[0].length; x++) {
-      if (map[y][x] === 0) { sx = x + 0.5; sy = y + 0.5; break; }
-    }
-    if (sx !== 1.5 || sy !== 1.5) break;
   }
   return {
     map,

@@ -13,6 +13,17 @@ const DEFAULT_BOOKMARKS: Bookmark[] = [
   { id: "mdn", title: "MDN Web Docs", url: "https://developer.mozilla.org" },
   { id: "hydra", title: "HydraDB", url: "https://hydradb.com" },
   { id: "groq", title: "Groq Console", url: "https://console.groq.com" },
+  // OSS library — projects shipped for DelOS as one-click bookmarks. Source
+  // repos are large enough they ship as references rather than full ports;
+  // click → opens in a new tab (X-Frame-Options blocks iframe embed).
+  { id: "understand-anything", title: "Understand Anything (vision QA)", url: "https://github.com/Lum1104/Understand-Anything" },
+  { id: "codegraph", title: "CodeGraph (LLM graph)", url: "https://github.com/colbymchenry/codegraph" },
+  { id: "ai-eng", title: "AI Engineering from Scratch", url: "https://github.com/rohitg00/ai-engineering-from-scratch" },
+  { id: "fincept", title: "Fincept Terminal (finance)", url: "https://github.com/Fincept-Corporation/FinceptTerminal" },
+  { id: "presenton", title: "Presenton (slides)", url: "https://github.com/presenton/presenton" },
+  { id: "multica", title: "Multica (multi-agent)", url: "https://github.com/multica-ai/multica" },
+  { id: "secret-knowledge", title: "Book of Secret Knowledge", url: "https://github.com/trimstray/the-book-of-secret-knowledge" },
+  { id: "longlive", title: "NVlabs LongLive", url: "https://github.com/NVlabs/LongLive" },
 ];
 
 const STORE_KEY = "delos.browser.v1";
