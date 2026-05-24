@@ -35,6 +35,16 @@ const CODEGEN_WINDOW_MS = 60_000;
 // allowance.
 const DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
+// Free-tier Groq models we cascade through on TPD/429. Order = best code
+// quality first, but each has its own daily token bucket — so when 120b
+// drains, 20b's 500K bucket is still untouched, etc. Maverick + Kimi K2
+// stay out of the cascade because they're paid-only on this account.
+const GROQ_CASCADE = [
+  "openai/gpt-oss-120b",                  // 200K TPD, best free code
+  "meta-llama/llama-4-scout-17b-16e-instruct", // 30K TPM, fast, decent
+  "openai/gpt-oss-20b",                   // 500K TPD, smaller but fresh bucket
+];
+
 // Per-file write call: ~2K input prompt + 3.5K output = 5.5K tokens.
 // Serial writes (parallel=1) + 2.5s sleep keeps us well under the 30K-TPM
 // sliding cap even when the plan call is fresh in the same window.
@@ -47,11 +57,11 @@ const BATCH_SLEEP_MS = 2500;
  * Send a JSON-mode completion to Groq. Throws on non-2xx so the caller can
  * decide to fall back to Mistral.
  */
-async function groqJson(
+async function groqOnceJson(
   prompt: string,
   system: string,
   maxTokens: number,
-  model: string = DEFAULT_MODEL,
+  model: string,
 ): Promise<string> {
   const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -72,10 +82,35 @@ async function groqJson(
   });
   if (!r.ok) {
     const errText = await r.text().catch(() => "");
-    throw new Error(`groq ${r.status}: ${errText.slice(0, 240)}`);
+    throw new Error(`groq ${model} ${r.status}: ${errText.slice(0, 240)}`);
   }
   const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
   return j.choices[0]?.message?.content ?? "";
+}
+
+/**
+ * Try every Groq model in the cascade before declaring Groq dead. Each model
+ * has its own TPD bucket on the org, so when 120b 429s the 20b bucket is
+ * often still completely fresh — no need to cross-cloud-providers yet.
+ */
+async function groqJson(prompt: string, system: string, maxTokens: number): Promise<string> {
+  let lastErr: Error | null = null;
+  for (const model of GROQ_CASCADE) {
+    try {
+      return await groqOnceJson(prompt, system, maxTokens, model);
+    } catch (e) {
+      lastErr = e as Error;
+      const msg = (lastErr.message || "").toLowerCase();
+      // Only cascade on rate-limit / quota / model-unavailable. For 4xx/5xx
+      // that are genuine prompt errors, stop and let the outer cascade try
+      // a different provider entirely.
+      if (!/429|rate|quota|tokens per day|tpd|does not exist|access|503/.test(msg)) {
+        throw lastErr;
+      }
+      console.warn(`[codegen] groq model ${model} ${msg.slice(0, 80)} — trying next groq model`);
+    }
+  }
+  throw lastErr ?? new Error("all groq models failed");
 }
 
 /**
@@ -166,6 +201,82 @@ async function openRouterJson(
 }
 
 /**
+ * Cerebras free inference — extremely fast (sub-second per file). Set
+ * CEREBRAS_API_KEY (free tier at cerebras.ai). llama-3.3-70b is the
+ * default — better code quality than gpt-oss-20b, comparable to gpt-oss-120b.
+ */
+async function cerebrasJson(
+  prompt: string,
+  system: string,
+  maxTokens: number,
+  model = "llama-3.3-70b",
+): Promise<string> {
+  const key = process.env.CEREBRAS_API_KEY;
+  if (!key) throw new Error("no Cerebras key — set CEREBRAS_API_KEY to enable");
+  const r = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`cerebras ${r.status}: ${errText.slice(0, 240)}`);
+  }
+  const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
+  return j.choices[0]?.message?.content ?? "";
+}
+
+/**
+ * Together AI — $25 free trial credit, OpenAI-compatible. Many free models
+ * including deepseek-coder, qwen2.5-coder, llama-3.3-70b. Set
+ * TOGETHER_API_KEY to enable.
+ */
+async function togetherJson(
+  prompt: string,
+  system: string,
+  maxTokens: number,
+  model = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+): Promise<string> {
+  const key = process.env.TOGETHER_API_KEY;
+  if (!key) throw new Error("no Together key — set TOGETHER_API_KEY to enable");
+  const r = await fetch("https://api.together.xyz/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`together ${r.status}: ${errText.slice(0, 240)}`);
+  }
+  const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
+  return j.choices[0]?.message?.content ?? "";
+}
+
+/**
  * Mistral fallback — last resort. Different provider, different rate-limit
  * bucket. mistral-small-latest is free-tier, JSON-mode supported, ok code.
  */
@@ -212,17 +323,20 @@ async function mistralJson(
  * error message. Only when ALL THREE fail do we surface the original error.
  */
 async function llmJson(prompt: string, system: string, maxTokens: number): Promise<string> {
-  // Cascade order: Groq scout (fastest, cheap on TPM) → Gemini 2.5 Flash
-  // (better code quality, more headroom) → Mistral small (last resort).
-  // Groq goes first because each multi-file build makes 8-14 calls; if every
-  // call started with Gemini's ~6-15s latency we'd blow Vercel's 90s ceiling.
-  // Gemini steps in only when Groq returns rate-limited / invalid JSON.
+  // Cascade order: Groq family (sub-model cascade inside) → Cerebras
+  // (sub-second 70B) → OpenRouter free models → Gemini → Together AI free
+  // tier → Mistral small (last resort). Each provider lives in its own
+  // rate-limit bucket on its own org, so a TPD-drained Groq doesn't bleed
+  // into Cerebras / Together. The codegen pipeline keeps going through
+  // EVERY available free model before surfacing an error.
   const providers: Array<{ name: string; call: () => Promise<string> }> = [
     { name: "groq",       call: () => groqJson(prompt, system, maxTokens) },
-    // OpenRouter qwen-3-coder — free, coder specialist. Pricier latency
+    { name: "cerebras",   call: () => cerebrasJson(prompt, system, maxTokens) },
+    // OpenRouter qwen-3-coder — coder specialist. Pricier latency
     // than Groq but better JSX quality. Steps in on Groq 429.
     { name: "openrouter", call: () => openRouterJson(prompt, system, maxTokens) },
     { name: "gemini",     call: () => geminiJson(prompt, system, Math.max(maxTokens, 6000)) },
+    { name: "together",   call: () => togetherJson(prompt, system, maxTokens) },
     { name: "mistral",    call: () => mistralJson(prompt, system, maxTokens) },
   ];
   let lastErr: Error | null = null;
@@ -240,7 +354,14 @@ async function llmJson(prompt: string, system: string, maxTokens: number): Promi
       }
     } catch (e) {
       lastErr = e as Error;
-      console.warn(`[codegen] ${p.name} failed: ${(lastErr.message || "").slice(0, 120)}`);
+      const m = (lastErr.message || "").toLowerCase();
+      // Skip silently when a provider key is unset — that's expected for
+      // free deploys where the user only configured 2-3 of the 6 providers.
+      if (/^no \w+ key/.test(lastErr.message)) {
+        console.info(`[codegen] ${p.name} skipped — ${lastErr.message.slice(0, 80)}`);
+        continue;
+      }
+      console.warn(`[codegen] ${p.name} failed: ${m.slice(0, 120)}`);
     }
   }
   throw lastErr ?? new Error("all providers failed");
