@@ -6,10 +6,11 @@ import { Wordmark } from "@/components/Logo";
 type Member = { index: number; model: string; status: "spawn" | "done" | "fail"; text?: string; ms?: number; error?: string };
 type Verdict = { winnerIndex: number; rationale: string; scores: Array<{ index: number; score: number }>; merged: string };
 
+// Gemini free quota burns out daily in production — swap to Kimi K2 (Groq).
 const MEMBERS = [
   "groq:openai/gpt-oss-120b",
   "groq:meta-llama/llama-4-scout-17b-16e-instruct",
-  "google:gemini-2.5-flash",
+  "groq:moonshotai/kimi-k2-instruct-0905",
 ] as const;
 
 const PRESETS = [

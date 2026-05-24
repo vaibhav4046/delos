@@ -377,10 +377,11 @@ export function DelAssistant() {
 
   async function runCohort(text: string, ctrl: AbortController, assistId: string) {
     if (!active) return;
+    // Gemini hits daily-quota fast; Kimi K2 keeps the 3-way race intact.
     const members: ModelKey[] = [
       "groq:openai/gpt-oss-120b",
       "groq:meta-llama/llama-4-scout-17b-16e-instruct",
-      "google:gemini-2.5-flash",
+      "groq:moonshotai/kimi-k2-instruct-0905",
     ];
     const r = await fetch("/api/cohort", {
       method: "POST",

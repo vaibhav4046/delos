@@ -58,6 +58,19 @@ export async function POST(req: NextRequest) {
     });
     return Response.json({ spec });
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    // Most failures here are "LLM didn't return a valid AppSpec" (zod fail
+    // on the generated JSON). That's a user-facing problem with the prompt,
+    // not a server crash — return 422 with a clean message so the builder
+    // UI can render "try a more specific prompt" instead of the raw stack.
+    const msg = e instanceof Error ? e.message : String(e);
+    const isSpecFail = /spec|json|invalid|parse|zod|validation/i.test(msg);
+    return Response.json(
+      {
+        error: isSpecFail
+          ? "Couldn't compile an app spec from that prompt. Try something more specific (e.g. \"Build a habit tracker with 7-day streak\")."
+          : msg,
+      },
+      { status: isSpecFail ? 422 : 500 },
+    );
   }
 }
