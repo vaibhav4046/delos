@@ -1,8 +1,12 @@
 import { NextRequest } from "next/server";
 import { safeAddMemory, ensureTenant } from "@/lib/hydra";
 import { env } from "@/lib/env";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+
+const SEED_LIMIT_PER_MIN = 2;
+const SEED_WINDOW_MS = 60_000;
 
 const SEED_MEMORIES = [
   {
@@ -48,8 +52,16 @@ const SEED_MEMORIES = [
 ];
 
 export async function POST(req: NextRequest) {
+  const ip = clientIp(req);
+  const lim = rateLimit(`memseed:ip:${ip}`, SEED_LIMIT_PER_MIN, SEED_WINDOW_MS);
+  if (!lim.ok) {
+    return Response.json(
+      { ok: false, error: "Seed endpoint is rate-limited." },
+      { status: 429, headers: lim.headers },
+    );
+  }
   const body = await req.json().catch(() => ({})) as { tenantId?: string };
-  const tenantId = body.tenantId || env.DELRIO_TENANT_ID;
+  const tenantId = (body.tenantId && body.tenantId.length <= 120 ? body.tenantId : env.DELRIO_TENANT_ID);
   await ensureTenant(tenantId);
   const added: string[] = [];
   const failed: string[] = [];
