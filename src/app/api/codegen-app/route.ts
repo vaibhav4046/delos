@@ -320,6 +320,7 @@ Language: ${planEntry.language ?? "tsx"}
 RULES (strict):
 - SAME-TO-SAME clone. Match the real product's exact colors (hex codes from the user request), exact layout proportions, exact copy ("Prime", "Sponsored", "Reply to Claude", "Ask anything", etc.).
 - Write COMPLETE, syntactically valid code. No \`...\` ellipses, no \`// TODO\`, no \`/* implement later */\`, no \`throw new Error("not implemented")\`.
+- JSX hygiene (Sandpack will fail otherwise): EVERY JSX attribute must have an explicit value — \`alt=""\` not \`alt=\`, \`disabled={true}\` not \`disabled=\`. Map keys must be unique strings or stable ids, not duplicated values. Close every tag. No stray commas in arrays. No trailing commas after JSX attrs.
 - Real working code: actual JSX, actual handlers, actual state, actual mock data.
 - 200–600 lines is the sweet spot for a component file. README can be shorter.
 - Inline mock data should be RICH and BRAND-AUTHENTIC (10+ items). Amazon → real-product-shaped names + prices + star ratings; ChatGPT → realistic chat titles; Perplexity → real-looking source URLs with favicon emoji; Claude → conversational starter phrases.

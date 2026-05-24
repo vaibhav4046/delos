@@ -40,8 +40,11 @@ export function SandpackPreview({ project }: { project: Project }) {
           showLineNumbers: false,
           showInlineErrors: true,
           wrapContent: true,
-          editorHeight: "100%",
-          editorWidthPercentage: 0, // Hide editor — we have FILES tab for that
+          // Real fixed pixel height — percentage layouts collapse inside a
+          // small parent. 600px gives the iframe enough room to render an
+          // actual Amazon/ChatGPT-shaped page without internal scrolling.
+          editorHeight: 600,
+          editorWidthPercentage: 0,
           autorun: true,
           recompileMode: "delayed",
           recompileDelay: 600,

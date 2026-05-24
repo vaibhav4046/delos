@@ -191,9 +191,11 @@ export function CodebaseApp() {
         </div>
       )}
 
-      {/* PREVIEW mode — live Sandpack iframe running the generated app */}
+      {/* PREVIEW mode — live Sandpack iframe running the generated app.
+         min-height keeps the iframe a real workable height even when the
+         host window is shrunk; Sandpack collapses to ~160px otherwise. */}
       {project && viewMode === "preview" && (
-        <div className="flex-1 overflow-hidden" style={{ background: "#0b0b14" }}>
+        <div className="flex-1 overflow-hidden" style={{ background: "#0b0b14", minHeight: 540 }}>
           <Suspense fallback={<div className="p-4 font-mono text-[10px]" style={{ color: "var(--muted)" }}>booting preview sandbox…</div>}>
             <SandpackPreview project={project} />
           </Suspense>
