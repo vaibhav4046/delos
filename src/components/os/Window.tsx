@@ -57,6 +57,7 @@ export function Window({
   const IconCmp = All[iconName] ?? Icons.Box;
   const [phase, setPhase] = useState<"open" | "shown" | "closing">("open");
   const [snapMenuOpen, setSnapMenuOpen] = useState(false);
+  const [resizing, setResizing] = useState(false);
   const snapHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -84,6 +85,7 @@ export function Window({
     const minH = 200;
     const target = e.currentTarget as HTMLElement;
     target.setPointerCapture?.(e.pointerId);
+    setResizing(true);
 
     function onMove(ev: PointerEvent) {
       const dx = ev.clientX - startX;
@@ -109,6 +111,7 @@ export function Window({
     function onUp() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      setResizing(false);
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -146,7 +149,7 @@ export function Window({
             ? { x: targetX, y: targetY, scale: 0.6, opacity: 0 }
             : { x: targetX, y: targetY, scale: 1, opacity: 1, width: targetW, height: targetH }
         }
-        transition={{ type: "spring", stiffness: 320, damping: 22, mass: 0.6 }}
+        transition={resizing ? { duration: 0 } : { type: "spring", stiffness: 320, damping: 22, mass: 0.6 }}
         onDragEnd={(_, info) => {
           if (maximized) return;
           const nx = win.x + info.offset.x;
