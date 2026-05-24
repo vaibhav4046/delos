@@ -33,8 +33,13 @@ export async function GET() {
   // Cryptographically random state, persisted in a short-lived cookie. The
   // callback must echo it back exactly — otherwise an attacker could feed a
   // victim a pre-prepared ?code= URL and have them sign in as the attacker.
-  const nonce = randomBytes(24).toString("base64url");
-  const state = `${nonce}-signin`;
+  // KEEP the "delos-" prefix: the shared gmail callback (which handles this
+  // sign-in flow too via the -signin suffix) rejects any state that doesn't
+  // start with "delos-" as an early sanity check. Without the prefix the
+  // callback fires "missing or invalid state/code" before the cookie
+  // comparison even runs.
+  const nonce = randomBytes(18).toString("base64url");
+  const state = `delos-${nonce}-signin`;
 
   const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   u.searchParams.set("client_id", clientId);
