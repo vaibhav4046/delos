@@ -7,14 +7,15 @@ import { onIntent, broadcastAgent } from "@/lib/intentBus";
 type Member = { index: number; model: ModelKey; status: "spawn" | "done" | "fail"; text?: string; ms?: number; error?: string };
 type Verdict = { winnerIndex: number; rationale: string; scores: Array<{ index: number; score: number }>; merged: string; fallback?: boolean };
 
-// Hackathon-account Gemini free-tier hit its daily quota almost instantly
-// in testing, so the third slot showed FAIL on every cohort demo. Swap to
-// Kimi K2 (Groq) which shares Groq's TPM with the other two and is reliably
-// available on this account. Judges still get 3-way race + verdict.
+// Default to the three Groq models confirmed available on the hackathon
+// account's free tier (gpt-oss-120b, llama-4-scout, gpt-oss-20b). Gemini
+// + Kimi K2 + Maverick all hit FAIL on this account — Gemini blows its
+// daily quota almost immediately, the others are gated to paid tier.
+// User can still toggle them ON manually if they want.
 const DEFAULT_MEMBERS: ModelKey[] = [
   "groq:openai/gpt-oss-120b",
   "groq:meta-llama/llama-4-scout-17b-16e-instruct",
-  "groq:moonshotai/kimi-k2-instruct-0905",
+  "groq:openai/gpt-oss-20b",
 ];
 
 export function CohortApp() {

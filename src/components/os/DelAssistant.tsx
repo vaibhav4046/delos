@@ -377,11 +377,13 @@ export function DelAssistant() {
 
   async function runCohort(text: string, ctrl: AbortController, assistId: string) {
     if (!active) return;
-    // Gemini hits daily-quota fast; Kimi K2 keeps the 3-way race intact.
+    // Use the three Groq models that are confirmed available on this
+    // account's free tier. Gemini blows daily quota, Kimi K2 + Maverick
+    // are paid-only and FAIL on cold call.
     const members: ModelKey[] = [
       "groq:openai/gpt-oss-120b",
       "groq:meta-llama/llama-4-scout-17b-16e-instruct",
-      "groq:moonshotai/kimi-k2-instruct-0905",
+      "groq:openai/gpt-oss-20b",
     ];
     const r = await fetch("/api/cohort", {
       method: "POST",
