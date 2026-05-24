@@ -159,16 +159,19 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
     );
     return Response.json(obj);
   } catch (e) {
-    // Don't leak the full Zod schema (with the entire app catalog) to clients.
-    // Map JSON-validation failure to "unknown" intent so the voice UI can say
-    // "I didn't catch that" instead of showing a 500 stack.
+    // Voice mis-classification should NEVER 500 the client — the mic loop
+    // depends on a sane fallback every time. Always return a 200 with an
+    // "unknown" intent, even on rate-limit / network / LLM crash. Keep the
+    // error tagged in a hint field so the UI can surface diagnostic state
+    // without breaking the loop.
     const msg = e instanceof Error ? e.message : String(e);
-    if (/generateJson failed|invalid_value|validation/i.test(msg)) {
-      return Response.json({
-        intent: "unknown",
-        reply: "I didn't catch that — try again with a clearer command.",
-      });
-    }
-    return Response.json({ error: "voice command failed" }, { status: 500 });
+    const rateLimited = /rate[_ ]?limit/i.test(msg);
+    return Response.json({
+      intent: "unknown",
+      reply: rateLimited
+        ? "Slow down — voice agent is rate-limited. Try again in a minute."
+        : "I didn't catch that — try again with a clearer command.",
+      hint: msg.slice(0, 80),
+    });
   }
 }
