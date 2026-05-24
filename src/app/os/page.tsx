@@ -676,6 +676,8 @@ export default function OSPage() {
       if (e.key === "Escape") {
         if (ctxMenu) {
           setCtxMenu(null);
+        } else if (launchpadOpen) {
+          setLaunchpadOpen(false);
         } else if (shortcutsOpen) {
           setShortcutsOpen(false);
         } else if (paletteOpen) {
@@ -828,6 +830,12 @@ export default function OSPage() {
               <span className="hidden sm:inline text-[color:var(--muted)] font-mono text-[10px]">v2.1 · agents under pressure</span>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
+              <button onClick={() => setLaunchpadOpen(true)} className="hidden sm:inline-flex pill pill-muted" title="Launchpad (F4 / ⌘Space)" style={{ cursor: "pointer", fontSize: 10 }}>
+                <Icons.LayoutGrid size={10} /> APPS
+              </button>
+              <button onClick={gridArrange} className="hidden md:inline-flex pill pill-muted" title="Tile windows (⌘G)" style={{ cursor: "pointer", fontSize: 10 }}>
+                <Icons.Grid3x3 size={10} /> TILE
+              </button>
               <button data-tour="demo-button" onClick={runDemoTour} className="hidden md:inline-flex pill pill-info" title="Run demo tour (⌘ Shift D)" style={{ cursor: "pointer", fontSize: 10 }}>
                 ▶ DEMO
               </button>
@@ -905,6 +913,21 @@ export default function OSPage() {
           <VoiceWakeMount />
           <ApprovalGate />
           <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+          <Launchpad
+            open={launchpadOpen}
+            onClose={() => setLaunchpadOpen(false)}
+            apps={SYSTEM_APPS}
+            order={dockOrder}
+            onLaunch={(k) => { spawnSystemApp(k); setLaunchpadOpen(false); }}
+          />
+          {!hintsDismissed && (
+            <HintSticky
+              onDismiss={() => setHintsDismissed(true)}
+              onTile={gridArrange}
+              onCascade={cascadeArrange}
+              onLaunchpad={() => setLaunchpadOpen(true)}
+            />
+          )}
 
           {ctxMenu && (
             <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} onPick={(action) => {
@@ -1068,6 +1091,214 @@ function WelcomeMat({
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Fullscreen Launchpad — Mac-style app grid with live filter.
+// Opens on F4 / Cmd+Space / header APPS button. ESC closes.
+function Launchpad({
+  open,
+  onClose,
+  apps,
+  order,
+  onLaunch,
+}: {
+  open: boolean;
+  onClose: () => void;
+  apps: Record<string, DockItem>;
+  order: string[];
+  onLaunch: (key: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const All = Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>;
+  const SLEEK: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
+    assistant: BrandIcons.DelAssistantSleek,
+    identity: BrandIcons.IdentitySleek,
+    ingest: BrandIcons.IngestSleek,
+    cohort: BrandIcons.CohortSleek,
+    cores: BrandIcons.CoresSleek,
+    arena: BrandIcons.ArenaSleek,
+    builder: BrandIcons.BuilderSleek,
+    terminal: BrandIcons.TerminalSleek,
+    mission: BrandIcons.MissionSleek,
+  };
+  useEffect(() => { if (!open) setQ(""); }, [open]);
+  if (!open) return null;
+  const list = order.filter((k) => apps[k].label.toLowerCase().includes(q.toLowerCase()));
+  // Group into categories
+  const groups: Array<{ label: string; ids: string[] }> = [
+    { label: "AI AGENTS",      ids: ["assistant", "identity", "cohort", "arena", "voice", "cowork"] },
+    { label: "BUILDERS",       ids: ["builder", "codebase", "cores", "mission"] },
+    { label: "TOOLS",          ids: ["ingest", "terminal", "browser", "marketplace", "analytics"] },
+    { label: "FILES & NOTES",  ids: ["files", "notes", "calendar", "calc", "sysinfo"] },
+    { label: "GAMES",          ids: ["snake", "tictactoe", "memory", "minesweeper", "game2048", "doom"] },
+    { label: "SYSTEM",         ids: ["settings", "about"] },
+  ];
+  return (
+    <div
+      className="fixed inset-0 z-[9000] flex flex-col items-center justify-start overflow-y-auto"
+      style={{
+        background: "rgba(7,7,11,0.92)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        padding: "60px 24px 40px",
+      }}
+      onClick={onClose}
+    >
+      <div className="w-full max-w-5xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="font-pixel text-2xl tracking-widest" style={{ color: "var(--accent)" }}>
+            ★ LAUNCHPAD
+          </div>
+          <button onClick={onClose} className="pill pill-muted" style={{ cursor: "pointer" }}>
+            <Icons.X size={10} /> ESC
+          </button>
+        </div>
+
+        <div className="card-pixel mb-6" style={{ padding: "8px 12px" }}>
+          <div className="flex items-center gap-2">
+            <Icons.Search size={14} color="var(--accent)" />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="search apps…"
+              className="bg-transparent flex-1 outline-none font-mono text-sm"
+              style={{ color: "var(--fg)" }}
+            />
+            <span className="font-mono text-[10px]" style={{ color: "var(--muted)" }}>
+              {list.length} / {order.length}
+            </span>
+          </div>
+        </div>
+
+        {q ? (
+          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-3">
+            {list.map((k) => {
+              const a = apps[k];
+              const Cmp = SLEEK[k] ?? All[a.icon as string] ?? Icons.Box;
+              return (
+                <button
+                  key={k}
+                  onClick={() => onLaunch(k)}
+                  className="card-pixel flex flex-col items-center justify-center gap-1.5 hover:scale-105 transition-transform"
+                  style={{ padding: "14px 8px", cursor: "pointer", background: "rgba(255,255,255,0.04)" }}
+                >
+                  <Cmp size={32} color="var(--accent)" />
+                  <span className="font-pixel text-[9px] tracking-wider text-center" style={{ color: "var(--fg)" }}>
+                    {a.label.toUpperCase()}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {groups.map((g) => {
+              const visible = g.ids.filter((id) => apps[id]);
+              if (!visible.length) return null;
+              return (
+                <div key={g.label}>
+                  <div className="font-pixel text-[10px] tracking-widest mb-2" style={{ color: "var(--muted)" }}>
+                    ◆ {g.label}
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-3">
+                    {visible.map((k) => {
+                      const a = apps[k];
+                      const Cmp = SLEEK[k] ?? All[a.icon as string] ?? Icons.Box;
+                      return (
+                        <button
+                          key={k}
+                          onClick={() => onLaunch(k)}
+                          className="card-pixel flex flex-col items-center justify-center gap-1.5 transition-transform"
+                          style={{ padding: "14px 8px", cursor: "pointer", background: "rgba(255,255,255,0.04)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.06)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+                        >
+                          <Cmp size={32} color="var(--accent)" />
+                          <span className="font-pixel text-[9px] tracking-wider text-center" style={{ color: "var(--fg)" }}>
+                            {a.label.toUpperCase()}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Sticky-note style cheat sheet pinned to the desktop. First-time
+// users see the new snap + Launchpad + tile shortcuts at a glance.
+// Dismissable; state lives in component memory (session).
+function HintSticky({
+  onDismiss,
+  onTile,
+  onCascade,
+  onLaunchpad,
+}: {
+  onDismiss: () => void;
+  onTile: () => void;
+  onCascade: () => void;
+  onLaunchpad: () => void;
+}) {
+  return (
+    <div
+      className="fixed z-[70] hidden md:block"
+      style={{
+        right: 16,
+        bottom: 72,
+        width: 268,
+        background: "#fff7a8",
+        color: "#1a1a26",
+        padding: 12,
+        boxShadow: "4px 4px 0 0 rgba(0,0,0,0.35)",
+        borderRadius: 2,
+        transform: "rotate(-1.5deg)",
+        fontFamily: "var(--font-pixel)",
+      }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] tracking-widest" style={{ color: "#7a6500" }}>★ STICKY · HOW TO USE</span>
+        <button onClick={onDismiss} aria-label="Dismiss hints" style={{ color: "#1a1a26", cursor: "pointer" }}>
+          <Icons.X size={12} />
+        </button>
+      </div>
+      <ul className="text-[10px] space-y-1 leading-snug" style={{ color: "#2a2200" }}>
+        <li>· Drag window to <strong>edge</strong> → snap half</li>
+        <li>· Drag to <strong>corner</strong> → quarter snap</li>
+        <li>· <strong>⌘ + ←/→</strong> half · <strong>⌘ + ↑</strong> full</li>
+        <li>· <strong>⌘ Alt ←/→</strong> top-quarter · <strong>⌘ Shift ←/→</strong> bottom-quarter</li>
+        <li>· <strong>⌘ G</strong> auto-tile · <strong>⌘ Shift C</strong> cascade</li>
+        <li>· <strong>F4</strong> or <strong>⌘ Space</strong> Launchpad</li>
+        <li>· <strong>⌘ K</strong> palette · <strong>⌘ /</strong> all shortcuts</li>
+      </ul>
+      <div className="flex gap-1.5 mt-3">
+        <button
+          onClick={onTile}
+          style={{ background: "#1a1a26", color: "#fbc531", padding: "4px 6px", fontSize: 9, cursor: "pointer", border: "none" }}
+        >
+          TILE NOW
+        </button>
+        <button
+          onClick={onCascade}
+          style={{ background: "#1a1a26", color: "#5fc4e1", padding: "4px 6px", fontSize: 9, cursor: "pointer", border: "none" }}
+        >
+          CASCADE
+        </button>
+        <button
+          onClick={onLaunchpad}
+          style={{ background: "#1a1a26", color: "#6ab04c", padding: "4px 6px", fontSize: 9, cursor: "pointer", border: "none" }}
+        >
+          LAUNCHPAD
+        </button>
       </div>
     </div>
   );
