@@ -309,15 +309,30 @@ Produce the final deliverable now.`,
       const subjectMatch = output.match(/(?:^|\n)\s*subject\s*[:\-]\s*(.+?)(?:\n|$)/i);
       const subject = (subjectMatch?.[1] || g.slice(0, 80)).trim();
       const body = output.replace(/(?:^|\n)\s*subject\s*[:\-].+?\n/i, "").trim();
-      const recipientMatch = g.match(/(?:to|email)\s+([\w._-]+@[\w.-]+\.[a-z]{2,})/i);
-      const to = recipientMatch?.[1] || "me@example.com";
+      const recipientMatch = g.match(/([\w._%+-]+@[\w.-]+\.[a-z]{2,})/i);
+      // If no real recipient parsed, fetch the authenticated user's own email
+      // and self-draft. Self-draft is the safe demo path · user can change
+      // To: in Gmail before sending. Never default to a fake test address.
+      let to = recipientMatch?.[1];
+      if (!to) {
+        try {
+          const me = await fetch("/api/me").then((r) => r.ok ? r.json() : null).catch(() => null) as { email?: string } | null;
+          to = me?.email;
+        } catch {}
+      }
+      if (!to) {
+        return "○ Skipped Gmail draft · couldn't determine a recipient. Mention an email address in the goal or sign in.";
+      }
       try {
         const r = await fetch("/api/connectors/gmail/draft", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ to, subject, body }),
         });
-        if (r.ok) return `✓ Saved to Gmail drafts → ${to} · subject: "${subject.slice(0, 60)}"`;
+        if (r.ok) {
+          const j = (await r.json()) as { openUrl?: string };
+          return `✓ Saved to Gmail drafts → ${to} · subject: "${subject.slice(0, 60)}"${j.openUrl ? ` · open: ${j.openUrl}` : ""}`;
+        }
         const j = (await r.json().catch(() => ({}))) as { error?: string };
         return `× Gmail draft failed: ${j.error ?? r.status}. Connect Gmail in Settings → Connectors.`;
       } catch (e) {

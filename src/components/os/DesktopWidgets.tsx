@@ -62,16 +62,20 @@ function WidgetFrame({
       drag
       dragMomentum={false}
       dragElastic={0}
+      // animate back to {x:0, y:0} after each drag so framer's transform
+      // resets and the new left/top from layout takes over cleanly. Without
+      // this, framer keeps the drag transform AND we set left/top → widget
+      // jumps double the drag distance on re-render.
+      initial={false}
+      animate={{ x: 0, y: 0 }}
+      transition={{ duration: 0 }}
       onDragEnd={(_, info) => {
-        const node = ref.current;
-        if (!node) return;
-        // Translate from drag offset to absolute viewport coords. Clamp so the
-        // widget header (top 24px) stays grabbable from inside the viewport.
-        const rect = node.getBoundingClientRect();
-        const nextX = Math.max(8, Math.min(window.innerWidth - 80, rect.left));
-        const nextY = Math.max(56, Math.min(window.innerHeight - 80, rect.top));
+        // Capture the *current* visual position by adding the drag offset to
+        // the element's rendered left/top, then commit. Using getBoundingClientRect
+        // would include the transform we're about to reset — avoid.
+        const nextX = Math.max(8, Math.min(window.innerWidth - 80, (free ? layout.x : window.innerWidth - 176) + info.offset.x));
+        const nextY = Math.max(56, Math.min(window.innerHeight - 80, layout.y + info.offset.y));
         onLayout({ ...layout, x: nextX, y: nextY });
-        void info;
       }}
       className="absolute pointer-events-auto group"
       style={

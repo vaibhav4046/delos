@@ -137,9 +137,12 @@ Return ONLY the JSON object.`;
 // shows a polite note explaining the LLM rate-limit, and includes a copy
 // button + a refresh suggestion. Better UX than a red toast that vanishes.
 function placeholderSpec(userPrompt: string, errMsg: string): AppSpec {
+  // Strip the imperative shell so the title is just the subject. Order matters:
+  // "build me an app named X" → drop "build me an app named" → "X". Drop trailing
+  // periods + quotes. Limit to 40 chars; fall back if nothing remains.
   const cleanName = userPrompt
-    .replace(/^(build|make|create)\s+(me\s+)?(a|an|the)?\s*/i, "")
-    .replace(/^(app|application|tool|widget)\s+(named|called|for)\s+/i, "")
+    .replace(/^\s*(please\s+)?(build|make|create|generate)\s+(me\s+)?(an?\s+|the\s+)?(app(lication)?|tool|widget|website|webapp|clone\s+of)?\s*(named|called|titled|for|about)?\s*/i, "")
+    .replace(/^["'`]|["'`.,!?]+$/g, "")
     .slice(0, 40)
     .trim() || "Quick Note";
   const id = `placeholder-${Date.now().toString(36)}`;
