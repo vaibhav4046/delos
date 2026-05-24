@@ -101,6 +101,26 @@ function reroot(p: string): string {
   return "/" + out;
 }
 
+/**
+ * Some codegen runs (especially via the Mistral fallback) emit `export function
+ * Foo()` and then sibling files do `import Foo from "./Foo"` as default import.
+ * That resolves to `{ default: undefined }` and Sandpack throws "Element type
+ * is invalid". We patch the common case: a single top-level `export function X`
+ * with no `export default` anywhere → promote it to `export default function X`.
+ *
+ * Conservative: only touches .tsx / .jsx files, only when there's exactly one
+ * exported function and no default already.
+ */
+function ensureDefaultExport(code: string, path: string): string {
+  if (!/\.(tsx|jsx)$/i.test(path)) return code;
+  if (/export\s+default\b/.test(code)) return code;
+  const matches = [...code.matchAll(/^export\s+function\s+([A-Z][A-Za-z0-9_]*)/gm)];
+  if (matches.length !== 1) return code;
+  const fnName = matches[0][1];
+  // Promote: `export function X(` → `export default function X(`
+  return code.replace(new RegExp(`^export\\s+function\\s+${fnName}\\b`, "m"), `export default function ${fnName}`);
+}
+
 /** Should this file participate in the client preview? */
 function isClientRunnable(path: string): boolean {
   const p = path.toLowerCase();
@@ -216,11 +236,12 @@ export function adaptForSandpack(projectFiles: InFile[]): AdapterResult {
     rerooted.push({ origPath: f.path, absPath: abs, content: f.content });
   }
 
-  // Second pass: rewrite imports.
+  // Second pass: rewrite imports + normalize exports.
   for (const r of rerooted) {
     const next1 = rewriteNextImports(r.content);
     const next2 = rewriteRelativeImports(next1, r.absPath);
-    out[r.absPath] = { code: next2 };
+    const next3 = ensureDefaultExport(next2, r.absPath);
+    out[r.absPath] = { code: next3 };
   }
 
   // If no App.tsx was produced (e.g. project didn't have page.tsx), synthesize

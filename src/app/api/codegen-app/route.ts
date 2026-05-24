@@ -28,10 +28,12 @@ import { rateLimit, clientIp } from "@/lib/rateLimit";
 const CODEGEN_LIMIT_PER_MIN = 6;
 const CODEGEN_WINDOW_MS = 60_000;
 
-// Default model: llama-4-scout-17b. 30K-TPM free-tier ceiling beats gpt-oss-120b
-// (8K) by 3.75×, and matches maverick. Scout is slightly faster; code quality
-// is fine for prototype clones.
-const DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+// Default model: Moonshot Kimi K2 (256B params, instruct-0905).
+// Best free-tier code generator on Groq right now — beats scout-17b /
+// maverick-17b / gpt-oss-120b on JSX validity + same-to-same product matching.
+// 60K TPM ceiling on Groq free tier (2× scout's 30K), so the two-pass plan +
+// write fan-out has more headroom too.
+const DEFAULT_MODEL = "moonshotai/kimi-k2-instruct-0905";
 
 // Per-file write call: ~2K input prompt + 3.5K output = 5.5K tokens.
 // Serial writes (parallel=1) + 2.5s sleep keeps us well under the 30K-TPM
@@ -77,9 +79,50 @@ async function groqJson(
 }
 
 /**
- * Mistral fallback — different provider, different rate-limit bucket.
- * Used automatically when Groq returns 429. mistral-small-latest is free-tier,
- * JSON-mode supported, decent code generator.
+ * Gemini 2.5 Flash fallback — Google's free-tier model, strong JSX, strong code.
+ * Different provider + different rate-limit bucket than Groq. Used as the FIRST
+ * fallback because its code quality beats Mistral-small for clone work.
+ */
+async function geminiJson(
+  prompt: string,
+  system: string,
+  maxTokens: number,
+): Promise<string> {
+  const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!key) throw new Error("no Gemini key — set GOOGLE_GENERATIVE_AI_API_KEY to enable fallback");
+  const r = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(key)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        // Gemini doesn't take a separate system role; prepend system to the user content.
+        contents: [
+          { role: "user", parts: [{ text: `${system}\n\n${prompt}` }] },
+        ],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: maxTokens,
+          responseMimeType: "application/json",
+        },
+      }),
+    },
+  );
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`gemini ${r.status}: ${errText.slice(0, 240)}`);
+  }
+  const j = (await r.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  if (!text) throw new Error("gemini: empty response");
+  return text;
+}
+
+/**
+ * Mistral fallback — last resort. Different provider, different rate-limit
+ * bucket. mistral-small-latest is free-tier, JSON-mode supported, ok code.
  */
 async function mistralJson(
   prompt: string,
@@ -114,20 +157,28 @@ async function mistralJson(
 }
 
 /**
- * Single entry point: try Groq, on 429 fall through to Mistral. Anything else
- * propagates the original error so genuine schema / network failures don't
- * silently retry against a slower provider.
+ * Single entry point: try Groq (Kimi K2), on 429 fall to Gemini 2.5 Flash,
+ * then Mistral small. Gemini beats Mistral on JSX validity + product
+ * accuracy so it's first in the fallback chain. Anything other than rate-
+ * limit propagates the original error so genuine schema failures don't
+ * silently retry against three providers.
  */
 async function llmJson(prompt: string, system: string, maxTokens: number): Promise<string> {
+  const isRate = (msg: string) => msg.includes("429") || /rate.?limit/i.test(msg) || msg.includes("Too Many Requests");
   try {
     return await groqJson(prompt, system, maxTokens);
   } catch (e) {
     const msg = (e as Error).message || "";
-    if (msg.includes("429") || /rate.?limit/i.test(msg) || msg.includes("Too Many Requests")) {
-      console.warn("[codegen] Groq 429, falling back to Mistral");
+    if (!isRate(msg)) throw e;
+    console.warn("[codegen] Groq 429, falling to Gemini");
+    try {
+      return await geminiJson(prompt, system, maxTokens);
+    } catch (e2) {
+      const msg2 = (e2 as Error).message || "";
+      if (!isRate(msg2)) throw e2;
+      console.warn("[codegen] Gemini 429, falling to Mistral");
       return await mistralJson(prompt, system, maxTokens);
     }
-    throw e;
   }
 }
 
@@ -321,6 +372,7 @@ RULES (strict):
 - SAME-TO-SAME clone. Match the real product's exact colors (hex codes from the user request), exact layout proportions, exact copy ("Prime", "Sponsored", "Reply to Claude", "Ask anything", etc.).
 - Write COMPLETE, syntactically valid code. No \`...\` ellipses, no \`// TODO\`, no \`/* implement later */\`, no \`throw new Error("not implemented")\`.
 - JSX hygiene (Sandpack will fail otherwise): EVERY JSX attribute must have an explicit value — \`alt=""\` not \`alt=\`, \`disabled={true}\` not \`disabled=\`. Map keys must be unique strings or stable ids, not duplicated values. Close every tag. No stray commas in arrays. No trailing commas after JSX attrs.
+- EXPORT RULE (Sandpack default-import resolution): every component file MUST use \`export default function ComponentName(...)\`. Sibling files import via \`import ComponentName from "./ComponentName"\` (default import). Do NOT use named exports for components. Mixing default + named breaks resolution and the preview shows "Element type is invalid: expected a string ... but got: object".
 - Real working code: actual JSX, actual handlers, actual state, actual mock data.
 - 200–600 lines is the sweet spot for a component file. README can be shorter.
 - Inline mock data should be RICH and BRAND-AUTHENTIC (10+ items). Amazon → real-product-shaped names + prices + star ratings; ChatGPT → realistic chat titles; Perplexity → real-looking source URLs with favicon emoji; Claude → conversational starter phrases.
