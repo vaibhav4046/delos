@@ -121,15 +121,15 @@ function Hero({ apps }: { apps: number }) {
           {/* Pixel headline — Pixelify Sans across the whole hero so the brand voice
              stays consistent with the OS dock, badges, and HUD type. */}
           <h1
-            className="font-pixel leading-[1.02] mb-5"
+            className="font-pixel leading-[1.1] mb-4"
             style={{
               fontWeight: 700,
-              letterSpacing: "0.005em",
-              fontSize: "clamp(34px, 6.8vw, 76px)",
+              letterSpacing: "0.01em",
+              fontSize: "clamp(22px, 3.4vw, 40px)",
             }}
           >
             The AI operating system{" "}
-            <span style={{ color: "var(--muted-2)" }}>where</span><br />
+            <span style={{ color: "var(--muted-2)" }}>where</span>{" "}
             agents{" "}
             <span style={{ color: "var(--accent)" }}>flow</span>{" "}
             under pressure.
@@ -137,9 +137,9 @@ function Hero({ apps }: { apps: number }) {
           <p
             className="font-pixel text-[color:var(--muted)] max-w-xl"
             style={{
-              fontSize: "clamp(15px, 1.6vw, 19px)",
-              lineHeight: 1.45,
-              letterSpacing: "0.01em",
+              fontSize: "clamp(12px, 1.05vw, 14px)",
+              lineHeight: 1.5,
+              letterSpacing: "0.015em",
             }}
           >
             Browser-OS where <span style={{ color: "var(--fg)" }}>memory</span>,{" "}
