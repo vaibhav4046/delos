@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DelOS · Options</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+    <style>
+      body { max-width: 560px; margin: 0 auto; padding: 20px; }
+      h1 { font-family: ui-sans-serif, system-ui; color: var(--accent); letter-spacing: 2px; font-size: 20px; }
+      label { display: block; margin: 12px 0; font-size: 11px; color: var(--muted); }
+      label > span { display: block; margin-bottom: 4px; }
+      .row { display: flex; gap: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>★ DelOS OPTIONS</h1>
+    <p class="muted small">Configure the side-panel companion. These also sync from the main app at <code>delrio.vercel.app</code> when you open it there.</p>
+
+    <label><span>Endpoint URL</span><input id="endpoint" placeholder="https://delrio.vercel.app" /></label>
+    <label><span>Tenant ID</span><input id="tenant" placeholder="e.g. me_personal_dev" /></label>
+
+    <label><span>Planner model</span><select id="planner"></select></label>
+    <label><span>Executor model</span><select id="executor"></select></label>
+    <label><span>Critic model</span><select id="critic"></select></label>
+
+    <div class="row">
+      <button id="save" class="primary">SAVE</button>
+      <button id="reset" class="ghost">RESET</button>
+    </div>
+
+    <div id="status" class="small muted" style="margin-top: 12px;"></div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

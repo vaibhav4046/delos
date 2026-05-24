@@ -1,0 +1,80 @@
+import { NextRequest } from "next/server";
+import { safeAddMemory, ensureTenant } from "@/lib/hydra";
+import { env } from "@/lib/env";
+
+export const runtime = "nodejs";
+
+const SEED_MEMORIES = [
+  {
+    text: "Run #1 — goal: 'compare graph DBs vs vector DBs for agent memory'. Planner=kimi-k2 chose 3 steps. web_search via MCP returned 9 hits. Critic drift=0.08. Final: graph DBs win for traversal-based recall.",
+    tags: ["run-summary", "research"],
+  },
+  {
+    text: "Run #2 — goal: 'build me a stopwatch'. AppBuilder generated spec via gpt-oss-120b. Validated with zod. Spec app mounted as window. 12 tools / 1240 tokens / $0.0008.",
+    tags: ["run-summary", "app-build"],
+  },
+  {
+    text: "Run #3 — chaos test: tool_flake=on + context_flood=on. Initial web_search timed out. Cockatiel retry succeeded on attempt 2. Context compressed at boundary from 8400→2100 tokens. Final answer delivered in 4.2s.",
+    tags: ["run-summary", "chaos-recovery"],
+  },
+  {
+    text: "Run #4 — cohort race: 3 models (gpt-oss-120b, llama-4-scout, gemini-2.5-flash) on 'best framework for AI agent OS'. Judge=mistral-large picked [2] gemini, score 9/10. Merged answer cites all 3 perspectives.",
+    tags: ["run-summary", "cohort"],
+  },
+  {
+    text: "Run #5 — voice command 'open builder and make me a tip calculator'. Whisper transcribed correctly. Intent classifier mapped to build_app + payload. App Builder opened, prefilled prompt, ran build. App mounted in 3.8s.",
+    tags: ["run-summary", "voice-autonomy"],
+  },
+  {
+    text: "Run #6 — user interrupt mid-stream. Original goal: 'find capital of France'. After step 1, user injected 'actually find capital of Japan'. Planner re-decomposed, executor ran new search, critic accepted drift. Delivered correct answer for Japan.",
+    tags: ["run-summary", "adaptation"],
+  },
+  {
+    text: "Run #7 — MCP tool fallback. Bundled wiki_search failed (rate limit). Sibling fallback to dad_joke MCP returned. Critic flagged irrelevance, planner replanned with hn_top instead. Recovered without user intervention.",
+    tags: ["run-summary", "tool-fallback"],
+  },
+  {
+    text: "Cohort verdict (cached) — for short factual queries, gemini-2.5-flash wins on latency (198ms avg). For multi-step reasoning, kimi-k2 wins on accuracy. Stored as routing hint for future cohort calls.",
+    tags: ["learning", "routing"],
+  },
+  {
+    text: "App spec persisted: 'Stopwatch v1' — components: start/stop/reset buttons + display. State key=elapsedMs. Can be re-mounted across sessions via HydraDB tenant.",
+    tags: ["app-spec"],
+  },
+  {
+    text: "User preference (cross-session) — tenant=delrio_demo prefers concise answers, no markdown headers, cites sources inline as [1][2]. Applied to all chat / research runs.",
+    tags: ["preference"],
+  },
+];
+
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({})) as { tenantId?: string };
+  const tenantId = body.tenantId || env.DELRIO_TENANT_ID;
+  await ensureTenant(tenantId);
+  const added: string[] = [];
+  const failed: string[] = [];
+  for (const m of SEED_MEMORIES) {
+    try {
+      await safeAddMemory({
+        tenantId,
+        text: m.text,
+        metadata: { runId: `seed-${Date.now()}`, tags: m.tags, seeded: true },
+      });
+      added.push(m.text.slice(0, 60));
+    } catch (e) {
+      failed.push((e as Error).message);
+    }
+  }
+  return Response.json({
+    ok: true,
+    tenantId,
+    seeded: added.length,
+    failed: failed.length,
+    entries: added,
+  });
+}
+
+// GET — convenience so judges can hit it from a browser
+export async function GET(req: NextRequest) {
+  return POST(req);
+}

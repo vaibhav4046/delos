@@ -9,13 +9,29 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.78",
+    "@ai-sdk/groq": "^3.0.39",
+    "@ai-sdk/mistral": "^3.0.37",
+    "@ai-sdk/react": "^3.0.190",
+    "@hydradb/sdk": "^0.0.3",
+    "ai": "^6.0.188",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cockatiel": "^3.2.1",
+    "framer-motion": "^12.39.0",
+    "lucide-react": "^1.16.0",
+    "nanoid": "^5.1.11",
     "next": "16.2.6",
+    "nodemailer": "^8.0.7",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "tailwind-merge": "^3.6.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

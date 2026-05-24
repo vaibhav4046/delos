@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "DelOS — Agents Under Pressure",
+  "short_name": "DelOS",
+  "version": "2.1.1",
+  "description": "Run multi-agent missions from any tab. Memory · Tools · Recovery · Adaptation. Voice + cohort + MCP companion to DelOS.",
+  "author": "DelOS",
+  "minimum_chrome_version": "114",
+  "action": {
+    "default_title": "Open DelOS"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:3000/*", "https://*.delrio.app/*", "https://delrio.vercel.app/*"],
+      "js": ["content-sync.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["sidePanel", "storage", "activeTab", "scripting", "contextMenus", "identity"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://*.delrio.app/*",
+    "https://delrio.vercel.app/*",
+    "https://api.hydradb.com/*"
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+D",
+        "mac": "Command+Shift+D"
+      },
+      "description": "Open DelOS side panel"
+    }
+  }
+}

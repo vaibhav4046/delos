@@ -1,26 +1,1031 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+:root,
+:root[data-theme="dark"] {
+  --bg: #0f0f1b;
+  --bg-rgb: 15, 15, 27;
+  --surface: #1b1b2e;
+  --surface-rgb: 27, 27, 46;
+  --surface-2: #232342;
+  --surface-3: #2c2c52;
+  --fg: #f4f1de;
+  --fg-rgb: 244, 241, 222;
+  --muted: #8a8aab;
+  --accent: #fbc531;
+  --accent-2: #ffdc6e;
+  --accent-shadow: #b8902a;
+  --on-accent: #1b1b2e;
+  --on-surface: #f4f1de;
+  --success: #6ab04c;
+  --success-shadow: #2e6c1e;
+  --warn: #e1a95f;
+  --warn-shadow: #7a5e2a;
+  --danger: #c0392b;
+  --danger-shadow: #7a1f15;
+  --pipe: #2ecc71;
+  --pipe-shadow: #168a3e;
+  --shadow: #0a0a14;
+  --ring: rgba(251, 197, 49, 0.45);
+  --header-bg: rgba(15, 15, 27, 0.7);
+  --header-border: var(--surface-2);
+  --overlay: rgba(15, 15, 27, 0.85);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #ece6cd;
+  --bg-rgb: 236, 230, 205;
+  --surface: #ffffff;
+  --surface-rgb: 255, 255, 255;
+  --surface-2: #d4cdb0;
+  --surface-3: #b8b08f;
+  --fg: #1b1b2e;
+  --fg-rgb: 27, 27, 46;
+  --muted: #4a4a64;
+  --accent: #a86214;
+  --accent-2: #c9791e;
+  --accent-shadow: #5a330a;
+  --on-accent: #ffffff;
+  --on-surface: #1b1b2e;
+  --success: #266a18;
+  --success-shadow: #0f3a08;
+  --warn: #8a5208;
+  --warn-shadow: #4a2806;
+  --danger: #7a1f15;
+  --danger-shadow: #3f0e08;
+  --pipe: #126633;
+  --pipe-shadow: #053418;
+  --shadow: #a8a288;
+  --ring: rgba(168, 98, 20, 0.45);
+  --header-bg: rgba(236, 230, 205, 0.85);
+  --header-border: var(--surface-2);
+  --overlay: rgba(236, 230, 205, 0.85);
+  color-scheme: light;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-pipe: var(--pipe);
+  --font-pixel: var(--font-pixel-google), system-ui, sans-serif;
+  --font-sans: var(--font-sans-google), system-ui, sans-serif;
+  --font-mono: var(--font-mono-google), ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv01";
+  transition: background 220ms cubic-bezier(0.4, 0, 0.2, 1), color 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+img[src$=".svg"] { image-rendering: pixelated; }
+
+.pixel-border {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--fg);
+}
+.pixel-border-accent {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+.btn-pixel {
+  font-family: var(--font-pixel);
+  letter-spacing: 0.04em;
+  background: var(--accent);
+  color: var(--on-accent);
+  padding: 12px 20px;
+  border: 2px solid var(--surface);
+  box-shadow: 0 4px 0 0 var(--accent-shadow);
+  transition: transform 100ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 100ms cubic-bezier(0.34, 1.56, 0.64, 1), background 120ms ease, filter 120ms ease;
+  cursor: pointer;
+  text-transform: uppercase;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  transform: translateZ(0);
+  will-change: transform;
+}
+.btn-pixel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 0 0 var(--accent-shadow);
+  background: var(--accent-2);
+}
+.btn-pixel:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 0 var(--accent-shadow);
+}
+.btn-pixel:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.btn-pixel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 4px 0 0 var(--surface-3);
+}
+.btn-pixel.ghost {
+  background: rgba(var(--surface-rgb), 0.7);
+  color: var(--fg);
+  box-shadow: 0 4px 0 0 var(--surface-2);
+  border-color: var(--fg);
+  backdrop-filter: blur(4px);
+}
+.btn-pixel.ghost:hover {
+  background: var(--surface-2);
+  box-shadow: 0 6px 0 0 var(--surface-3);
+}
+.btn-pixel.danger {
+  background: var(--danger);
+  color: #ffffff;
+  box-shadow: 0 4px 0 0 var(--danger-shadow);
+}
+.btn-pixel.danger:hover { filter: brightness(1.12); }
+.btn-pixel.success {
+  background: var(--success);
+  color: #ffffff;
+  box-shadow: 0 4px 0 0 var(--success-shadow);
+}
+.btn-pixel.success:hover { filter: brightness(1.12); }
+
+.brick {
+  background:
+    repeating-linear-gradient(0deg, transparent 0 22px, rgba(0,0,0,0.25) 22px 24px),
+    repeating-linear-gradient(90deg, transparent 0 44px, rgba(0,0,0,0.25) 44px 46px),
+    var(--accent);
+  color: var(--on-accent);
+}
+
+.scanlines { position: relative; }
+.scanlines::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0 2px, transparent 2px 4px);
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+
+@keyframes blink { 50% { opacity: 0.2; } }
+.cursor::after {
+  content: "_";
+  animation: blink 1s steps(2) infinite;
+  margin-left: 2px;
+  color: var(--accent);
+}
+
+@keyframes coin-pop {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  60% { transform: translateY(-24px) scale(1.2); opacity: 1; }
+  100% { transform: translateY(-40px) scale(0.6); opacity: 0; }
+}
+.coin-pop { animation: coin-pop 600ms steps(8) forwards; }
+
+@keyframes pipe-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.pipe-in { animation: pipe-in 220ms steps(8) forwards; }
+
+@keyframes powerup-flash {
+  0% { background-color: var(--accent); }
+  100% { background-color: transparent; }
+}
+.powerup-flash { animation: powerup-flash 800ms ease-out; }
+
+@keyframes star-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.star-spin { animation: star-spin 6s linear infinite; }
+
+.font-pixel { font-family: var(--font-pixel); }
+.font-mono { font-family: var(--font-mono); }
+
+.input-pixel {
+  background: var(--surface);
+  color: var(--fg);
+  border: 2px solid var(--muted);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  width: 100%;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.input-pixel::placeholder { color: var(--muted); opacity: 0.7; }
+.input-pixel:hover { border-color: var(--surface-3); }
+.input-pixel:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.card-pixel {
+  background: var(--surface);
+  border: 2px solid var(--surface-2);
+  box-shadow: 0 4px 0 0 var(--shadow);
+  padding: 16px;
+  transition: border-color 120ms ease, box-shadow 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translateZ(0);
+}
+.card-pixel:hover { border-color: var(--surface-3); }
+
+.pill {
+  padding: 2px 8px;
+  border: 2px solid;
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+  background: transparent;
+}
+.pill:hover { transform: translateY(-1px); }
+.pill-ok { border-color: var(--success); color: var(--success); }
+.pill-warn { border-color: var(--warn); color: var(--warn); }
+.pill-bad { border-color: var(--danger); color: var(--danger); }
+.pill-info { border-color: var(--accent); color: var(--accent); }
+.pill-muted { border-color: var(--muted); color: var(--muted); }
+
+.coin {
+  display: inline-block;
+  width: 14px; height: 14px;
+  background: var(--accent);
+  border: 2px solid var(--accent-shadow);
+  border-radius: 999px;
+  box-shadow: inset -2px -2px 0 0 var(--accent-shadow);
+}
+
+.checker-bg {
+  background-image:
+    linear-gradient(45deg, var(--surface-2) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--surface-2) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--surface-2) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--surface-2) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+}
+
+@media (max-width: 768px) {
+  .btn-pixel { padding: 10px 14px; font-size: 12px; }
+  .card-pixel { padding: 12px; }
+  .input-pixel { padding: 8px 10px; font-size: 13px; }
+  .pill { font-size: 10px; padding: 1px 6px; }
+}
+
+@media (max-width: 640px) {
+  /* Mobile-OS shell. Phone-sized devices get a single full-screen window with
+     a fixed bottom dock — mimics native mobile OS feel without rebuilding
+     architecture. Auto-maximize is also forced via JS (page.tsx forceMaximize). */
+  .btn-pixel { padding: 8px 10px; font-size: 11px; }
+  .pill { font-size: 9px; }
+  /* Touch target floor: 40px tap area on all interactive elements */
+  button, [role="button"], a.btn-pixel, .dock button {
+    min-height: 40px;
+    min-width: 40px;
   }
+  /* DelOS header — compact on mobile so vertical space goes to the active app */
+  .delos-root header {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+  .delos-root header .font-pixel {
+    font-size: 13px !important;
+  }
+  /* Hide secondary header chips on mobile to fit (counter strip handles overflow) */
+  .delos-root header .hidden.sm\:inline,
+  .delos-root header .hidden.md\:inline-flex,
+  .delos-root header .hidden.sm\:inline-flex { display: none !important; }
+  /* Dock — fixed bottom strip with horizontal scroll. Larger icons for touch. */
+  .dock {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    padding-bottom: env(safe-area-inset-bottom, 4px);
+  }
+  .dock > * {
+    scroll-snap-align: start;
+    flex-shrink: 0;
+  }
+  /* Window controls — chunkier close/min/max so finger taps land */
+  .window-pixel header button {
+    padding: 8px !important;
+  }
+  /* WelcomeMat buttons taller, easier to tap */
+  .welcome-mat .btn-pixel {
+    min-height: 48px;
+    padding: 12px 14px;
+  }
+  /* Sticky note + desktop widgets — shrink and reposition so they don't cover content */
+  .desktop-widget {
+    transform: scale(0.85);
+    transform-origin: top left;
+  }
+  /* Right-side desktop widgets (clock) hidden on phone to save space */
+  .desktop-widget--clock { display: none !important; }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Tablet — between 640 and 1024. Windows still draggable but smaller defaults. */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .dock { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
+
+.btn-pixel:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.input-pixel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb {
+  background: var(--surface-2);
+  border: 2px solid var(--surface);
+  transition: background 120ms ease;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+* {
+  scrollbar-color: var(--surface-2) var(--surface);
+  scrollbar-width: thin;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+.delos-root,
+.delos-root * {
+  cursor: url("/cursor.svg") 1 1, auto;
+}
+.delos-root a,
+.delos-root button,
+.delos-root [role="button"],
+.delos-root .pill,
+.delos-root .btn-pixel,
+.delos-root .card-pixel button,
+.delos-root .dock-btn,
+.delos-root select,
+.delos-root summary {
+  cursor: url("/cursor-pointer.svg") 7 2, pointer;
+}
+.delos-root input,
+.delos-root textarea,
+.delos-root [contenteditable="true"] {
+  cursor: url("/cursor-text.svg") 7 7, text;
+}
+.delos-root .grabbable {
+  cursor: url("/cursor-grab.svg") 8 4, grab;
+}
+.delos-root .grabbable:active {
+  cursor: url("/cursor-grab.svg") 8 4, grabbing;
+}
+html[data-cursor="classic"] .delos-root,
+html[data-cursor="classic"] .delos-root * {
+  cursor: url("/cursor-classic.svg") 1 1, auto;
+}
+html[data-cursor="neon"] .delos-root,
+html[data-cursor="neon"] .delos-root * {
+  cursor: url("/cursor-neon.svg") 1 1, auto;
+}
+html[data-cursor="system"] .delos-root,
+html[data-cursor="system"] .delos-root * {
+  cursor: auto;
+}
+html[data-cursor="system"] .delos-root a,
+html[data-cursor="system"] .delos-root button,
+html[data-cursor="system"] .delos-root [role="button"],
+html[data-cursor="system"] .delos-root .btn-pixel,
+html[data-cursor="system"] .delos-root .pill {
+  cursor: pointer;
+}
+html[data-cursor="system"] .delos-root input,
+html[data-cursor="system"] .delos-root textarea {
+  cursor: text;
+}
+
+@keyframes drift-slow {
+  0% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(8px, -6px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+.drift-slow { animation: drift-slow 14s ease-in-out infinite; }
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.6; }
+}
+.twinkle { animation: twinkle 4s ease-in-out infinite; }
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.wallpaper-animated { animation: gradient-shift 30s ease-in-out infinite; background-size: 400% 400%; }
+
+@keyframes accent-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent); }
+  50% { box-shadow: 0 0 0 4px transparent; }
+}
+.accent-pulse { animation: accent-pulse 1.6s ease-in-out infinite; }
+
+html { scroll-behavior: smooth; }
+
+.crisp { image-rendering: pixelated; }
+.crisp-svg svg { shape-rendering: crispEdges; }
+
+a {
+  color: inherit;
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+a:hover { color: var(--accent); }
+
+code, pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+input:disabled, textarea:disabled, select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Window-focus glow accent */
+.window-focused {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent), 0 8px 0 0 var(--shadow);
+}
+.window-unfocused {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--surface-2), 0 6px 0 0 var(--shadow);
+}
+
+/* Animations used by AgentPulse + dock + welcome */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulseRing {
+  0% { box-shadow: 0 0 0 0 var(--ring); }
+  70% { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.pulse-ring { animation: pulseRing 1.4s ease-out infinite; }
+@keyframes heroPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 2px var(--accent), 0 0 28px var(--ring); }
+  50% { transform: scale(1.08); box-shadow: 0 0 0 2px var(--accent), 0 0 48px var(--ring); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.float { animation: float 3.6s ease-in-out infinite; }
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.hero-bg {
+  background: linear-gradient(135deg, var(--bg) 0%, rgba(var(--surface-rgb), 0.5) 50%, var(--bg) 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 12s ease infinite;
+}
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+.scanline::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.3;
+  pointer-events: none;
+  animation: scanline 8s linear infinite;
+}
+@keyframes glitch {
+  0%, 100% { transform: translate(0); text-shadow: none; }
+  20% { transform: translate(-1px, 0); text-shadow: 1px 0 var(--danger), -1px 0 var(--accent); }
+  40% { transform: translate(1px, 0); }
+  60% { transform: translate(0, 1px); text-shadow: 0 1px var(--accent); }
+  80% { transform: translate(-1px, -1px); }
+}
+.glitch:hover { animation: glitch 0.5s linear; }
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--fg) 0%, var(--accent) 50%, var(--fg) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 4s linear infinite;
+}
+
+/* Dock icon hover bounce — falls back when JS magnify disabled */
+.dock-icon:hover {
+  filter: drop-shadow(0 0 6px var(--ring));
+}
+.dock-icon:active {
+  transform: translateY(-2px) scale(0.94) !important;
+  transition: transform 80ms ease-out !important;
+}
+
+/* ===========================
+   LOGO THEME-AWARE
+   In light mode → pure black silhouette (no scatter pixels).
+   In dark mode → original colored logo with subtle glow.
+   =========================== */
+.delos-logo {
+  transition: filter 200ms ease;
+}
+:root[data-theme="light"] .delos-logo {
+  /* Convert all SVG colors to pure black, removing chromatic scatter */
+  filter: brightness(0) saturate(100%);
+}
+:root[data-theme="dark"] .delos-logo,
+:root:not([data-theme]) .delos-logo {
+  filter: drop-shadow(0 0 4px var(--ring));
+}
+
+/* ===========================
+   WALLPAPER AUTO-CONTRAST
+   When wallpaper is light-toned (paper, mint, lavender, mac-aqua, winxp-bliss,
+   vapor-horizon) flip logo + dock overlay to dark text for readability.
+   Applied at .delos-root scope via data-wall-tone attribute.
+   =========================== */
+.delos-root[data-wall-tone="light"] .delos-logo {
+  filter: brightness(0) saturate(100%);
+}
+.delos-root[data-wall-tone="light"] .desktop-mat,
+.delos-root[data-wall-tone="light"] .topbar-text {
+  color: #111 !important;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.6);
+}
+.delos-root[data-wall-tone="light"] .wall-readable {
+  background: rgba(255, 255, 255, 0.88) !important;
+  color: #111 !important;
+}
+.delos-root[data-wall-tone="dark"] .wall-readable {
+  background: rgba(0, 0, 0, 0.55) !important;
+  color: #f4f1de !important;
+}
+
+/* ===========================
+   CRT SCANLINES (retro-futuristic OS shell)
+   Subtle horizontal scanlines + vignette tint on .delos-root for that CRT feel.
+   Tuned weak enough to stay readable in all themes.
+   =========================== */
+.delos-root::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 2px, rgba(123, 123, 153, 0.035) 2px 3px),
+    radial-gradient(ellipse at center, transparent 60%, rgba(0, 0, 0, 0.25) 100%);
+  mix-blend-mode: overlay;
+  opacity: 0.55;
+}
+.delos-root[data-wall-tone="light"]::before {
+  background:
+    repeating-linear-gradient(0deg, transparent 0 2px, rgba(15, 15, 27, 0.04) 2px 3px),
+    radial-gradient(ellipse at center, transparent 60%, rgba(255, 255, 255, 0.25) 100%);
+  opacity: 0.35;
+}
+
+/* Neon glow on accent borders */
+.neon-accent {
+  box-shadow: 0 0 12px var(--accent), 0 0 24px rgba(251, 197, 49, 0.3);
+  border-color: var(--accent) !important;
+}
+
+/* Animated terminal cursor pulse */
+@keyframes term-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+.term-cursor {
+  animation: term-blink 1s steps(1) infinite;
+}
+
+/* ===========================
+   GLASSMORPHISM
+   Frosted-glass cards layered on backgrounds.
+   =========================== */
+.glass {
+  background: rgba(var(--surface-rgb), 0.55) !important;
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(var(--fg-rgb), 0.08);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.glass-strong {
+  background: rgba(var(--surface-rgb), 0.72) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(var(--fg-rgb), 0.12);
+}
+.glass-subtle {
+  background: rgba(var(--surface-rgb), 0.4) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Glass header — replaces hard surface */
+header.glass-header {
+  background: rgba(var(--bg-rgb), 0.85) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+}
+
+/* Text legibility over busy wallpapers — apply to text rendered directly on body bg */
+.wallpaper-text-shadow {
+  text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 8px rgba(0,0,0,0.35);
+}
+
+/* Dock + windows must remain opaque enough to read against any wallpaper */
+[data-app-dock], footer.dock-glass {
+  background: rgba(var(--bg-rgb), 0.88) !important;
+  backdrop-filter: blur(14px) saturate(170%);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+}
+
+/* Window content always opaque — no wallpaper bleed-through */
+[data-window-content], .window-content-opaque {
+  background: var(--surface) !important;
+}
+
+/* ===========================
+   GOD-MODE INTERACTIONS
+   =========================== */
+
+/* Premium scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) var(--surface);
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: var(--surface); }
+*::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border: 2px solid var(--surface);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--accent-2); }
+
+/* Universal button hover lift + active press */
+.btn-pixel {
+  transition: transform 140ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 140ms, filter 140ms;
+}
+.btn-pixel:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+}
+.btn-pixel:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97);
+  transition: transform 60ms ease-out;
+}
+
+/* Card hover tilt */
+.card-pixel {
+  transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 200ms, border-color 200ms;
+}
+.card-pixel:not(.no-tilt):hover {
+  transform: translateY(-2px);
+}
+
+/* Pill bounce on appear (assign .pill-pop) */
+@keyframes pillPop {
+  0% { transform: scale(0.8); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pill-pop { animation: pillPop 280ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* Window-open spring (used by motion variants too) */
+@keyframes windowIn {
+  from { opacity: 0; transform: scale(0.85) translateY(20px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Aurora background — slow rainbow shift */
+@keyframes aurora {
+  0%, 100% { background-position: 0% 50%; }
+  33% { background-position: 100% 50%; }
+  66% { background-position: 50% 100%; }
+}
+.aurora-bg {
+  background: linear-gradient(135deg, var(--bg), rgba(var(--surface-rgb), 0.4), var(--bg), rgba(var(--surface-rgb), 0.6), var(--bg));
+  background-size: 300% 300%;
+  animation: aurora 18s ease infinite;
+}
+
+/* Screen shake */
+@keyframes shake {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-2px, -1px); }
+  20% { transform: translate(2px, 1px); }
+  30% { transform: translate(-1px, 2px); }
+  40% { transform: translate(1px, -2px); }
+  50% { transform: translate(-2px, 1px); }
+  60% { transform: translate(2px, -1px); }
+  70% { transform: translate(-1px, -2px); }
+  80% { transform: translate(1px, 2px); }
+  90% { transform: translate(-2px, -1px); }
+}
+.shake { animation: shake 280ms cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+
+/* Glow pulse for active items */
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 4px var(--ring), 0 0 8px var(--ring); }
+  50% { box-shadow: 0 0 12px var(--ring), 0 0 24px var(--ring); }
+}
+.glow-pulse { animation: glowPulse 2s ease-in-out infinite; }
+
+/* Magnetic snap — for primary CTAs */
+@keyframes magnet {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-4px) scale(1.02); }
+}
+.magnet { animation: magnet 2.4s ease-in-out infinite; }
+
+/* Type-cursor for terminal-style elements */
+.cursor::after {
+  content: "▌";
+  display: inline-block;
+  color: var(--accent);
+  animation: cursorBlink 1s infinite step-end;
+}
+@keyframes cursorBlink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Link micro-arrow on hover */
+a[href]:not(.btn-pixel):not(.pill) {
+  position: relative;
+  transition: color 140ms;
+}
+
+/* Page transition */
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+main, section {
+  animation: pageFadeIn 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Particle floating dots for ambience */
+@keyframes ambientFloat {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.3; }
+  25% { transform: translate(8px, -12px) scale(1.1); opacity: 0.6; }
+  50% { transform: translate(-8px, -20px) scale(0.95); opacity: 0.4; }
+  75% { transform: translate(4px, -8px) scale(1.05); opacity: 0.5; }
+}
+
+/* Focus ring premium */
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Smooth scroll */
+html { scroll-behavior: smooth; }
+
+/* Pulse on appear for toasts */
+@keyframes toastPop {
+  0% { transform: translateX(40px) scale(0.9); opacity: 0; }
+  60% { transform: translateX(-4px) scale(1.03); opacity: 1; }
+  100% { transform: translateX(0) scale(1); opacity: 1; }
+}
+.toast-pop { animation: toastPop 320ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* Counter increment pulse */
+@keyframes counterPulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); filter: brightness(1.3); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+.counter-pulse {
+  animation: counterPulse 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: inline-block;
+}
+
+/* App icon idle wiggle on hover */
+.icon-wiggle:hover {
+  animation: iconWiggle 0.45s ease-in-out;
+}
+@keyframes iconWiggle {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-6deg); }
+  75% { transform: rotate(6deg); }
+}
+
+/* ============================================================
+   Ultra-premium retro-futuristic polish (additive layer).
+   Targets card / btn / pill / window-title states without
+   breaking existing rules. Hover = neon glow + lift, focus =
+   accent halo, active = press-down stamp.
+   ============================================================ */
+
+/* Card lift + glow on hover. */
+.card-pixel {
+  position: relative;
+}
+.card-pixel:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 6px 0 0 var(--shadow),
+    0 0 0 1px var(--accent),
+    0 12px 32px -8px var(--ring);
+}
+
+/* Subtle scanline shimmer on premium buttons. */
+.btn-pixel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,0.08) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  transition: transform 600ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-pixel { position: relative; overflow: hidden; }
+.btn-pixel:hover::after { transform: translateX(100%); }
+
+/* Pill premium hover — neon glow ring */
+.pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px currentColor, 0 4px 12px -2px currentColor;
+}
+
+/* Window title bar — premium gradient + shimmer */
+.window-title-premium {
+  background: linear-gradient(
+    180deg,
+    var(--accent) 0%,
+    color-mix(in srgb, var(--accent) 78%, #000 22%) 100%
+  );
+  position: relative;
+  overflow: hidden;
+}
+.window-title-premium::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.04) 0px,
+    rgba(255, 255, 255, 0.04) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+}
+
+/* Accent neon halo for focused interactive widgets */
+.neon-focus:focus-visible,
+.neon-focus:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  box-shadow: 0 0 16px var(--ring), 0 0 32px -8px var(--accent);
+}
+
+/* Subtle CRT-style outline glow for top bar / dock */
+.crt-glow {
+  box-shadow:
+    inset 0 0 0 1px var(--surface-2),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
+    0 -4px 24px -8px var(--ring);
+}
+
+/* Accent ribbon hover for nav pills */
+.nav-pill-premium {
+  position: relative;
+}
+.nav-pill-premium::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  width: 0;
+  height: 2px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  transition: width 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.nav-pill-premium:hover::after { width: 60%; }
+
+/* Premium glass-header — adds subtle bottom highlight */
+.glass-header {
+  background: rgba(var(--bg-rgb), 0.78);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border-bottom: 1px solid var(--surface-2);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.03), 0 8px 24px -16px var(--ring);
+}
+
+/* Voice agent mic pulse — expanding ring while listening */
+@keyframes voicePulse {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* Reveal-up animation for sections (used with data-reveal attr) */
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+[data-reveal] {
+  animation: revealUp 480ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* ============================================================
+   Sleek premium icon polish.
+   Lucide ships strokeWidth=2 by default — looks chunky. Tighten
+   globally to 1.75 and add subtle drop-shadow + hover glow so
+   the OS feels hand-crafted, not lucide-templated.
+   ============================================================ */
+svg.lucide,
+.lucide {
+  stroke-width: 1.75 !important;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  shape-rendering: geometricPrecision;
+}
+
+/* Premium icon container — drop-shadow + subtle accent glow on hover */
+.icon-premium svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+  transition: filter 200ms ease, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.icon-premium:hover svg {
+  filter: drop-shadow(0 0 8px var(--ring)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+  transform: translateY(-1px) scale(1.04);
+}
+
+/* Sleek welcome-mat / dock icons — extra crisp, slight glow always-on */
+.dock-icon svg,
+.app-card-icon svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+  shape-rendering: geometricPrecision;
+}
+.dock-icon:hover svg {
+  filter: drop-shadow(0 0 12px var(--ring)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+/* Soft shimmer for "live" pills */
+@keyframes liveShimmer {
+  0%, 100% { box-shadow: 0 0 0 2px transparent; }
+  50% { box-shadow: 0 0 0 2px var(--ring); }
+}
+.live-shimmer { animation: liveShimmer 2.4s ease-in-out infinite; }

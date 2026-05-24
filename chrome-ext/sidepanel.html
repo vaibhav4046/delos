@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DelOS</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="hdr">
+      <div class="brand">
+        <span class="brand-mark">▮</span>
+        <span class="brand-name">DelOS</span>
+        <span class="brand-sub">v2.1</span>
+      </div>
+      <div class="hdr-right">
+        <span id="conn" class="pill pill-warn">● checking</span>
+        <button id="settingsBtn" class="iconbtn" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button data-tab="mission" class="tab on">Mission</button>
+      <button data-tab="cohort" class="tab">Cohort</button>
+      <button data-tab="voice" class="tab">Voice</button>
+      <button data-tab="memory" class="tab">Memory</button>
+    </nav>
+
+    <main class="panels">
+      <!-- MISSION -->
+      <section data-panel="mission" class="panel on">
+        <div class="row">
+          <textarea id="goal" rows="2" placeholder="give the agent a mission…"></textarea>
+        </div>
+        <div class="row tightrow">
+          <button id="grabTab" class="ghost small">⤓ Use current tab</button>
+          <button id="micBtn" class="ghost small">🎤 Voice</button>
+          <label class="check small"><input type="checkbox" id="useMcp" checked /> MCP</label>
+        </div>
+        <div class="row chaos">
+          <label><input type="checkbox" data-chaos="tool_flake" /> flake</label>
+          <label><input type="checkbox" data-chaos="tool_outage" /> outage</label>
+          <label><input type="checkbox" data-chaos="context_flood" /> flood</label>
+        </div>
+        <div class="row">
+          <button id="runBtn" class="primary">▶ RUN</button>
+          <button id="stopBtn" class="danger">■ STOP</button>
+        </div>
+        <div id="steerRow" class="row hidden">
+          <input id="steerInput" placeholder="steer running agent…" />
+          <button id="steerBtn" class="warn small">★ STEER</button>
+        </div>
+        <div class="stats" id="stats"></div>
+        <div id="log" class="log"></div>
+      </section>
+
+      <!-- COHORT -->
+      <section data-panel="cohort" class="panel">
+        <div class="row">
+          <textarea id="cohortGoal" rows="2" placeholder="ask all models at once…"></textarea>
+        </div>
+        <div class="row tightrow">
+          <span class="muted small">members:</span>
+          <select id="cohortPreset" class="small">
+            <option value="3groq">3× Groq</option>
+            <option value="mixed" selected>Mixed (Groq + Gemini + Mistral)</option>
+            <option value="fast">Fast (small models)</option>
+          </select>
+        </div>
+        <div class="row">
+          <button id="cohortBtn" class="primary">▶ RUN COHORT</button>
+        </div>
+        <div id="cohortResults" class="log"></div>
+      </section>
+
+      <!-- VOICE -->
+      <section data-panel="voice" class="panel">
+        <div class="row">
+          <button id="voiceBtn" class="primary big">🎤 HOLD TO TALK</button>
+        </div>
+        <div class="row tightrow">
+          <label class="check small"><input type="checkbox" id="voiceLoop" /> loop</label>
+          <label class="check small"><input type="checkbox" id="voiceSpeak" checked /> speak reply</label>
+          <button id="stopSpeakBtn" class="ghost small">stop voice</button>
+        </div>
+        <div id="voiceLog" class="log"></div>
+      </section>
+
+      <!-- MEMORY -->
+      <section data-panel="memory" class="panel">
+        <div class="row">
+          <input id="memQuery" placeholder="recall…" />
+          <button id="memBtn" class="primary small">RECALL</button>
+        </div>
+        <div id="memLog" class="log"></div>
+      </section>
+    </main>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settingsModal" class="modal hidden" role="dialog">
+      <div class="modal-card">
+        <div class="modal-hdr">
+          <span class="brand-name">SETTINGS</span>
+          <button id="settingsClose" class="iconbtn">×</button>
+        </div>
+        <div class="modal-body">
+          <label>Endpoint
+            <input id="cfgEndpoint" placeholder="https://delrio.vercel.app" />
+          </label>
+          <label>Tenant ID (cross-device sync)
+            <input id="cfgTenant" placeholder="me_personal_dev" />
+          </label>
+          <label>Planner model
+            <select id="cfgPlanner"></select>
+          </label>
+          <label>Executor model
+            <select id="cfgExecutor"></select>
+          </label>
+          <label>Critic model
+            <select id="cfgCritic"></select>
+          </label>
+          <div class="hint">MCP servers and shared settings auto-sync from <code>delrio.vercel.app</code> when you open the app there.</div>
+          <button id="cfgSave" class="primary">SAVE</button>
+        </div>
+      </div>
+    </div>
+
+    <footer class="ftr">
+      <span id="syncedFrom" class="muted small">not synced yet · open delrio.vercel.app/os once</span>
+    </footer>
+
+    <script src="sidepanel.js" type="module"></script>
+  </body>
+</html>

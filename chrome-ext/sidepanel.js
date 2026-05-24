@@ -1,0 +1,511 @@
+// DelOS side panel — full DelOS companion. Runs missions, cohort, memory, voice
+// from any Chrome tab. Talks to delrio.vercel.app endpoints.
+
+const MODELS = [
+  "groq:openai/gpt-oss-120b",
+  "groq:openai/gpt-oss-20b",
+  "groq:meta-llama/llama-4-scout-17b-16e-instruct",
+  "groq:meta-llama/llama-4-maverick-17b-128e-instruct",
+  "groq:moonshotai/kimi-k2-instruct-0905",
+  "mistral:mistral-large-latest",
+  "mistral:mistral-small-latest",
+  "google:gemini-2.5-flash",
+  "google:gemini-2.5-pro",
+];
+
+const DEFAULTS = {
+  endpoint: "https://delrio.vercel.app",
+  tenantId: "delrio_demo",
+  modelOverrides: {},
+  mcpServers: [],
+};
+
+const $ = (s, root = document) => root.querySelector(s);
+const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+
+const state = {
+  cfg: { ...DEFAULTS },
+  runCtrl: null,
+  runId: null,
+  voiceRec: null,
+  voiceLoop: false,
+  voiceBusy: false,
+};
+
+// ---- Storage ----
+async function loadCfg() {
+  const stored = await chrome.storage.local.get(["endpoint", "tenantId", "modelOverrides", "mcpServers", "syncedFrom"]);
+  state.cfg.endpoint = stored.endpoint || DEFAULTS.endpoint;
+  state.cfg.tenantId = stored.tenantId || "";
+  state.cfg.modelOverrides = stored.modelOverrides || {};
+  state.cfg.mcpServers = stored.mcpServers || [];
+  state.cfg.syncedFrom = stored.syncedFrom || null;
+}
+
+async function saveCfg() {
+  await chrome.storage.local.set({
+    endpoint: state.cfg.endpoint,
+    tenantId: state.cfg.tenantId,
+    modelOverrides: state.cfg.modelOverrides,
+    mcpServers: state.cfg.mcpServers,
+  });
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  let changed = false;
+  for (const k of ["endpoint", "tenantId", "modelOverrides", "mcpServers"]) {
+    if (changes[k]) {
+      state.cfg[k] = changes[k].newValue ?? state.cfg[k];
+      changed = true;
+    }
+  }
+  if (changed) {
+    renderSettings();
+    refreshConn();
+    if (changes.tenantId || changes.mcpServers) {
+      $("#syncedFrom").textContent = `synced from main app · ${new Date().toLocaleTimeString()}`;
+    }
+  }
+});
+
+// ---- Connection check ----
+async function refreshConn() {
+  const pill = $("#conn");
+  pill.className = "pill pill-warn";
+  pill.textContent = "● checking";
+  try {
+    const r = await fetch(`${state.cfg.endpoint}/api/mcp/demo`, { method: "GET" });
+    if (r.ok) {
+      pill.className = "pill pill-ok";
+      pill.textContent = "● connected";
+    } else {
+      pill.className = "pill pill-bad";
+      pill.textContent = `● ${r.status}`;
+    }
+  } catch (e) {
+    pill.className = "pill pill-bad";
+    pill.textContent = "● offline";
+  }
+}
+
+// ---- Tab switching ----
+$$(".tab").forEach((t) =>
+  t.addEventListener("click", () => {
+    $$(".tab").forEach((x) => x.classList.remove("on"));
+    $$(".panel").forEach((x) => x.classList.remove("on"));
+    t.classList.add("on");
+    $(`[data-panel="${t.dataset.tab}"]`).classList.add("on");
+  }),
+);
+
+// ---- Settings modal ----
+function renderSettings() {
+  $("#cfgEndpoint").value = state.cfg.endpoint;
+  $("#cfgTenant").value = state.cfg.tenantId || "";
+  for (const role of ["planner", "executor", "critic"]) {
+    const sel = $(`#cfg${role.charAt(0).toUpperCase() + role.slice(1)}`);
+    sel.innerHTML = '<option value="">(default)</option>' + MODELS.map((m) => `<option value="${m}">${m}</option>`).join("");
+    sel.value = state.cfg.modelOverrides[role] || "";
+  }
+}
+$("#settingsBtn").addEventListener("click", () => $("#settingsModal").classList.remove("hidden"));
+$("#settingsClose").addEventListener("click", () => $("#settingsModal").classList.add("hidden"));
+$("#cfgSave").addEventListener("click", async () => {
+  state.cfg.endpoint = $("#cfgEndpoint").value.trim() || DEFAULTS.endpoint;
+  state.cfg.tenantId = $("#cfgTenant").value.trim();
+  const ov = {};
+  for (const role of ["planner", "executor", "critic"]) {
+    const v = $(`#cfg${role.charAt(0).toUpperCase() + role.slice(1)}`).value;
+    if (v) ov[role] = v;
+  }
+  state.cfg.modelOverrides = ov;
+  await saveCfg();
+  $("#settingsModal").classList.add("hidden");
+  refreshConn();
+});
+
+// ---- Helpers ----
+function tag(cls, label) {
+  return `<span class="tag ${cls}">${label}</span>`;
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function appendLog(targetId, html) {
+  const el = $(`#${targetId}`);
+  if (el.firstChild?.classList?.contains("empty")) el.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "line";
+  div.innerHTML = html;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+function setStats(s) {
+  const el = $("#stats");
+  el.innerHTML = ["tok in", "tok out", "calls", "ms"]
+    .map((k, i) => `<div class="stat"><div class="v">${s[i] ?? 0}</div><div class="k">${k}</div></div>`)
+    .join("") + `<div class="stat"><div class="v">${s[4] ?? "·"}</div><div class="k">cost</div></div>`;
+}
+
+function renderEvent(ev) {
+  const t = ((ev.at - state.runBase) / 1000).toFixed(2) + "s";
+  const muted = (text) => `<span class="muted">${esc(text)}</span>`;
+  switch (ev.t) {
+    case "meta":
+      state.runId = ev.runId;
+      return `${muted(t)} ${tag("info", "meta")} runId=${ev.runId}`;
+    case "phase":
+      return `${muted(t)} ${tag("info", ev.phase)} ${esc(ev.note ?? "")}`;
+    case "thought":
+      return `${muted(t)} ${tag("muted", ev.agent)} ${esc(ev.text)}`;
+    case "tool_call":
+      return `${muted(t)} ${tag("info", "→")} ${esc(ev.name)} ${muted(JSON.stringify(ev.args).slice(0, 80))}`;
+    case "tool_result":
+      return `${muted(t)} ${tag(ev.ok ? "ok" : "bad", ev.ok ? "✓" : "✗")} ${esc(ev.name)} ${muted(ev.ok ? JSON.stringify(ev.result).slice(0, 80) : ev.error)}`;
+    case "recover":
+      return `${muted(t)} ${tag("ok", "1-UP")} ${esc(ev.strategy)} ${muted("— " + ev.reason)}`;
+    case "adapt":
+      return `${muted(t)} ${tag("warn", "WARP")} ${esc(ev.reason)}`;
+    case "subagent":
+      return `${muted(t)} ${tag(ev.status === "done" ? "ok" : ev.status === "fail" ? "bad" : "warn", "sub " + ev.status)} ${esc(ev.result ?? ev.goal.slice(0, 60))}`;
+    case "memory_write":
+      return `${muted(t)} ${tag("info", "★ save")} ${esc(ev.preview)}`;
+    case "memory_recall":
+      return `${muted(t)} ${tag("info", "recall")} ${ev.hits} hits`;
+    case "usage":
+      return `${muted(t)} ${tag("muted", "llm")} <b>${esc(ev.role)}</b> ${muted(ev.model)} ${ev.promptTokens}→${ev.completionTokens}t ${muted(ev.ms + "ms")}`;
+    case "metric":
+      return `${muted(t)} ${tag("muted", "m")} ${esc(ev.key)}=${ev.value}`;
+    case "answer":
+      return `<div class="answer">${tag("info", "answer")} ${esc(ev.text)}</div>`;
+    case "error":
+      return `${muted(t)} ${tag("bad", "ERR")} ${esc(ev.message)}`;
+  }
+  return "";
+}
+
+// ---- Mission run ----
+const runStats = { pin: 0, pout: 0, calls: 0, llmMs: 0 };
+
+$("#runBtn").addEventListener("click", run);
+$("#stopBtn").addEventListener("click", () => state.runCtrl?.abort());
+$("#steerBtn").addEventListener("click", sendSteer);
+$("#grabTab").addEventListener("click", grabTabContext);
+$("#micBtn").addEventListener("click", () => toggleSttIntoGoal());
+
+async function grabTabContext() {
+  try {
+    chrome.runtime.sendMessage({ kind: "delrio-grab-tab" }, (res) => {
+      if (!res || res.error) {
+        appendLog("log", `${tag("bad", "tab")} ${esc(res?.error || "no data")}`);
+        return;
+      }
+      const ctx = res.data;
+      $("#goal").value = `Based on this page (${ctx.url}):\n${ctx.text.slice(0, 800)}\n\n${$("#goal").value || "summarize in 3 bullets."}`;
+    });
+  } catch (e) {
+    appendLog("log", `${tag("bad", "tab")} ${esc(e.message)}`);
+  }
+}
+
+async function run() {
+  state.runCtrl?.abort();
+  const ctrl = new AbortController();
+  state.runCtrl = ctrl;
+  state.runId = null;
+  state.runBase = Date.now();
+  runStats.pin = 0; runStats.pout = 0; runStats.calls = 0; runStats.llmMs = 0;
+  setStats([0, 0, 0, 0, "$0"]);
+  $("#log").innerHTML = "";
+  $("#steerRow").classList.remove("hidden");
+
+  const chaos = $$("input[data-chaos]").filter((c) => c.checked).map((c) => c.dataset.chaos);
+  const useMcp = $("#useMcp").checked;
+  const body = {
+    goal: $("#goal").value.trim(),
+    chaos,
+    maxSteps: 5,
+    models: state.cfg.modelOverrides,
+    tenantId: state.cfg.tenantId || undefined,
+    mcpServers: useMcp ? state.cfg.mcpServers.map((s) => ({ ...s, url: rewriteUrl(s.url) })) : [],
+  };
+  if (!body.goal) {
+    appendLog("log", `${tag("bad", "ERR")} goal required`);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${state.cfg.endpoint}/api/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.body) throw new Error("no stream");
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop() ?? "";
+      for (const p of parts) {
+        const line = p.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        try {
+          const ev = JSON.parse(line.slice(6));
+          appendLog("log", renderEvent(ev));
+          if (ev.t === "usage") {
+            runStats.pin += ev.promptTokens;
+            runStats.pout += ev.completionTokens;
+            runStats.calls += 1;
+            runStats.llmMs += ev.ms;
+            setStats([runStats.pin, runStats.pout, runStats.calls, runStats.llmMs, "·"]);
+          }
+          if (ev.t === "answer") {
+            if ($("#voiceSpeak")?.checked && state.activeTab === "voice") speakText(ev.text);
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") appendLog("log", `${tag("bad", "ERR")} ${esc(e.message)}`);
+  } finally {
+    $("#steerRow").classList.add("hidden");
+  }
+}
+
+async function sendSteer() {
+  if (!state.runId) return;
+  const v = $("#steerInput").value.trim();
+  if (!v) return;
+  try {
+    await fetch(`${state.cfg.endpoint}/api/steer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: state.runId, instruction: v }),
+    });
+    $("#steerInput").value = "";
+  } catch (e) {
+    appendLog("log", `${tag("bad", "steer")} ${esc(e.message)}`);
+  }
+}
+
+function rewriteUrl(u) {
+  // If MCP server is registered with relative path, point at extension endpoint
+  if (u?.startsWith("/")) return `${state.cfg.endpoint}${u}`;
+  return u;
+}
+
+// ---- Cohort ----
+$("#cohortBtn").addEventListener("click", runCohort);
+
+async function runCohort() {
+  $("#cohortResults").innerHTML = "";
+  const preset = $("#cohortPreset").value;
+  let members;
+  if (preset === "3groq") members = ["groq:openai/gpt-oss-120b", "groq:openai/gpt-oss-20b", "groq:meta-llama/llama-4-maverick-17b-128e-instruct"];
+  else if (preset === "fast") members = ["groq:openai/gpt-oss-20b", "mistral:mistral-small-latest", "google:gemini-2.5-flash"];
+  else members = ["groq:openai/gpt-oss-120b", "google:gemini-2.5-flash", "mistral:mistral-large-latest"];
+
+  const goal = $("#cohortGoal").value.trim();
+  if (!goal) {
+    appendLog("cohortResults", `${tag("bad", "ERR")} goal required`);
+    return;
+  }
+  appendLog("cohortResults", `${tag("info", "cohort")} ${members.length} members`);
+  try {
+    const res = await fetch(`${state.cfg.endpoint}/api/cohort`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goal, members }),
+    });
+    if (!res.body) throw new Error("no stream");
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop() ?? "";
+      for (const p of parts) {
+        const line = p.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        try {
+          const ev = JSON.parse(line.slice(6));
+          if (ev.t === "cohort_member") {
+            const label = ev.model.split(":").pop();
+            if (ev.status === "spawn") appendLog("cohortResults", `${tag("warn", "spawn")} [${ev.index}] ${esc(label)}`);
+            else if (ev.status === "done") appendLog("cohortResults", `${tag("ok", `[${ev.index}]`)} ${esc(label)} ${tag("muted", ev.ms + "ms")} <div class="muted">${esc(ev.text)}</div>`);
+            else if (ev.status === "fail") appendLog("cohortResults", `${tag("bad", `[${ev.index}]`)} ${esc(label)} err: ${esc(ev.error)}`);
+          } else if (ev.t === "cohort_verdict") {
+            const scores = (ev.scores || []).map((s) => `[${s.index}]${s.score}`).join(" ");
+            appendLog("cohortResults", `<div class="answer">${tag("info", "JUDGE")} winner [${ev.winnerIndex}] · ${esc(scores)}<br>${tag("info", "merged")}<br>${esc(ev.merged)}</div>`);
+          } else if (ev.t === "error") {
+            appendLog("cohortResults", `${tag("bad", "ERR")} ${esc(ev.message)}`);
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    appendLog("cohortResults", `${tag("bad", "ERR")} ${esc(e.message)}`);
+  }
+}
+
+// ---- Voice ----
+function getSttCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition;
+}
+
+function speakText(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  window.speechSynthesis.speak(u);
+}
+
+function toggleSttIntoGoal() {
+  const Ctor = getSttCtor();
+  if (!Ctor) {
+    appendLog("log", `${tag("bad", "voice")} SpeechRecognition unsupported`);
+    return;
+  }
+  if (state.miniRec) {
+    state.miniRec.stop();
+    state.miniRec = null;
+    return;
+  }
+  const rec = new Ctor();
+  rec.lang = "en-US";
+  rec.interimResults = true;
+  rec.continuous = false;
+  rec.onresult = (e) => {
+    let final = "", interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    if (final) $("#goal").value = ($("#goal").value + " " + final).trim();
+  };
+  rec.onend = () => { state.miniRec = null; };
+  rec.onerror = () => { state.miniRec = null; };
+  rec.start();
+  state.miniRec = rec;
+}
+
+$("#voiceBtn").addEventListener("click", voiceTurn);
+$("#stopSpeakBtn").addEventListener("click", () => window.speechSynthesis?.cancel());
+
+async function voiceTurn() {
+  const Ctor = getSttCtor();
+  if (!Ctor) {
+    appendLog("voiceLog", `${tag("bad", "voice")} unsupported`);
+    return;
+  }
+  if (state.voiceRec) {
+    state.voiceRec.stop();
+    return;
+  }
+  state.voiceLoop = $("#voiceLoop").checked;
+  const rec = new Ctor();
+  rec.lang = "en-US";
+  rec.interimResults = true;
+  rec.continuous = false;
+  let live = "", finalText = "";
+  appendLog("voiceLog", `${tag("warn", "LIVE")} listening…`);
+  rec.onresult = (e) => {
+    finalText = "";
+    live = "";
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+      else live += e.results[i][0].transcript;
+    }
+  };
+  rec.onend = async () => {
+    state.voiceRec = null;
+    $("#voiceBtn").textContent = "🎤 HOLD TO TALK";
+    const text = (finalText || live).trim();
+    if (!text) {
+      appendLog("voiceLog", `${tag("muted", "·")} no speech`);
+      return;
+    }
+    appendLog("voiceLog", `<b>YOU</b> ${esc(text)}`);
+    state.voiceBusy = true;
+    try {
+      const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text, models: state.cfg.modelOverrides, tenantId: state.cfg.tenantId || undefined }),
+      });
+      const j = await r.json();
+      const reply = j.text || `err: ${j.error || "unknown"}`;
+      appendLog("voiceLog", `<b style="color:var(--accent)">AGENT</b> ${esc(reply)}`);
+      if ($("#voiceSpeak").checked) speakText(reply);
+      if (state.voiceLoop) setTimeout(voiceTurn, 600);
+    } catch (e) {
+      appendLog("voiceLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+    } finally {
+      state.voiceBusy = false;
+    }
+  };
+  rec.onerror = (e) => {
+    appendLog("voiceLog", `${tag("bad", "voice")} ${esc(e.error || "error")}`);
+    state.voiceRec = null;
+    $("#voiceBtn").textContent = "🎤 HOLD TO TALK";
+  };
+  rec.start();
+  state.voiceRec = rec;
+  $("#voiceBtn").textContent = "■ STOP";
+}
+
+// ---- Memory ----
+$("#memBtn").addEventListener("click", recallMem);
+
+async function recallMem() {
+  const q = $("#memQuery").value.trim() || "recent agent runs";
+  $("#memLog").innerHTML = "";
+  try {
+    const url = `${state.cfg.endpoint}/api/memory?q=${encodeURIComponent(q)}${state.cfg.tenantId ? `&tenantId=${encodeURIComponent(state.cfg.tenantId)}` : ""}&topK=12`;
+    const r = await fetch(url);
+    const j = await r.json();
+    if (j.hits?.length === 0 && j.local?.length === 0) {
+      appendLog("memLog", `<span class="empty">no matches</span>`);
+      return;
+    }
+    for (const h of j.hits || []) {
+      appendLog("memLog", `${tag("info", "hit")} ${tag("muted", "s=" + (h.score?.toFixed(2) ?? "?"))} ${esc(h.text)}`);
+    }
+    for (const m of j.local || []) {
+      const tags = (m.tags || []).map((t) => tag("muted", t)).join("");
+      appendLog("memLog", `${tag("warn", "local")} ${tags} ${esc(m.text)}`);
+    }
+  } catch (e) {
+    appendLog("memLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+  }
+}
+
+// ---- Track active tab ----
+$$(".tab").forEach((t) => t.addEventListener("click", () => { state.activeTab = t.dataset.tab; }));
+state.activeTab = "mission";
+
+// ---- Bootstrap ----
+(async function init() {
+  await loadCfg();
+  renderSettings();
+  refreshConn();
+  const stored = await chrome.storage.local.get("pendingGoal");
+  if (stored.pendingGoal) {
+    $("#goal").value = stored.pendingGoal;
+    await chrome.storage.local.remove("pendingGoal");
+  }
+  $("#log").innerHTML = '<div class="empty">terminal ready <span class="cursor"></span></div>';
+  $("#cohortResults").innerHTML = '<div class="empty">no cohort run yet</div>';
+  $("#voiceLog").innerHTML = '<div class="empty">tap mic and speak</div>';
+  $("#memLog").innerHTML = '<div class="empty">search saved runs</div>';
+  setInterval(refreshConn, 15000);
+})();

@@ -1,0 +1,21 @@
+{
+  "name": "Del Rio — Agents Under Pressure",
+  "short_name": "DelOS",
+  "description": "Browser-OS where multi-agent orchestration is wired in by default — memory, tools, recovery, adaptation. Agents build the apps live.",
+  "start_url": "/os",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f0f1b",
+  "theme_color": "#fbc531",
+  "orientation": "any",
+  "categories": ["productivity", "utilities", "developer"],
+  "icons": [
+    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" },
+    { "src": "/logo.svg", "type": "image/svg+xml", "sizes": "512x512", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Launch DelOS", "url": "/os", "icons": [{ "src": "/icon.svg", "sizes": "any" }] },
+    { "name": "Chaos Demo", "url": "/play", "icons": [{ "src": "/icon.svg", "sizes": "any" }] },
+    { "name": "Live Feed", "url": "/live", "icons": [{ "src": "/icon.svg", "sizes": "any" }] }
+  ]
+}
