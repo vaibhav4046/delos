@@ -15,6 +15,11 @@ const PROBE_URLS: Record<ProviderId, string> = {
   anthropic: "https://api.anthropic.com/v1/models",
   together: "https://api.together.xyz/v1/models",
   openrouter: "https://openrouter.ai/api/v1/models",
+  // OpenAI-compatible endpoints — Bearer auth + /v1/models GET works on all.
+  cerebras: "https://api.cerebras.ai/v1/models",
+  deepinfra: "https://api.deepinfra.com/v1/openai/models",
+  hyperbolic: "https://api.hyperbolic.xyz/v1/models",
+  fireworks: "https://api.fireworks.ai/inference/v1/models",
 };
 
 function authHeader(provider: ProviderId, key: string): Record<string, string> {

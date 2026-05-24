@@ -9,10 +9,25 @@
 import { encryptBag, decryptBag } from "@/lib/cryptoBag";
 import { safeAddMemory, safeRecall } from "@/lib/hydra";
 
-export type ProviderId = "groq" | "mistral" | "gemini" | "openai" | "anthropic" | "together" | "openrouter";
+export type ProviderId =
+  | "groq"        // 30K TPM free tier · gpt-oss / llama-4 / kimi-k2
+  | "mistral"     // 1M tokens/month free · mistral-large/small
+  | "gemini"      // 1M tokens/day free · 2.5-flash / 2.5-pro
+  | "openai"      // BYOK · no platform free tier
+  | "anthropic"   // BYOK · no platform free tier
+  | "together"    // $5 free credit · 60+ open models
+  | "openrouter"  // $1 free credit · 100+ models routed
+  | "cerebras"    // 8K req/min free · llama-3.3-70b at ~1500 tok/s
+  | "deepinfra"   // $0.50 free · qwen, llama, mistral hosts
+  | "hyperbolic"  // $1 free credit · llama-3.1 / qwen
+  | "fireworks";  // $1 free credit · firefunction / mixtral
 export type RoleId = "planner" | "executor" | "critic" | "voice" | "image";
 
-export const PROVIDERS: ProviderId[] = ["groq", "mistral", "gemini", "openai", "anthropic", "together", "openrouter"];
+export const PROVIDERS: ProviderId[] = [
+  "groq", "mistral", "gemini", "cerebras",
+  "openai", "anthropic", "together", "openrouter",
+  "deepinfra", "hyperbolic", "fireworks",
+];
 export const ROLES: RoleId[] = ["planner", "executor", "critic", "voice", "image"];
 
 export type KeyBagEntry = {
