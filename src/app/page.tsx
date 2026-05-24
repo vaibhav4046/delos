@@ -54,9 +54,9 @@ const faqs = [
 export default async function Home() {
   const stats = await getSiteStats();
   return (
-    <div className="min-h-screen relative">
+    <div className="min-h-screen relative overflow-x-hidden">
       <Header />
-      <main role="main" aria-label="DelOS landing">
+      <main role="main" aria-label="DelOS landing" className="overflow-x-hidden">
         <Hero apps={stats.apps} />
         <StatBar stats={stats} />
         <Pillars />
@@ -232,11 +232,13 @@ function StatBar({ stats }: { stats: SiteStats }) {
       className="border-y-2 py-6 sm:py-8"
       style={{ background: "var(--surface)", borderColor: "var(--surface-2)" }}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 grid grid-cols-5 gap-2 sm:gap-4">
+      {/* 5-col was overflowing 390px viewports — 2 / 3 / 5 staircase keeps */}
+      {/* every stat tile readable + the page total width under viewport. */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-3 sm:gap-4 overflow-hidden">
         {row.map((s) => (
-          <div key={s.k} className="text-center">
-            <div className="font-pixel text-2xl sm:text-4xl" style={{ color: "var(--accent)" }}>{s.v}</div>
-            <div className="text-[9px] sm:text-xs text-[color:var(--muted)] uppercase tracking-wider mt-1">{s.k}</div>
+          <div key={s.k} className="text-center min-w-0">
+            <div className="font-pixel text-xl sm:text-3xl md:text-4xl truncate" style={{ color: "var(--accent)" }}>{s.v}</div>
+            <div className="text-[9px] sm:text-xs text-[color:var(--muted)] uppercase tracking-wider mt-1 truncate">{s.k}</div>
           </div>
         ))}
       </div>

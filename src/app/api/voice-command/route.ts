@@ -3,10 +3,14 @@ import { z } from "zod";
 import { generateJson } from "@/lib/agents/jsonGen";
 import { models, withModels, type ModelOverrides, type ModelKey } from "@/lib/llm";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
+import { parseVoiceLocal } from "@/lib/voiceParser";
 
 import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
-export const maxDuration = 15;
+// Total budget is short · the deterministic parser handles 90%+ of intents in
+// microseconds, LLM only fires on novel asks, and we hard-cap that branch at
+// 8s internally (see Promise.race below) so Vercel's maxDuration is never hit.
+export const maxDuration = 10;
 
 // Voice command is LLM-backed; uncapped traffic is a Groq-token wallet attack.
 // 40/min per IP comfortably exceeds any human cadence and bounds wallet burn.
@@ -74,6 +78,21 @@ export async function POST(req: NextRequest) {
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return zodErr(parsed.error);
+
+  const transcript = parsed.data.transcript ?? parsed.data.text!;
+
+  // ─── Fast path · deterministic regex parser ──────────────────────────────
+  // Covers ~90% of voice intents (open / build / cohort / math / greetings /
+  // close / wallpaper / navigate / recall / mission) with zero LLM cost. If
+  // the LLM fails, this still keeps voice usable. Bypass with ?force_llm=1.
+  const url = new URL(req.url);
+  const forceLLM = url.searchParams.get("force_llm") === "1";
+  if (!forceLLM) {
+    const local = parseVoiceLocal(transcript);
+    if (local) {
+      return Response.json({ ...local, source: "local" });
+    }
+  }
 
   const overrides: ModelOverrides | undefined = parsed.data.models
     ? Object.fromEntries(Object.entries(parsed.data.models).filter(([, v]) => v) as Array<[string, ModelKey]>)
@@ -160,13 +179,16 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
         temperature: 0.1,
       }),
     );
+    // Hard 8s timeout — well under route's 10s maxDuration so we always
+    // return JSON, not Vercel's HTML 504 page. The deterministic parser
+    // above already covers the common path; this is best-effort for novel.
     const obj = await Promise.race([
       llmCall,
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("voice_command_timeout")), 11_000),
+        setTimeout(() => reject(new Error("voice_command_timeout")), 8_000),
       ),
     ]);
-    return Response.json(obj);
+    return Response.json({ ...(obj as object), source: "llm" });
   } catch (e) {
     // Voice mis-classification should NEVER 500 the client — the mic loop
     // depends on a sane fallback every time. Always return a 200 with an

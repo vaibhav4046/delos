@@ -94,14 +94,15 @@ function sanitizeProviderError(msg: string): string {
   s = s.replace(/https?:\/\/console\.[^\s)\]]+/gi, "<upgrade-url>");
   s = s.replace(/in organization `[^`]*`/gi, "");
   s = s.replace(/service tier `[^`]*`/gi, "");
-  // Re-extract the human-relevant signal: rate-limit / timeout / 4xx / 5xx
-  if (/rate.limit|TPD|TPM|RPM/i.test(s)) {
-    const wait = s.match(/try again in (\d+m?\d*\.?\d*s?)/i);
-    return `rate_limited${wait ? ` · retry in ${wait[1]}` : ""}`;
-  }
-  if (/timeout/i.test(s)) return "timeout";
-  if (/401|403|forbidden|unauthorized/i.test(s)) return "auth_failed";
+  // Re-extract the human-relevant signal · NEVER leak the upstream retry-
+  // window, model name, or token counts. Just a stable enum the UI can map.
+  if (/rate.limit|TPD|TPM|RPM|quota/i.test(s)) return "rate_limited";
+  if (/timeout|aborted/i.test(s)) return "timeout";
+  if (/401|403|forbidden|unauthorized|invalid.api/i.test(s)) return "auth_failed";
   if (/5\d\d|service.unavailable|bad.gateway/i.test(s)) return "upstream_5xx";
-  // Final fallback — keep first 120 chars, strip remaining URLs.
-  return s.replace(/https?:\/\/\S+/g, "<url>").slice(0, 120);
+  if (/network|fetch|ENOTFOUND|ECONNREFUSED/i.test(s)) return "network_error";
+  // Last-resort fallback · short enough that no internals leak.
+  return "upstream_error";
 }
+
+export { sanitizeProviderError };
