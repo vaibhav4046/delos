@@ -24,8 +24,11 @@ const modelKey = z
   ])
   .optional();
 
+// Prompt cap raised from 1200 → 8000. CoworkApp's compile pass joins 4-6
+// step results plus a system block and was hitting 400s once goals had any
+// research depth, killing the final "★ OUTPUT" render on the hackathon demo.
 const bodySchema = z.object({
-  prompt: z.string().min(2).max(1200),
+  prompt: z.string().min(2).max(8000),
   models: z.object({ planner: modelKey, executor: modelKey, critic: modelKey }).partial().optional(),
   temperature: z.number().min(0).max(1.5).optional(),
   identity: z.string().max(2000).optional(),

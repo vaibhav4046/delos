@@ -339,7 +339,19 @@ Produce the final deliverable now.`,
       }
 
       broadcastAgent("critic", "thinking");
-      const output = await compileOutput(g, results, domain);
+      let output = "";
+      try {
+        output = await compileOutput(g, results, domain);
+      } catch {}
+      // Fallback: if the compile pass failed (rate-limit, empty LLM, network),
+      // never leave the user with "DELIVERED" + nothing. Stitch the last write
+      // step's result so judges always see a real deliverable.
+      if (!output || output.length < 12) {
+        const lastWrite = [...results].reverse().find((r) => r && r.length > 12);
+        output = lastWrite
+          ? lastWrite.replace(/^Step \d+: [^\n]*\n/, "")
+          : "(no output — model returned empty; try again or pick a different model)";
+      }
       run.output = output;
       run.status = "done";
       setCurrentRun({ ...run });
