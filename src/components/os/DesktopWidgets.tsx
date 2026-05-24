@@ -312,6 +312,35 @@ function WeatherWidget() {
   const [err, setErr] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cityInput, setCityInput] = useState("");
+  const [requestingGps, setRequestingGps] = useState(false);
+
+  // Explicit GPS request — when IP geo lands the user in the wrong city
+  // (VPN, ISP routing, etc.), they hit this to force a permission prompt.
+  async function requestGps() {
+    if (!("geolocation" in navigator)) return;
+    setRequestingGps(true);
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          timeout: 12000,
+          enableHighAccuracy: true,
+        });
+      });
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const rg = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&count=1`).then((r) => r.json()).catch(() => null);
+      const loc: WeatherLoc = { lat, lon, city: rg?.results?.[0]?.name ?? "Current location", source: "gps" };
+      saveCachedLoc(loc);
+      const w = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code`);
+      const j = await w.json();
+      setData({ tempC: j.current.temperature_2m, code: j.current.weather_code, city: loc.city, source: "gps" });
+      setErr(false);
+    } catch {
+      setErr(true);
+    } finally {
+      setRequestingGps(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -392,6 +421,23 @@ function WeatherWidget() {
         <span className="font-pixel" style={{ color: "var(--fg)", fontSize: 18, lineHeight: 1 }}>
           {data ? `${Math.round(data.tempC)}°C` : err ? "—" : "…"}
         </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); requestGps(); }}
+          disabled={requestingGps}
+          title="Use my real GPS location"
+          aria-label="Use GPS"
+          style={{
+            background: "transparent",
+            border: "1px solid var(--surface-2)",
+            color: data?.source === "gps" ? "var(--success)" : "var(--accent)",
+            cursor: "pointer",
+            fontSize: 11,
+            padding: "1px 5px",
+            lineHeight: 1,
+          }}
+        >
+          {requestingGps ? "…" : "🎯"}
+        </button>
       </div>
       {editing ? (
         <input
@@ -422,18 +468,24 @@ function WeatherWidget() {
           style={{
             background: "transparent",
             border: "none",
-            color: "var(--muted)",
+            borderBottom: "1px dashed var(--surface-2)",
+            color: data?.source === "ip" ? "var(--warn)" : "var(--muted)",
             fontSize: 9,
             letterSpacing: "0.08em",
             cursor: "pointer",
           }}
-          title="Double-click to change city"
+          title="Click to type your city — overrides IP geolocation"
         >
           {data?.city ?? (err ? "offline" : "locating…")}
           {sourceTag && (
-            <span style={{ marginLeft: 4, color: "var(--accent)", fontSize: 8 }}>· {sourceTag}</span>
+            <span style={{ marginLeft: 4, color: data?.source === "ip" ? "var(--warn)" : "var(--accent)", fontSize: 8 }}>· {sourceTag}</span>
           )}
         </button>
+      )}
+      {data?.source === "ip" && !editing && (
+        <div className="font-mono mt-1" style={{ fontSize: 8, color: "var(--muted)", lineHeight: 1.3 }}>
+          wrong city? tap 🎯 for GPS<br/>or click name to type
+        </div>
       )}
     </div>
   );
