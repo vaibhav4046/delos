@@ -55,7 +55,11 @@ export async function generateJson<T>(args: {
       }
       text = result.text;
     } catch (e) {
-      lastErr = (e as Error).message;
+      // Sanitize upstream provider errors before propagating — Groq + others
+      // leak org IDs, billing URLs, and rate-limit internals. Compress to a
+      // short reason code per common case so the QA-surfaced "information
+      // disclosure" finding is closed.
+      lastErr = sanitizeProviderError((e as Error).message);
       continue;
     }
     const json = extractJson(text);
@@ -79,4 +83,25 @@ export async function generateJson<T>(args: {
   }
   // User-facing message. Keep concise — Terminal / Builder render this directly.
   throw new Error(`Model returned malformed output after ${attempts} attempts (${lastErr}). Retry or switch model in Settings.`);
+}
+
+// Strip org IDs, billing URLs, internal request IDs from provider error
+// messages so DelOS responses never leak upstream-provider account info.
+function sanitizeProviderError(msg: string): string {
+  let s = String(msg || "");
+  s = s.replace(/org_[a-z0-9]{20,}/gi, "<org>");
+  s = s.replace(/req_[a-z0-9_]{8,}/gi, "<req>");
+  s = s.replace(/https?:\/\/console\.[^\s)\]]+/gi, "<upgrade-url>");
+  s = s.replace(/in organization `[^`]*`/gi, "");
+  s = s.replace(/service tier `[^`]*`/gi, "");
+  // Re-extract the human-relevant signal: rate-limit / timeout / 4xx / 5xx
+  if (/rate.limit|TPD|TPM|RPM/i.test(s)) {
+    const wait = s.match(/try again in (\d+m?\d*\.?\d*s?)/i);
+    return `rate_limited${wait ? ` · retry in ${wait[1]}` : ""}`;
+  }
+  if (/timeout/i.test(s)) return "timeout";
+  if (/401|403|forbidden|unauthorized/i.test(s)) return "auth_failed";
+  if (/5\d\d|service.unavailable|bad.gateway/i.test(s)) return "upstream_5xx";
+  // Final fallback — keep first 120 chars, strip remaining URLs.
+  return s.replace(/https?:\/\/\S+/g, "<url>").slice(0, 120);
 }

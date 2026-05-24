@@ -70,11 +70,20 @@ function localMatch(t: string): { intent: IntentName; params?: Record<string, un
   // Mission / build
   m = s.match(/^(run|start) mission (.+)$/);
   if (m) return { intent: "run", params: { goal: m[2].trim() }, speak: `Running mission.` };
-  // "build a Twitter clone" / "build me a Notion clone" / "build a clone of X"
-  m = s.match(/^build (?:me )?(?:an? )?(?:clone (?:of |for )?(.+)|(.+?)\s+clone\b)$/);
+  // "build a Twitter clone" / "build me a Notion clone with full block editor" /
+  // "build a clone of X" — the `clone` keyword anywhere in the post-"build"
+  // phrase routes us to the clone builder, with the word before `clone` as
+  // the inspiration target.
+  m = s.match(/^build (?:me )?(?:an? )?clone (?:of |for )?(.+)$/);
   if (m) {
-    const target = (m[1] || m[2] || "").trim();
+    const target = m[1].trim();
     return { intent: "build_clone", params: { inspiration: target }, speak: `Building a ${target} clone.` };
+  }
+  m = s.match(/^build (?:me )?(?:an? )?(\S+)\s+clone(?:\s+(.+))?$/);
+  if (m) {
+    const target = m[1].trim();
+    const detail = m[2]?.trim() ?? "";
+    return { intent: "build_clone", params: { inspiration: target, detail }, speak: `Building a ${target} clone.` };
   }
   // Generic build (non-clone)
   m = s.match(/^build (?:me )?(?:an? )?(.+)$/);
