@@ -462,7 +462,7 @@ Produce the final deliverable now.`,
           >
             {MODEL_CATALOG.map((m) => (
               <option key={m.key} value={m.key}>
-                {m.label}{m.paid ? " · paid only" : ""}
+                {m.label}
               </option>
             ))}
           </select>

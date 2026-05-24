@@ -23,20 +23,21 @@ export const DEFAULTS: Record<"planner" | "executor" | "critic", ModelKey> = {
   critic: "groq:openai/gpt-oss-20b",
 };
 
-// `paid` flags models that the deployed account can't currently call on
-// its free tier. The UI uses this to gray them out + show a "paid only"
-// hint, but they remain selectable so a user with their own BYOK key
-// can still pick them.
-export const MODEL_CATALOG: Array<{ key: ModelKey; provider: string; label: string; ctx: string; tag: "fast" | "smart" | "balanced"; paid?: boolean }> = [
+// All 9 models are callable with the BYOK keys configured in Settings →
+// Provider Keys (or auto-fallback to platform pool when user hasn't set their
+// own). Cohort + Arena now treat per-call failures as soft errors and skip
+// the failing member without aborting the whole race, so flaky daily quotas
+// no longer brick the feature.
+export const MODEL_CATALOG: Array<{ key: ModelKey; provider: string; label: string; ctx: string; tag: "fast" | "smart" | "balanced" }> = [
   { key: "groq:openai/gpt-oss-120b", provider: "Groq", label: "GPT-OSS 120B", ctx: "131K", tag: "smart" },
   { key: "groq:openai/gpt-oss-20b", provider: "Groq", label: "GPT-OSS 20B", ctx: "131K", tag: "fast" },
   { key: "groq:meta-llama/llama-4-scout-17b-16e-instruct", provider: "Groq", label: "Llama 4 Scout 17B", ctx: "128K", tag: "balanced" },
-  { key: "groq:meta-llama/llama-4-maverick-17b-128e-instruct", provider: "Groq", label: "Llama 4 Maverick 17B", ctx: "1M", tag: "smart", paid: true },
-  { key: "groq:moonshotai/kimi-k2-instruct-0905", provider: "Groq", label: "Kimi K2", ctx: "262K", tag: "smart", paid: true },
+  { key: "groq:meta-llama/llama-4-maverick-17b-128e-instruct", provider: "Groq", label: "Llama 4 Maverick 17B", ctx: "1M", tag: "smart" },
+  { key: "groq:moonshotai/kimi-k2-instruct-0905", provider: "Groq", label: "Kimi K2", ctx: "262K", tag: "smart" },
   { key: "mistral:mistral-large-latest", provider: "Mistral", label: "Mistral Large", ctx: "128K", tag: "smart" },
   { key: "mistral:mistral-small-latest", provider: "Mistral", label: "Mistral Small", ctx: "32K", tag: "fast" },
-  { key: "google:gemini-2.5-flash", provider: "Google", label: "Gemini 2.5 Flash", ctx: "1M", tag: "balanced", paid: true },
-  { key: "google:gemini-2.5-pro", provider: "Google", label: "Gemini 2.5 Pro", ctx: "2M", tag: "smart", paid: true },
+  { key: "google:gemini-2.5-flash", provider: "Google", label: "Gemini 2.5 Flash", ctx: "1M", tag: "balanced" },
+  { key: "google:gemini-2.5-pro", provider: "Google", label: "Gemini 2.5 Pro", ctx: "2M", tag: "smart" },
 ];
 
 export const MODEL_KEYS: ModelKey[] = MODEL_CATALOG.map((m) => m.key);

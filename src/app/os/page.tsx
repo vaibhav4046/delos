@@ -1138,7 +1138,7 @@ function WelcomeMat({
           <button className="btn-pixel" onClick={() => onLaunch("builder")}>★ BUILD APP</button>
           <button className="btn-pixel ghost" onClick={() => onLaunch("cohort")}>COHORT</button>
           <button className="btn-pixel ghost" onClick={() => onLaunch("voice")}>VOICE</button>
-          <button className="btn-pixel ghost" onClick={() => onLaunch("doom")}>DOOM 3D</button>
+          <button className="btn-pixel ghost" onClick={() => onLaunch("doom")}>DEL DOOM</button>
           <button className="btn-pixel ghost" onClick={() => onLaunch("terminal")}>TERMINAL</button>
         </div>
 

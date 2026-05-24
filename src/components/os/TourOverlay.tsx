@@ -25,7 +25,7 @@ const STEPS: Step[] = [
   {
     selector: "[data-tour=\"dock\"]",
     title: "24 apps in the dock",
-    body: "Terminal · Assistant · Cohort · Arena · Voice · Doom 3D · Builder · Memory · Cowork · and more. macOS-style magnification.",
+    body: "Terminal · Assistant · Cohort · Arena · Voice · Del Doom · Builder · Memory · Cowork · and more. macOS-style magnification.",
   },
   {
     selector: "[data-tour=\"demo-button\"]",

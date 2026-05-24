@@ -23,7 +23,7 @@ type Win = {
 const APP_META: Record<AppKey, { label: string; icon: string; color: string }> = {
   terminal: { label: "Terminal", icon: "TerminalSquare", color: "var(--accent)" },
   assistant: { label: "Del Assistant", icon: "Bot", color: "var(--success)" },
-  doom: { label: "Doom 3D", icon: "Flame", color: "var(--danger)" },
+  doom: { label: "Del Doom", icon: "Flame", color: "var(--danger)" },
   cohort: { label: "Cohort", icon: "Users", color: "var(--warn)" },
 };
 

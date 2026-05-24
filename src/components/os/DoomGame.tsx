@@ -1791,7 +1791,7 @@ export function DoomGame() {
     <div ref={wrapRef} className="p-3 space-y-2 text-xs" style={{ position: "relative" }}>
       <div className="flex items-center justify-between">
         <div className="font-pixel text-sm tracking-wider" style={{ color: "var(--danger)" }}>
-          ★ DEL DOOM 3D — L{levelIdx + 1}/10 · {lvl.name} · <span style={{ color: dCur.color }}>{dCur.short}</span>
+          ★ DEL DOOM — L{levelIdx + 1}/10 · {lvl.name} · <span style={{ color: dCur.color }}>{dCur.short}</span>
         </div>
         <div className="flex gap-1">
           <button onClick={() => setShowMap((v) => !v)} className="pill pill-muted" style={{ cursor: "pointer", fontSize: 10 }}>

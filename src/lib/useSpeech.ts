@@ -400,11 +400,97 @@ export type VoiceAction = {
   reply: string;
 };
 
+// Local regex fast-path. Catches "build me X named Y", "open Z", "run cohort
+// on X", "close", "wallpaper", and obvious math/greetings BEFORE we hit the
+// LLM. Cuts latency to ~0ms for the common commands and removes the failure
+// mode where the LLM mis-classifies "build me app" as an "answer" intent.
+// Returns null if no local pattern matches — caller falls through to LLM.
+function localMatch(raw: string): VoiceAction | null {
+  const text = raw.trim();
+  const lower = text.toLowerCase();
+
+  // Greetings → speak directly
+  if (/^(hi|hello|hey|yo|hola|hiya|sup)[\s.,!?]*$/i.test(lower)) {
+    return { intent: "answer", payload: "Hey — what should we build?", reply: "Hey — what should we build?" };
+  }
+
+  // Basic math · "what is 2 + 2" / "calculate 5 times 7" / "23 plus 9"
+  const math = lower.match(/(?:what\s+(?:is|are)\s+)?(\d+(?:\.\d+)?)\s*(plus|minus|times|over|divided\s+by|\+|-|\*|x|\/)\s*(\d+(?:\.\d+)?)/i);
+  if (math) {
+    const a = parseFloat(math[1]);
+    const b = parseFloat(math[3]);
+    const op = math[2].toLowerCase();
+    let v: number | null = null;
+    if (op === "plus" || op === "+") v = a + b;
+    else if (op === "minus" || op === "-") v = a - b;
+    else if (op === "times" || op === "*" || op === "x") v = a * b;
+    else if (op === "over" || op === "divided by" || op === "/") v = b === 0 ? null : a / b;
+    if (v != null) {
+      const r = Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, "");
+      return { intent: "answer", payload: r, reply: r };
+    }
+  }
+
+  // "build me an app/application named/called X" / "build me X" / "create X app"
+  // Strips the conversational shell ("hello hello, please build me…") so the
+  // payload sent to App Builder is just the actual subject.
+  const build = lower.match(/(?:^|[.,!]\s*)(?:please\s+)?(?:can\s+you\s+)?(?:could\s+you\s+)?(?:build|make|create)\s+(?:me\s+)?(?:an?\s+|the\s+)?(?:app(?:lication)?|tool|widget|clone\s+of|website|webapp)?\s*(?:named|called|for)?\s*(.{2,200}?)$/i);
+  if (build) {
+    const subject = build[1].trim().replace(/^["'`]|["'`]$/g, "");
+    if (subject && !/^(it|that|one|this)$/i.test(subject)) {
+      return {
+        intent: "build_app",
+        payload: subject,
+        reply: `Building ${subject.length > 40 ? subject.slice(0, 40) + "…" : subject}.`,
+      };
+    }
+  }
+
+  // "run cohort on X" / "council X" / "race the models on X"
+  const cohort = lower.match(/(?:run\s+(?:a\s+)?cohort|council|race\s+(?:the\s+)?models?)\s+(?:on|about|for|with)?\s+(.{3,200})$/i);
+  if (cohort) {
+    return { intent: "run_cohort", payload: cohort[1].trim(), reply: `Racing the models on ${cohort[1].slice(0, 30)}.` };
+  }
+
+  // "open X" — exact app id pass-through
+  const open = lower.match(/^(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?([a-z0-9 _-]{2,30})(?:\s+app)?[.!?]*$/i);
+  if (open) {
+    const raw = open[1].trim().toLowerCase().replace(/\s+/g, "");
+    const ALIASES: Record<string, string> = {
+      delassistant: "assistant", chat: "assistant", del: "assistant",
+      kanban: "builder", pomodoro: "builder", timer: "builder",
+      doom: "doom", deldoom: "doom",
+      music: "browser", youtube: "browser", google: "browser",
+    };
+    const app = ALIASES[raw] ?? raw;
+    return { intent: "open_app", app, payload: "", reply: `Opening ${app}.` };
+  }
+
+  // "close" / "close this" / "close window"
+  if (/^(close|dismiss|exit)(\s+(this|window|the\s+window))?[.!?]*$/i.test(lower)) {
+    return { intent: "close_window", reply: "Closed." };
+  }
+
+  // "next/change wallpaper"
+  if (/(change|next|cycle|swap)\s+(?:the\s+)?(?:wall\s*paper|background)/i.test(lower)) {
+    return { intent: "change_wallpaper", reply: "Wallpaper changed." };
+  }
+
+  return null;
+}
+
 // Network-resilient command interpreter. Retries up to 2 times on transient
 // failure (5xx / network) with exponential backoff. Hard-fail after 10s total.
 // Falls back to a local "answer" payload so the voice loop never silently
 // stalls — user always hears something.
 export async function interpretCommand(transcript: string): Promise<VoiceAction | null> {
+  // Fast path · regex matcher resolves common intents in ~0ms without an LLM
+  // round trip. Removes the failure mode where the LLM mis-classified
+  // "Build me an app named Vaibhav" as a chat "answer" and returned 200 words
+  // of "create new project npx create-react-app…" instructions.
+  const fast = localMatch(transcript);
+  if (fast) return fast;
+
   const deadline = Date.now() + 10_000;
   let attempt = 0;
   let lastErr: unknown = null;

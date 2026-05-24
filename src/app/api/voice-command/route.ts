@@ -139,7 +139,12 @@ Map this to ONE action. Available intents:
 - unknown: ONLY use this if the input is gibberish or empty. Default to answer
   for short factual / greeting questions.
 
-Always include a short spoken "reply" (1 sentence, friendly) the system will speak back to the user confirming what it's doing.
+CRITICAL: the "reply" must be ONE short sentence (under 14 words) that
+confirms what you're doing. Never describe HOW to build something or list
+step-by-step instructions in the reply — that wastes TTS time and blocks
+the next mic re-arm. If the user said "build me an app named X", reply is
+"Building X." — nothing more. The actual build happens via the build_app
+intent firing the App Builder.
 
 Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }`;
 

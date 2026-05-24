@@ -150,7 +150,7 @@ export function CohortApp() {
                   <span className={`pill ${on ? "pill-info" : "pill-muted"}`} style={{ fontSize: 8 }}>{on ? "ON" : ""}</span>
                 </div>
                 <div className="text-[9px] text-[color:var(--muted)] font-mono">
-                  {m.provider} · {m.ctx}{m.paid ? " · paid only" : ""}
+                  {m.provider} · {m.ctx} · {m.tag}
                 </div>
               </button>
             );
@@ -163,7 +163,7 @@ export function CohortApp() {
         <select className="input-pixel" value={judge} onChange={(e) => setJudge(e.target.value as ModelKey)} disabled={running}>
           {MODEL_CATALOG.map((m) => (
             <option key={m.key} value={m.key}>
-              {m.provider} · {m.label}{m.paid ? " · paid only" : ""}
+              {m.provider} · {m.label}
             </option>
           ))}
         </select>

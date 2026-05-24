@@ -27,7 +27,7 @@ const ROWS: Row[] = [
   { track: "Adaptation", feature: "User-interrupt warp zone", where: "/play", href: "/play", status: "🟢" },
   // Bonus
   { track: "Bonus · AI-OS", feature: "DelOS — 24 desktop apps", where: "/os", href: "/os", status: "🟢" },
-  { track: "Bonus · AI-OS", feature: "Doom 3D · 10 levels · raycaster", where: "/os doom app", status: "🟢" },
+  { track: "Bonus · AI-OS", feature: "Del Doom · 10 levels · raycaster", where: "/os doom app", status: "🟢" },
   { track: "Bonus · AI-OS", feature: "Del Assistant · Claude-style chat", where: "src/components/os/DelAssistant.tsx", status: "🟢" },
   { track: "Bonus · AI-OS", feature: "Cowork · autonomous task agent", where: "src/components/os/CoworkApp.tsx", status: "🟢" },
   { track: "Bonus · AI-OS", feature: "Cohort council (3+ models race)", where: "/api/cohort", status: "🟢" },
