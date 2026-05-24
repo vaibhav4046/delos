@@ -60,6 +60,10 @@ const BUILTIN_HELP = [
   "  echo <text>         print text",
   "  history             show command history",
   "  neofetch            ASCII system info splash",
+  "  weather             NYC current temp (Open-Meteo, no key)",
+  "  price <coin>        crypto price + 24h change (CoinGecko)",
+  "  fx <FROM> <TO>      live currency rate (Frankfurter)",
+  "  lookup <query>      DuckDuckGo instant answer",
   "  theme               cycle wallpaper",
   "  exit                close this terminal",
   "",
@@ -313,6 +317,62 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
       case "neofetch":
         push({ kind: "ascii", text: NEOFETCH.join("\n") });
         break;
+      case "lookup":
+      case "ddg": {
+        if (!rest) { push({ kind: "stderr", text: `usage: ${cmd} <query>` }); break; }
+        push({ kind: "stdout", text: `⌕ DuckDuckGo: ${rest}` });
+        try {
+          const r = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(rest)}&format=json&no_html=1&skip_disambig=1`);
+          const j = await r.json();
+          if (j.AbstractText) push({ kind: "stdout", text: j.AbstractText });
+          else if (j.RelatedTopics?.[0]?.Text) push({ kind: "stdout", text: j.RelatedTopics[0].Text });
+          else push({ kind: "stderr", text: "no instant answer. Try `ai " + rest + "` for agent fallback." });
+          if (j.AbstractURL) push({ kind: "stdout", text: "↗ " + j.AbstractURL });
+        } catch (e) {
+          push({ kind: "stderr", text: `lookup failed: ${(e as Error).message}` });
+        }
+        break;
+      }
+      case "weather": {
+        try {
+          const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=40.7128&longitude=-74.006&current=temperature_2m,weather_code,wind_speed_10m");
+          const j = await r.json();
+          const c = j.current;
+          push({ kind: "stdout", text: `NYC · ${Math.round(c.temperature_2m)}°C · code ${c.weather_code} · wind ${c.wind_speed_10m} km/h` });
+        } catch {
+          push({ kind: "stderr", text: "weather offline" });
+        }
+        break;
+      }
+      case "price":
+      case "crypto": {
+        const sym = (rest || "btc").toLowerCase();
+        const id = sym === "btc" ? "bitcoin" : sym === "eth" ? "ethereum" : sym === "sol" ? "solana" : sym;
+        try {
+          const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`);
+          const j = await r.json();
+          const k = j[id];
+          if (!k) { push({ kind: "stderr", text: `unknown coin: ${sym}` }); break; }
+          const chg = k.usd_24h_change ?? 0;
+          push({ kind: "stdout", text: `${id.toUpperCase()} · $${k.usd.toLocaleString()} · ${chg > 0 ? "+" : ""}${chg.toFixed(2)}% (24h)` });
+        } catch {
+          push({ kind: "stderr", text: "coingecko offline" });
+        }
+        break;
+      }
+      case "fx": {
+        const [from = "USD", to = "EUR"] = rest.split(/\s+/);
+        try {
+          const r = await fetch(`https://api.frankfurter.app/latest?from=${from.toUpperCase()}&to=${to.toUpperCase()}`);
+          const j = await r.json();
+          if (!j.rates) { push({ kind: "stderr", text: "fx pair not found" }); break; }
+          const rate = Object.values(j.rates)[0] as number;
+          push({ kind: "stdout", text: `1 ${from.toUpperCase()} = ${rate} ${to.toUpperCase()} (${j.date})` });
+        } catch {
+          push({ kind: "stderr", text: "frankfurter offline" });
+        }
+        break;
+      }
       case "theme": {
         const next = (Math.floor(Math.random() * 15) + 1).toString();
         window.dispatchEvent(new CustomEvent("delos-cycle-wallpaper"));
