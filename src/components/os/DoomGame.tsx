@@ -584,8 +584,9 @@ export function DoomGame() {
     hintTimeoutRef.current = setTimeout(() => setHint(null), ms);
   }
 
-  function loadLevel(idx: number) {
-    const d = DIFFICULTIES.find((dd) => dd.id === diffId) ?? DIFFICULTIES[2];
+  function loadLevel(idx: number, overrideDiff?: DifficultyId) {
+    const id = overrideDiff ?? diffId;
+    const d = DIFFICULTIES.find((dd) => dd.id === id) ?? DIFFICULTIES[2];
     const spec = buildLevel(idx, d);
     levelRef.current = spec;
     const s = stateRef.current;
@@ -687,7 +688,7 @@ export function DoomGame() {
     s.hp = s.maxHp;
     s.ammo.bullet = Math.round(30 * d.ammoMul);
     setShowLevelScreen("brief");
-    loadLevel(0);
+    loadLevel(0, id);
   }
 
   function switchWeapon(id: WeaponId) {
