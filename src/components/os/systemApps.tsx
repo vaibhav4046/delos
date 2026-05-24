@@ -33,38 +33,130 @@ function totals(events: RunEvent[]) {
   return { pin, pout, calls, llmMs, cost };
 }
 
+// del-terminal — CRT-style CLI shell. Black background, phosphor-green
+// text, blinking cursor, ASCII banner, command history (↑↓), tab-complete.
+// Built-in commands: help, clear, ls, apps, launch <app>, ai <prompt>,
+// run <goal>, echo, date, whoami, pwd, neofetch, history, theme, exit.
+// `ai <prompt>` / `run <goal>` still hit the real /api/run streaming
+// pipeline. Easter-egg `:matrix` / `:doom` / `:varun` still work.
+type TermOut =
+  | { kind: "input"; prompt: string; cmd: string }
+  | { kind: "stdout"; text: string }
+  | { kind: "stderr"; text: string }
+  | { kind: "ascii"; text: string }
+  | { kind: "event"; ev: RunEvent };
+
+const BUILTIN_HELP = [
+  "Built-in commands:",
+  "  help                show this message",
+  "  clear / cls         wipe screen",
+  "  ls / apps           list installed DelOS apps",
+  "  launch <app>        open an app by id (e.g. launch builder)",
+  "  ai <prompt>         ask the multi-agent loop a question",
+  "  run <goal>          alias for `ai` (full agent run)",
+  "  whoami              print current tenant identity",
+  "  pwd                 print virtual working directory",
+  "  date                print current ISO datetime",
+  "  echo <text>         print text",
+  "  history             show command history",
+  "  neofetch            ASCII system info splash",
+  "  theme               cycle wallpaper",
+  "  exit                close this terminal",
+  "",
+  "Easter eggs: :matrix · :doom · :varun · :konami",
+];
+
+const NEOFETCH = [
+  "",
+  "       ██████╗ ███████╗██╗      ██████╗ ███████╗",
+  "       ██╔══██╗██╔════╝██║     ██╔═══██╗██╔════╝",
+  "       ██║  ██║█████╗  ██║     ██║   ██║███████╗",
+  "       ██║  ██║██╔══╝  ██║     ██║   ██║╚════██║",
+  "       ██████╔╝███████╗███████╗╚██████╔╝███████║",
+  "       ╚═════╝ ╚══════╝╚══════╝ ╚═════╝ ╚══════╝",
+  "",
+  "  os:      DelOS v2.1 (agents under pressure)",
+  "  shell:   del-terminal",
+  "  kernel:  Next.js 16 / React 19",
+  "  cpu:     multi-agent loop · planner→executor→critic→memory",
+  "  memory:  HydraDB (tenant-scoped)",
+  "  models:  Groq · Mistral · Gemini · OpenRouter · ElevenLabs",
+  "  uptime:  see top bar",
+  "",
+];
+
+const APP_IDS = [
+  "assistant","identity","cohort","arena","voice","cowork",
+  "builder","codebase","cores","mission",
+  "ingest","terminal","browser","marketplace","analytics",
+  "files","notes","calendar","calc","sysinfo",
+  "snake","tictactoe","memory","minesweeper","game2048","doom",
+  "settings","about",
+];
+
 export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
-  const [goal, setGoal] = useState("What is the capital of Japan? Be brief.");
-  const [events, setEvents] = useState<RunEvent[]>([]);
+  const [lines, setLines] = useState<TermOut[]>(() => [
+    { kind: "ascii", text: NEOFETCH.join("\n") },
+    { kind: "stdout", text: "Welcome to del-terminal. Type `help` for commands. `ai hello` to query agents." },
+  ]);
+  const [input, setInput] = useState("");
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIdx, setHistoryIdx] = useState(-1);
+  const [cwd, setCwd] = useState("~");
   const [running, setRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [steerText, setSteerText] = useState("");
   const ctrlRef = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
-  const [base, setBase] = useState<number>(Date.now());
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const baseRef = useRef<number>(Date.now());
   const stt = useSpeechToText();
   const sup = speechSupported();
 
-  // Sync STT transcript into goal input
-  useEffect(() => {
-    if (stt.transcript) setGoal(stt.transcript);
-  }, [stt.transcript]);
+  const tenant = (typeof window !== "undefined" && getTenantId()) || "guest";
+  const prompt = `${tenant}@delos:${cwd}$ `;
 
-  // Voice-action / intent bus subscription. Passes goal explicitly so run()
-  // doesn't fire with the stale state captured in this effect's closure.
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [lines.length]);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    if (stt.transcript && !running) setInput(stt.transcript);
+  }, [stt.transcript, running]);
+
   useEffect(() => {
     return onIntent("terminal.run", (i) => {
-      setGoal(i.goal);
-      setTimeout(() => run(i.goal), 50);
+      setInput(`ai ${i.goal}`);
+      setTimeout(() => handleSubmit(`ai ${i.goal}`), 50);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [events.length]);
+  function push(line: TermOut) {
+    setLines((p) => [...p, line]);
+  }
 
-  const t = useMemo(() => totals(events), [events]);
+  function clearScreen() {
+    setLines([]);
+  }
+
+  function tabComplete() {
+    const v = input.trim();
+    if (!v) return;
+    const parts = v.split(/\s+/);
+    if (parts.length === 1) {
+      const builtins = ["help","clear","cls","ls","apps","launch","ai","run","whoami","pwd","date","echo","history","neofetch","theme","exit"];
+      const matches = builtins.filter((b) => b.startsWith(parts[0]));
+      if (matches.length === 1) setInput(matches[0] + " ");
+      else if (matches.length > 1) push({ kind: "stdout", text: matches.join("  ") });
+    } else if (parts[0] === "launch") {
+      const matches = APP_IDS.filter((a) => a.startsWith(parts[1] ?? ""));
+      if (matches.length === 1) setInput(`launch ${matches[0]}`);
+      else if (matches.length > 1) push({ kind: "stdout", text: matches.join("  ") });
+    }
+  }
 
   async function sendSteer() {
     if (!runId || !steerText.trim()) return;
@@ -78,23 +170,15 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
     } catch {}
   }
 
-  async function run(overrideGoal?: string) {
+  async function runAgent(goal: string) {
     if (running) return;
-    const useGoal = overrideGoal ?? goal;
-    // Easter-egg shortcut: goals starting with ":" are intercepted before /api/run
-    const trimmed = useGoal.trim();
-    if (trimmed.startsWith(":") && trimmed.length < 30) {
-      window.dispatchEvent(new CustomEvent("delos-terminal-cmd", { detail: { cmd: trimmed } }));
-      window.dispatchEvent(new CustomEvent("toast", { detail: { text: `easter egg fired: ${trimmed}`, tone: "ok" } }));
-      return;
-    }
+    push({ kind: "stdout", text: `▶ launching agent loop for: ${goal}` });
     ctrlRef.current?.abort();
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
-    setEvents([]);
-    setBase(Date.now());
     setRunId(null);
     setRunning(true);
+    baseRef.current = Date.now();
     broadcastAgent("planner", "thinking");
     broadcastAgent("executor", "tool");
     broadcastAgent("critic", "thinking");
@@ -103,7 +187,7 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal: useGoal, chaos: [], maxSteps: 4, models: getModelOverrides(), mcpServers: getMcpServers(), tenantId: getTenantId(), temperature: getTemperature(), identity: renderIdentityPreamble(getIdentity()) || undefined }),
+        body: JSON.stringify({ goal, chaos: [], maxSteps: 4, models: getModelOverrides(), mcpServers: getMcpServers(), tenantId: getTenantId(), temperature: getTemperature(), identity: renderIdentityPreamble(getIdentity()) || undefined }),
         signal: ctrl.signal,
       });
       if (!res.body) throw new Error("no stream");
@@ -121,7 +205,7 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
           if (!line) continue;
           try {
             const ev = JSON.parse(line.slice(6)) as RunEvent;
-            setEvents((prev) => [...prev, ev]);
+            push({ kind: "event", ev });
             if (ev.t === "meta") {
               setRunId(ev.runId);
               bumpCounters({ agents: 1 });
@@ -134,6 +218,7 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
               });
             }
             if (ev.t === "answer") {
+              push({ kind: "stdout", text: `◆ answer: ${ev.text}` });
               if (onAnswer) onAnswer(ev.text);
               const prefs = getVoicePrefs();
               if (prefs.autoSpeak) speak(ev.text);
@@ -141,9 +226,10 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
           } catch {}
         }
       }
+      push({ kind: "stdout", text: "✓ agent loop complete." });
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
-        setEvents((p) => [...p, { t: "error", message: (e as Error).message, at: Date.now() }]);
+        push({ kind: "stderr", text: `✗ ${(e as Error).message}` });
       }
     } finally {
       setRunning(false);
@@ -157,78 +243,294 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
         broadcastAgent("critic", "idle");
         broadcastAgent("memory", "idle");
       }, 1500);
-      // Process achievements at end of run
-      setEvents((all) => {
-        const fresh = processEventsForAchievements(all);
-        for (const a of fresh) {
-          window.dispatchEvent(
-            new CustomEvent("toast", { detail: { text: `🏆 ${a.label}`, tone: "ok" } }),
-          );
-        }
-        return all;
-      });
     }
   }
 
+  async function handleSubmit(override?: string) {
+    const raw = (override ?? input).trim();
+    if (!raw) return;
+    push({ kind: "input", prompt, cmd: raw });
+    if (raw !== history[history.length - 1]) {
+      setHistory((h) => [...h.slice(-49), raw]);
+    }
+    setInput("");
+    setHistoryIdx(-1);
+
+    // Easter eggs
+    if (raw.startsWith(":") && raw.length < 30) {
+      window.dispatchEvent(new CustomEvent("delos-terminal-cmd", { detail: { cmd: raw } }));
+      push({ kind: "stdout", text: `🥚 easter egg dispatched: ${raw}` });
+      return;
+    }
+
+    const [cmd, ...args] = raw.split(/\s+/);
+    const rest = args.join(" ");
+
+    switch (cmd) {
+      case "help":
+      case "?":
+        push({ kind: "stdout", text: BUILTIN_HELP.join("\n") });
+        break;
+      case "clear":
+      case "cls":
+        clearScreen();
+        break;
+      case "ls":
+      case "apps":
+        push({ kind: "stdout", text: APP_IDS.join("  ") });
+        break;
+      case "launch":
+      case "open": {
+        if (!rest) { push({ kind: "stderr", text: "usage: launch <app>" }); break; }
+        if (!APP_IDS.includes(rest)) { push({ kind: "stderr", text: `unknown app: ${rest}` }); break; }
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { app: rest } }));
+        push({ kind: "stdout", text: `↗ launched ${rest}` });
+        break;
+      }
+      case "ai":
+      case "run":
+        if (!rest) { push({ kind: "stderr", text: `usage: ${cmd} <prompt>` }); break; }
+        await runAgent(rest);
+        break;
+      case "whoami":
+        push({ kind: "stdout", text: tenant });
+        break;
+      case "pwd":
+        push({ kind: "stdout", text: `/home/${tenant}` });
+        break;
+      case "cd":
+        setCwd(rest || "~");
+        break;
+      case "date":
+        push({ kind: "stdout", text: new Date().toISOString() });
+        break;
+      case "echo":
+        push({ kind: "stdout", text: rest });
+        break;
+      case "history":
+        push({ kind: "stdout", text: history.map((h, i) => `${String(i + 1).padStart(3)}  ${h}`).join("\n") });
+        break;
+      case "neofetch":
+        push({ kind: "ascii", text: NEOFETCH.join("\n") });
+        break;
+      case "theme": {
+        const next = (Math.floor(Math.random() * 15) + 1).toString();
+        window.dispatchEvent(new CustomEvent("delos-cycle-wallpaper"));
+        push({ kind: "stdout", text: `▒ wallpaper cycled (${next})` });
+        break;
+      }
+      case "exit":
+      case "quit":
+        push({ kind: "stdout", text: "bye." });
+        setTimeout(() => window.dispatchEvent(new CustomEvent("delos-close-focused")), 400);
+        break;
+      default:
+        push({ kind: "stderr", text: `${cmd}: command not found. Try \`help\`. Maybe you meant \`ai ${raw}\`?` });
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") { e.preventDefault(); handleSubmit(); return; }
+    if (e.key === "Tab")   { e.preventDefault(); tabComplete(); return; }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!history.length) return;
+      const next = historyIdx < 0 ? history.length - 1 : Math.max(0, historyIdx - 1);
+      setHistoryIdx(next);
+      setInput(history[next] ?? "");
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (historyIdx < 0) return;
+      const next = historyIdx + 1;
+      if (next >= history.length) { setHistoryIdx(-1); setInput(""); }
+      else { setHistoryIdx(next); setInput(history[next] ?? ""); }
+      return;
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === "l") { e.preventDefault(); clearScreen(); return; }
+    if (e.ctrlKey && e.key.toLowerCase() === "c" && running) { e.preventDefault(); ctrlRef.current?.abort(); push({ kind: "stderr", text: "^C" }); return; }
+  }
+
   return (
-    <div className="p-3 h-full flex flex-col gap-2 text-xs">
-      <div className="flex gap-2 items-center">
-        <span className="font-pixel text-sm" style={{ color: "var(--accent)" }}>$</span>
-        <input
-          className="input-pixel flex-1"
-          value={stt.state === "listening" ? goal + " " + stt.interim : goal}
-          onChange={(e) => setGoal(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && run()}
-          disabled={running}
-          placeholder="give the agent a mission… (or click 🎤)"
-        />
-        {sup.stt && (
+    <div
+      className="h-full flex flex-col font-mono"
+      style={{
+        background: "#050807",
+        color: "#7fff8a",
+        fontFamily: "ui-monospace, 'JetBrains Mono', 'Cascadia Code', Menlo, monospace",
+      }}
+      onClick={() => inputRef.current?.focus()}
+    >
+      {/* Tab bar / CRT header */}
+      <div
+        className="flex items-center justify-between px-3 py-1 text-[10px] flex-shrink-0"
+        style={{ background: "#0a1410", color: "#5fc480", borderBottom: "1px solid #1a3422" }}
+      >
+        <div className="flex items-center gap-2">
+          <Icons.TerminalSquare size={11} color="#7fff8a" />
+          <span style={{ fontWeight: 600 }}>del-terminal</span>
+          <span style={{ color: "#3a6a45" }}>·</span>
+          <span>{tenant}@delos</span>
+          {running && (<>
+            <span style={{ color: "#3a6a45" }}>·</span>
+            <span style={{ color: "#fbc531" }}>● running</span>
+          </>)}
+        </div>
+        <div className="flex items-center gap-2">
+          {sup.stt && (
+            <button
+              onClick={() => (stt.state === "listening" ? stt.stop() : stt.start({ continuous: false }))}
+              title="Voice input"
+              style={{ background: "transparent", border: "1px solid #2a4030", color: stt.state === "listening" ? "#c0392b" : "#7fff8a", padding: "1px 6px", fontSize: 9, cursor: "pointer" }}
+            >
+              {stt.state === "listening" ? "■ STOP" : "🎤 MIC"}
+            </button>
+          )}
           <button
-            type="button"
-            onClick={() => (stt.state === "listening" ? stt.stop() : stt.start({ continuous: false }))}
-            className={`btn-pixel ${stt.state === "listening" ? "danger" : "ghost"}`}
-            style={{ padding: "8px 10px", fontSize: 11 }}
-            title="Voice input"
+            onClick={clearScreen}
+            style={{ background: "transparent", border: "1px solid #2a4030", color: "#7fff8a", padding: "1px 6px", fontSize: 9, cursor: "pointer" }}
+            title="Clear (Ctrl+L)"
           >
-            {stt.state === "listening" ? <Icons.MicOff size={12} /> : <Icons.Mic size={12} />}
+            ⌧ CLR
           </button>
-        )}
-        <button className="btn-pixel" style={{ padding: "8px 12px", fontSize: 11 }} onClick={() => run()} disabled={running}>
-          {running ? "…" : "RUN"}
-        </button>
+        </div>
       </div>
 
-      <AgentConstellation events={events} compact />
+      {/* Output log */}
+      <div
+        ref={logRef}
+        className="flex-1 overflow-y-auto px-3 py-2 text-[12px] leading-[1.45]"
+        style={{
+          background: "linear-gradient(180deg, #050807 0%, #060a08 100%)",
+          // CRT scanlines overlay
+          backgroundImage: "repeating-linear-gradient(0deg, rgba(127,255,138,0.02) 0px, rgba(127,255,138,0.02) 1px, transparent 1px, transparent 3px)",
+        }}
+      >
+        {lines.map((l, i) => <TermOutput key={i} line={l} base={baseRef.current} />)}
 
-      {running && runId && (
-        <div className="card-pixel flex items-center gap-2" style={{ borderColor: "var(--warn)", boxShadow: "0 4px 0 0 #7a5e2a" }}>
-          <Icons.Navigation size={14} color="var(--warn)" />
+        {/* Active prompt input — inline with the buffer like a real shell */}
+        <div className="flex items-center" style={{ marginTop: 2 }}>
+          <span style={{ color: "#5fc4e1" }}>{tenant}@delos</span>
+          <span style={{ color: "#3a6a45" }}>:</span>
+          <span style={{ color: "#fbc531" }}>{cwd}</span>
+          <span style={{ color: "#5fc480" }}>$&nbsp;</span>
           <input
-            className="input-pixel flex-1"
-            style={{ padding: "6px 8px" }}
-            placeholder="steer the running agent…"
+            ref={inputRef}
+            value={stt.state === "listening" ? input + " " + stt.interim : input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            spellCheck={false}
+            autoComplete="off"
+            disabled={running}
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: "#7fff8a",
+              fontFamily: "inherit",
+              fontSize: "inherit",
+              caretColor: "#7fff8a",
+            }}
+            placeholder={running ? "agent running… ctrl+c to abort" : "type a command, or `help`"}
+          />
+          <span
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 14,
+              background: "#7fff8a",
+              animation: "delosBlink 1.05s steps(2, end) infinite",
+              marginLeft: 2,
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Inline steer bar (only while a run is active) */}
+      {running && runId && (
+        <div className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0" style={{ background: "#1a1208", borderTop: "1px solid #7a5e2a" }}>
+          <Icons.Navigation size={11} color="#fbc531" />
+          <input
             value={steerText}
             onChange={(e) => setSteerText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && sendSteer()}
+            placeholder="steer the running agent…"
+            style={{ flex: 1, background: "transparent", border: "1px solid #7a5e2a", color: "#fbc531", padding: "2px 6px", fontSize: 11, fontFamily: "inherit" }}
           />
-          <button onClick={sendSteer} className="btn-pixel" style={{ padding: "6px 10px", fontSize: 10, background: "var(--warn)" }}>
+          <button onClick={sendSteer} style={{ background: "#fbc531", color: "#000", padding: "2px 8px", fontSize: 10, border: "none", cursor: "pointer", fontWeight: 700 }}>
             ★ STEER
           </button>
         </div>
       )}
 
-      <div className="grid grid-cols-5 gap-1 text-center">
-        <Stat label="tok in" value={t.pin.toLocaleString()} />
-        <Stat label="tok out" value={t.pout.toLocaleString()} />
-        <Stat label="calls" value={String(t.calls)} />
-        <Stat label="llm ms" value={t.llmMs.toLocaleString()} />
-        <Stat label="cost" value={t.cost < 0.0001 ? "<$0.0001" : `$${t.cost.toFixed(4)}`} />
-      </div>
+      <style>{`
+        @keyframes delosBlink {
+          0%,100% { opacity: 1; }
+          50%     { opacity: 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
 
-      <div ref={logRef} className="flex-1 overflow-y-auto border-2 border-[color:var(--surface-2)] p-2 space-y-0.5 font-mono">
-        {events.length === 0 && <div className="text-[color:var(--muted)]">terminal ready <span className="cursor" /></div>}
-        {events.map((e, i) => <TermLine key={i} ev={e} base={base} />)}
+function TermOutput({ line, base }: { line: TermOut; base: number }) {
+  if (line.kind === "input") {
+    const [user, host] = line.prompt.includes("@")
+      ? line.prompt.split("@")
+      : [line.prompt, ""];
+    const hostBeforeColon = host.split(":")[0];
+    const pwd = host.split(":")[1]?.replace(/\$ $/, "") ?? "";
+    return (
+      <div style={{ marginTop: 2 }}>
+        <span style={{ color: "#5fc4e1" }}>{user}</span>
+        <span style={{ color: "#3a6a45" }}>@</span>
+        <span style={{ color: "#5fc4e1" }}>{hostBeforeColon}</span>
+        <span style={{ color: "#3a6a45" }}>:</span>
+        <span style={{ color: "#fbc531" }}>{pwd}</span>
+        <span style={{ color: "#5fc480" }}>$&nbsp;</span>
+        <span style={{ color: "#e0ffe5" }}>{line.cmd}</span>
       </div>
+    );
+  }
+  if (line.kind === "stdout") {
+    return <div style={{ color: "#a0ffaa", whiteSpace: "pre-wrap" }}>{line.text}</div>;
+  }
+  if (line.kind === "stderr") {
+    return <div style={{ color: "#ff6b6b", whiteSpace: "pre-wrap" }}>{line.text}</div>;
+  }
+  if (line.kind === "ascii") {
+    return <pre style={{ color: "#7fff8a", margin: 0, fontSize: 10, lineHeight: 1.1 }}>{line.text}</pre>;
+  }
+  // event line — matches RunEvent variants in src/lib/types.ts
+  const ev = line.ev;
+  const ms = ev.at - base;
+  const tag = ev.t.padEnd(13, " ");
+  let color = "#5fc480";
+  let body = "";
+  switch (ev.t) {
+    case "meta":          color = "#5fc4e1"; body = `runId=${ev.runId}`; break;
+    case "phase":         color = "#fbc531"; body = `phase=${ev.phase}${ev.note ? " · " + ev.note : ""}`; break;
+    case "thought":       color = "#e1a95f"; body = `${ev.agent}: ${ev.text.slice(0, 240)}`; break;
+    case "tool_call":     color = "#aef0ff"; body = `→ ${ev.name}(${JSON.stringify(ev.args).slice(0, 180)})`; break;
+    case "tool_result":   color = ev.ok ? "#a0ffaa" : "#ff6b6b"; body = `← ${ev.name} ${ev.ok ? "ok" : `fail: ${ev.error ?? "?"}`}`; break;
+    case "memory_write":  color = "#7a9aff"; body = `mem write ${ev.key} (${(ev.preview ?? "").slice(0, 80)})`; break;
+    case "memory_recall": color = "#7a9aff"; body = `mem recall "${ev.query}" → ${ev.hits} hits`; break;
+    case "recover":       color = "#c0c0ff"; body = `recover · ${ev.reason} → ${ev.strategy}`; break;
+    case "adapt":         color = "#c0c0ff"; body = `adapt · ${ev.from} → ${ev.to} (${ev.reason})`; break;
+    case "metric":        color = "#888";    body = `metric ${ev.key}=${ev.value}`; break;
+    case "usage":         color = "#888";    body = `${ev.role}/${ev.model} · in=${ev.promptTokens} out=${ev.completionTokens} ${ev.ms}ms`; break;
+    case "subagent":      color = "#fbc531"; body = `subagent ${ev.id} ${ev.status} — ${ev.goal.slice(0, 80)}`; break;
+    case "answer":        color = "#a0ffaa"; body = `◆ answer · ${ev.text.slice(0, 200)}${ev.text.length > 200 ? "…" : ""}`; break;
+    case "error":         color = "#ff6b6b"; body = `error · ${ev.message}`; break;
+    default:              body = JSON.stringify(ev);
+  }
+  return (
+    <div style={{ color, fontSize: 11, whiteSpace: "pre-wrap" }}>
+      <span style={{ color: "#3a6a45" }}>[{String(ms).padStart(5, " ")}ms]</span>{" "}
+      <span style={{ color: "#5fc480" }}>{tag}</span>{" "}
+      <span>{body}</span>
     </div>
   );
 }

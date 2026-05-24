@@ -80,9 +80,9 @@ const SYSTEM_APPS: Record<string, DockItem> = {
   },
   terminal: {
     id: "terminal",
-    label: "Terminal",
+    label: "del-terminal",
     icon: "TerminalSquare",
-    spawn: () => ({ id: "terminal", title: "DelOS Terminal", icon: "TerminalSquare", width: 540, height: 460, content: <TerminalSlot /> }),
+    spawn: () => ({ id: "terminal", title: "del-terminal", icon: "TerminalSquare", width: 620, height: 480, content: <TerminalSlot /> }),
   },
   builder: {
     id: "builder",
