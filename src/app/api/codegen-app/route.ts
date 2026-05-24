@@ -397,6 +397,12 @@ This is a GENERIC app (no specific brand named). Design it with a clean, modern 
 - Interactive components with state, real handlers, no stubs.
 - Inline mocks only; runs standalone.`;
 
+    // Shared output contract appended to whichever framing branch ran above.
+    // Prior version left this text outside the template literal — Turbopack
+    // raised "Expected ';', '}' or <eof>" and the Vercel build failed silently
+    // (last live deploy stuck on commit prior to the brand-mode split).
+    const planPromptFull = planPrompt + `
+
 Output the FILE PLAN — 8 to 14 files. For each file:
 - path : exact path including extension (e.g. "app/page.tsx", "app/components/MapMock.tsx")
 - purpose : 2–4 sentence brief of what this file contains, what it exports, what state it owns, what it imports from sibling files. Be SPECIFIC — name the props, state shape, mock data structure. The writer agent will use this brief verbatim.
@@ -422,7 +428,7 @@ Return JSON only:
     const sysPlan = "Respond with ONE JSON object only. No prose. No markdown fences.";
     let plan: FilePlan | null = null;
     try {
-      const rawPlan = await llmJson(planPrompt, sysPlan, 4000);
+      const rawPlan = await llmJson(planPromptFull, sysPlan, 4000);
       const obj = JSON.parse(rawPlan);
       const v = planSchema.safeParse(obj);
       if (v.success) plan = v.data;

@@ -11,25 +11,27 @@ export type Session = {
   tenantId: string;
 };
 
-// Resolve the signing secret once at module load. In production a missing
-// AUTH_SECRET means *anyone* who knows the literal default below can forge
-// a delos_session cookie — refuse to start instead.
-const SECRET = (() => {
+// Resolve the signing secret lazily so a missing AUTH_SECRET doesn't crash
+// the Next.js build's collect-page-data pass (which evaluates modules under
+// NODE_ENV=production without the runtime env vars). At first verify call
+// in production, we still refuse to sign or verify without a real secret —
+// just without taking the whole deploy down at build time.
+function getSecret(): string {
   const s = process.env.AUTH_SECRET;
   if (s) return s;
   if (process.env.NODE_ENV === "production") {
     throw new Error("AUTH_SECRET is required in production");
   }
   return "delos-dev-secret";
-})();
+}
 
 function hmacShort(body: string): string {
-  return createHmac("sha256", SECRET).update(body).digest("base64url").slice(0, 32);
+  return createHmac("sha256", getSecret()).update(body).digest("base64url").slice(0, 32);
 }
 
 // Stable per-user tenantId derived from email. 12 char base32, prefixed `u_`.
 export function deriveTenant(email: string): string {
-  const h = createHash("sha256").update(email.toLowerCase().trim() + SECRET).digest("hex");
+  const h = createHash("sha256").update(email.toLowerCase().trim() + getSecret()).digest("hex");
   return `u_${h.slice(0, 12)}`;
 }
 
