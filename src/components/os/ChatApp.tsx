@@ -329,7 +329,8 @@ export function PerplexityApp() {
         id: "perplexity",
         title: "Perplexity",
         brandColor: "#20808d",
-        model: "groq:moonshotai/kimi-k2-instruct-0905",
+        // Free-tier-confirmed model. Kimi K2 is paid on this account.
+        model: "groq:openai/gpt-oss-120b",
         systemPrompt:
           "You are Perplexity, an answer engine. Search the web for context, then answer with concise citations. If web context is provided in the system message, weave it into the answer. Always cite sources inline like [1]. Be direct, no hedging.",
         placeholder: "Ask anything — searches the web first…",

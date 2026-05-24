@@ -659,7 +659,7 @@ export function DelAssistant() {
             >
               {MODEL_CATALOG.map((m) => (
                 <option key={m.key} value={m.key}>
-                  {m.label}
+                  {m.label}{m.paid ? " · paid" : ""}
                 </option>
               ))}
             </select>

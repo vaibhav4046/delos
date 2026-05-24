@@ -466,7 +466,7 @@ function ModelsTab() {
             <select className="input-pixel" value={current} onChange={(e) => setRole(r.key, e.target.value as ModelKey)}>
               {MODEL_CATALOG.map((m) => (
                 <option key={m.key} value={m.key}>
-                  {m.provider} · {m.label} · {m.ctx} · {m.tag}{m.key === def ? " (default)" : ""}
+                  {m.provider} · {m.label} · {m.ctx} · {m.tag}{m.paid ? " · paid only" : ""}{m.key === def ? " (default)" : ""}
                 </option>
               ))}
             </select>

@@ -60,7 +60,10 @@ export function CoworkApp() {
   const [running, setRunning] = useState(false);
   const [currentRun, setCurrentRun] = useState<Run | null>(null);
   const [recent, setRecent] = useState<Run[]>([]);
-  const [model, setModel] = useState<ModelKey>("groq:moonshotai/kimi-k2-instruct-0905");
+  // Default to free-tier-confirmed gpt-oss-120b. Kimi K2 was the previous
+  // default but it's gated to paid tier on this Groq account and made every
+  // first-run COWORK call fail until the user manually switched models.
+  const [model, setModel] = useState<ModelKey>("groq:openai/gpt-oss-120b");
   const [tenant, setTenant] = useTenantId();
   const [draft, setDraft] = useState(tenant);
   const [showShare, setShowShare] = useState(false);
@@ -457,7 +460,11 @@ Produce the final deliverable now.`,
             }}
             disabled={running}
           >
-            {MODEL_CATALOG.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+            {MODEL_CATALOG.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.label}{m.paid ? " · paid only" : ""}
+              </option>
+            ))}
           </select>
           <div className="flex gap-1">
             {running ? (
