@@ -180,19 +180,20 @@ export async function POST(req: NextRequest) {
     // --- PASS 1: PLAN ---
     // Ask the model to lay out the file structure with a short brief for each.
     // No actual code yet — the brief is what each WRITE call gets as context.
-    const planPrompt = `You are a senior staff engineer planning a production-quality clone.
+    const planPrompt = `You are a senior staff engineer planning a SAME-TO-SAME clone of a real product.
 
 USER REQUEST:
 ${userPrompt}
 
 STACK: ${stackHint}
 
-Plan a REAL prototype — not a stub. Think hard about what a working clone of this product needs:
-- Hero / landing surface with real visual hierarchy
-- Mock data that looks plausible (10+ realistic items per list — driver names, fares, listings, posts, etc.)
-- Interactive components with state (forms, toggles, modals, search filters, like buttons that actually toggle)
-- Inline-mocked external services (map, payment, auth) so the project runs standalone
-- Multi-page or multi-section UX matching the real product's navigation
+This must look like the real product, not a generic prototype. Specifically:
+- HONOR every color/layout/copy detail in the user request — exact hex codes, exact section names ("Prime badge", "Recommendation rail", "Focus picker"), exact nav structure.
+- Match the brand's visual hierarchy: hero shape, header strip, sidebar widths, button styling, typography weights.
+- Mock data must use the product's CONVENTIONS: Amazon → product titles + 4.5-star ratings + "Sponsored" labels; ChatGPT → "Today / Yesterday / Previous 7 Days" buckets; Perplexity → numbered [1][2][3] citations + sources panel; Claude → conversation chips + Anthropic burnt orange.
+- 10+ realistic items per list — real product names, prices, descriptions.
+- Interactive components with state: forms, modals, search filters, like buttons, dropdowns, tabs.
+- Inline-mocked services (no external APIs needed) so the project runs standalone.
 
 Output the FILE PLAN — 8 to 14 files. For each file:
 - path : exact path including extension (e.g. "app/page.tsx", "app/components/MapMock.tsx")
@@ -256,11 +257,12 @@ Purpose: ${planEntry.purpose}
 Language: ${planEntry.language ?? "tsx"}
 
 RULES (strict):
+- SAME-TO-SAME clone. Match the real product's exact colors (hex codes from the user request), exact layout proportions, exact copy ("Prime", "Sponsored", "Reply to Claude", "Ask anything", etc.).
 - Write COMPLETE, syntactically valid code. No \`...\` ellipses, no \`// TODO\`, no \`/* implement later */\`, no \`throw new Error("not implemented")\`.
 - Real working code: actual JSX, actual handlers, actual state, actual mock data.
 - 200–600 lines is the sweet spot for a component file. README can be shorter.
-- Inline mock data should be RICH (10+ items, plausible names, realistic numbers). Not "Item 1, Item 2".
-- Tailwind v4 utility classes for styling. No external CSS libs.
+- Inline mock data should be RICH and BRAND-AUTHENTIC (10+ items). Amazon → real-product-shaped names + prices + star ratings; ChatGPT → realistic chat titles; Perplexity → real-looking source URLs with favicon emoji; Claude → conversational starter phrases.
+- Tailwind v4 utility classes for styling. Use exact hex codes inline with arbitrary values \`bg-[#FF9900]\` when the product's brand color is specified.
 - Imports from siblings must use exact relative paths (./ComponentName, ../lib/hookName).
 - ESCAPE all newlines as \\n and double-quotes as \\" inside the JSON string value.
 

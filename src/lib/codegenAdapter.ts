@@ -60,6 +60,39 @@ export function cookies() { return { get: () => null, set: () => {}, getAll: () 
 export function headers() { return new Headers(); }
 `;
 
+// Pages-router Head component — codegen sometimes mixes paradigms.
+const NEXT_HEAD_STUB = `// Stub for next/head — preview only.
+import * as React from "react";
+export default function Head({ children }: { children?: React.ReactNode }) { return null; }
+`;
+
+// next/script + next/dynamic + next/document — catch-all stubs.
+const NEXT_SCRIPT_STUB = `// Stub for next/script — preview only.
+import * as React from "react";
+export default function Script(_props: React.ScriptHTMLAttributes<HTMLScriptElement>) { return null; }
+`;
+const NEXT_DYNAMIC_STUB = `// Stub for next/dynamic — preview only.
+export default function dynamic<T>(loader: () => Promise<{ default: T }>): T {
+  // Synchronous return is wrong technically but lets the import resolve at module
+  // eval time. Real apps would lazy-load; in the preview we want eager render.
+  return loader as unknown as T;
+}
+`;
+const NEXT_DOCUMENT_STUB = `// Stub for next/document — preview only.
+import * as React from "react";
+export function Html({ children, ...p }: React.HTMLAttributes<HTMLHtmlElement> & { children?: React.ReactNode }) { return <div {...p}>{children}</div>; }
+export function Head({ children }: { children?: React.ReactNode }) { return null; }
+export function Main() { return null; }
+export function NextScript() { return null; }
+export default function Document() { return null; }
+`;
+const NEXT_ROOT_STUB = `// Stub for "next" root types — preview only.
+import * as React from "react";
+export type NextPage<P = {}, IP = P> = React.FC<P>;
+export type GetServerSideProps = (...args: unknown[]) => Promise<{ props: unknown }>;
+export type GetStaticProps = (...args: unknown[]) => Promise<{ props: unknown }>;
+`;
+
 /** Strip leading `app/` from any path; map common Next paths to Vite-shape. */
 function reroot(p: string): string {
   let out = p.replace(/^\.?\//, "");
@@ -80,16 +113,26 @@ function isClientRunnable(path: string): boolean {
   return true;
 }
 
-/** Rewrite next/* imports to local stub paths. */
+/** Rewrite next/* imports to local stub paths.
+ *  Catch-all at the end ensures even unknown subpaths (next/something-new)
+ *  resolve to a no-op module so the bundler doesn't 500. */
 function rewriteNextImports(code: string): string {
   return code
-    .replace(/from\s+["']next\/link["']/g, 'from "./__next/link"')
-    .replace(/from\s+["']next\/image["']/g, 'from "./__next/image"')
-    .replace(/from\s+["']next\/navigation["']/g, 'from "./__next/navigation"')
-    .replace(/from\s+["']next\/font\/google["']/g, 'from "./__next/font"')
-    .replace(/from\s+["']next\/font\/local["']/g, 'from "./__next/font"')
-    .replace(/from\s+["']next\/headers["']/g, 'from "./__next/headers"')
-    .replace(/from\s+["']next\/server["']/g, 'from "./__next/headers"')
+    .replace(/from\s+["']next\/link["']/g, 'from "/__next/link"')
+    .replace(/from\s+["']next\/image["']/g, 'from "/__next/image"')
+    .replace(/from\s+["']next\/navigation["']/g, 'from "/__next/navigation"')
+    .replace(/from\s+["']next\/font\/google["']/g, 'from "/__next/font"')
+    .replace(/from\s+["']next\/font\/local["']/g, 'from "/__next/font"')
+    .replace(/from\s+["']next\/headers["']/g, 'from "/__next/headers"')
+    .replace(/from\s+["']next\/server["']/g, 'from "/__next/headers"')
+    .replace(/from\s+["']next\/head["']/g, 'from "/__next/head"')
+    .replace(/from\s+["']next\/script["']/g, 'from "/__next/script"')
+    .replace(/from\s+["']next\/dynamic["']/g, 'from "/__next/dynamic"')
+    .replace(/from\s+["']next\/document["']/g, 'from "/__next/document"')
+    // Catch-all for next/<anything-else> — point at root stub.
+    .replace(/from\s+["']next\/[^"']+["']/g, 'from "/__next/root"')
+    // Bare `from "next"` — root types import.
+    .replace(/from\s+["']next["']/g, 'from "/__next/root"')
     // Strip "use client" / "use server" directives — meaningless in Vite.
     .replace(/^\s*["']use (client|server)["'];?\s*\n/m, "");
 }
@@ -154,6 +197,11 @@ export function adaptForSandpack(projectFiles: InFile[]): AdapterResult {
   out["/__next/navigation.ts"] = { code: NEXT_NAV_STUB, hidden: true };
   out["/__next/font.ts"] = { code: NEXT_FONT_STUB, hidden: true };
   out["/__next/headers.ts"] = { code: NEXT_HEADERS_STUB, hidden: true };
+  out["/__next/head.tsx"] = { code: NEXT_HEAD_STUB, hidden: true };
+  out["/__next/script.tsx"] = { code: NEXT_SCRIPT_STUB, hidden: true };
+  out["/__next/dynamic.ts"] = { code: NEXT_DYNAMIC_STUB, hidden: true };
+  out["/__next/document.tsx"] = { code: NEXT_DOCUMENT_STUB, hidden: true };
+  out["/__next/root.tsx"] = { code: NEXT_ROOT_STUB, hidden: true };
 
   // First pass: re-root paths + filter server-only files.
   const rerooted: Array<{ origPath: string; absPath: string; content: string }> = [];
