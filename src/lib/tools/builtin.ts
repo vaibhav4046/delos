@@ -15,53 +15,80 @@ const webSearch: Tool<
   { results: Array<{ title: string; url: string; snippet: string }>; abstract?: string; abstractSource?: string; abstractUrl?: string }
 > = {
   name: "web_search",
-  description: "Search the public web. Returns top-K results plus DuckDuckGo's instant answer when available.",
+  description: "Search the public web. Returns top-K results plus an instant-answer extract when available.",
   tags: ["search", "web", "research"],
   schema: z.object({ query: z.string().min(1), topK: z.number().int().positive().max(10).optional() }),
   async run({ query, topK = 5 }, ctx) {
     if (chaosFail(ctx, "tool_outage")) throw new Error("Search provider is down (chaos: tool_outage)");
     if (flakeRoll(ctx)) throw new Error("Transient network error (chaos: tool_flake)");
-    // DuckDuckGo Instant Answer — free, no key
-    const url = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
-    const r = await fetch(url, { headers: { "User-Agent": "DelRio/1.0" } }).catch(() => null);
-    if (!r || !r.ok) {
-      // graceful degradation: synthesize "results" so loop has something to work with
-      return {
-        results: [
-          { title: `Stub: ${query}`, url: "https://example.com", snippet: "Web tool unavailable, stub result." },
-        ].slice(0, topK),
-      };
-    }
-    const j = (await r.json().catch(() => null)) as {
-      RelatedTopics?: Array<{ Text?: string; FirstURL?: string; Topics?: Array<{ Text?: string; FirstURL?: string }> }>;
-      AbstractText?: string;
-      AbstractSource?: string;
-      AbstractURL?: string;
-      Heading?: string;
-    } | null;
-    // Flatten nested topic groups so we don't drop the rich category results.
+
+    // 1) DuckDuckGo Instant Answer (good for definitions / topics).
+    const ddgUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
+    const ddg = await fetch(ddgUrl, { headers: { "User-Agent": "DelRio/1.0" } })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null) as {
+        RelatedTopics?: Array<{ Text?: string; FirstURL?: string; Topics?: Array<{ Text?: string; FirstURL?: string }> }>;
+        AbstractText?: string;
+        AbstractSource?: string;
+        AbstractURL?: string;
+      } | null;
     const flatTopics: Array<{ Text?: string; FirstURL?: string }> = [];
-    for (const t of j?.RelatedTopics ?? []) {
+    for (const t of ddg?.RelatedTopics ?? []) {
       if (Array.isArray(t.Topics)) flatTopics.push(...t.Topics);
       else flatTopics.push(t);
     }
-    const results = flatTopics
+    const ddgResults = flatTopics
       .filter((x) => x.Text && x.FirstURL)
-      .slice(0, topK)
       .map((x) => ({ title: x.Text!.slice(0, 100), url: x.FirstURL!, snippet: x.Text! }));
-    if (results.length === 0) {
-      results.push({
-        title: `No instant results for ${query}`,
+
+    let abstract = ddg?.AbstractText || undefined;
+    let abstractSource = ddg?.AbstractSource || undefined;
+    let abstractUrl = ddg?.AbstractURL || undefined;
+
+    // 2) Wikipedia REST API as a real fallback. DDG returns empty for many
+    // queries (especially over server-side fetches from cloud IPs), so we
+    // also pull the top Wikipedia results so DEL SEARCH never lands empty.
+    const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=${Math.max(topK, 6)}&srprop=snippet&srsearch=${encodeURIComponent(query)}&origin=*`;
+    const wiki = await fetch(wikiUrl, { headers: { "User-Agent": "DelRio/1.0" } })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null) as {
+        query?: { search?: Array<{ title?: string; snippet?: string; pageid?: number }> };
+      } | null;
+    const wikiResults = (wiki?.query?.search ?? [])
+      .filter((s) => s.title)
+      .map((s) => ({
+        title: s.title!,
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(s.title!.replace(/ /g, "_"))}`,
+        // Wikipedia snippet uses MediaWiki <span class="searchmatch">…</span> markup.
+        snippet: (s.snippet ?? "").replace(/<[^>]+>/g, "").slice(0, 240),
+      }));
+
+    // 3) If DDG had an extract and Wikipedia hit the same topic first, use that
+    // as the abstract source — Wikipedia is almost always more useful copy.
+    if (!abstract && wikiResults[0]?.snippet) {
+      abstract = wikiResults[0].snippet;
+      abstractSource = "Wikipedia";
+      abstractUrl = wikiResults[0].url;
+    }
+
+    // Merge, dedupe by URL, cap at topK.
+    const merged: Array<{ title: string; url: string; snippet: string }> = [];
+    const seen = new Set<string>();
+    for (const r of [...ddgResults, ...wikiResults]) {
+      if (seen.has(r.url)) continue;
+      seen.add(r.url);
+      merged.push(r);
+      if (merged.length >= topK) break;
+    }
+
+    if (merged.length === 0) {
+      merged.push({
+        title: `No results for "${query}"`,
         url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
-        snippet: "Falling back to query URL.",
+        snippet: "No DuckDuckGo or Wikipedia hits. Try a different phrasing.",
       });
     }
-    return {
-      results,
-      abstract: j?.AbstractText || undefined,
-      abstractSource: j?.AbstractSource || undefined,
-      abstractUrl: j?.AbstractURL || undefined,
-    };
+    return { results: merged, abstract, abstractSource, abstractUrl };
   },
 };
 
