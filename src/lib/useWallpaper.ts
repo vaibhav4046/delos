@@ -30,7 +30,12 @@ const WINXP_BLISS = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/
 
 const MAC_AQUA = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'><defs><linearGradient id='aqua' x1='0' y1='0' x2='0' y2='1'><stop offset='0%25' stop-color='%23cbe8ff'/><stop offset='50%25' stop-color='%237ab0e0'/><stop offset='100%25' stop-color='%232070d8'/></linearGradient></defs><rect width='400' height='400' fill='url(%23aqua)'/><g opacity='0.3'><line x1='0' y1='50' x2='400' y2='50' stroke='%23ffffff' stroke-width='2'/><line x1='0' y1='90' x2='400' y2='90' stroke='%23ffffff' stroke-width='1'/><line x1='0' y1='150' x2='400' y2='150' stroke='%23ffffff' stroke-width='2'/></g></svg>") center/cover`;
 
-export const WALLPAPERS: Array<{ id: string; label: string; css: string; animated?: boolean; pairsWith?: "dark" | "light" }> = [
+export const WALLPAPERS: Array<{ id: string; label: string; css: string; animated?: boolean; pairsWith?: "dark" | "light"; video?: string; videoBlur?: number; videoOverlay?: string }> = [
+  // Video wallpaper · drop file at public/hero-loop.mp4 (mp4 + webm both fine).
+  // Renders muted + looping + playsInline, blurred + dimmed + accent-tinted
+  // so foreground OS chrome stays readable. Falls back to midnight gradient
+  // if the file 404s (handled in /os render).
+  { id: "hero-video", label: "Hero Video", css: "linear-gradient(135deg, #07070B 0%, #1A1A26 100%)", video: "/hero-loop.mp4", videoBlur: 14, videoOverlay: "linear-gradient(135deg, rgba(7,7,11,0.55) 0%, rgba(255,214,10,0.08) 50%, rgba(7,7,11,0.7) 100%)", animated: true, pairsWith: "dark" },
   { id: "midnight", label: "Midnight", css: "linear-gradient(135deg, #0f0f1b 0%, #1b1b2e 100%)", pairsWith: "dark" },
   { id: "warpzone", label: "Warp Zone", css: "linear-gradient(135deg, #0a1a3f 0%, #1b1b2e 50%, #3a0d2a 100%)", pairsWith: "dark" },
   { id: "starfield", label: "Starfield", css: STAR_FIELD, pairsWith: "dark" },

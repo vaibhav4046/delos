@@ -11,6 +11,10 @@ type Slide = {
   bullets?: string[];
   accent: string;
   cta?: { label: string; href: string };
+  /** When set, slide renders a muted+looping video front-and-center.
+   *  Path is resolved against /public — drop the file there and it
+   *  appears automatically. Falls back to title + body if 404. */
+  video?: string;
 };
 
 const SLIDES: Slide[] = [
@@ -48,6 +52,13 @@ const SLIDES: Slide[] = [
     body: "DelOS is a full window-managed desktop in a tab. 25 apps. Dock magnification. Cmd+K palette. Voice autonomy. Multi-agent constellation always visible.",
     accent: "var(--success)",
     cta: { label: "Open DelOS →", href: "/os" },
+  },
+  {
+    eyebrow: "★ SEE IT IN MOTION",
+    title: "Agents that flow.",
+    body: "Hero loop · DelOS in action · zero sound, just signal.",
+    accent: "var(--accent)",
+    video: "/hero-loop.mp4",
   },
   {
     eyebrow: "★ THE LOOP",
@@ -97,6 +108,12 @@ const SLIDES: Slide[] = [
 
 const AUTO_MS = 7500;
 
+// Shared child variants for staggered slide entrance.
+const CHILD_VARIANTS = {
+  hidden: { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] as const } },
+};
+
 export default function PitchPage() {
   const [idx, setIdx] = useState(0);
   // Default paused — auto-advance moves faster than judges can read.
@@ -136,13 +153,35 @@ export default function PitchPage() {
 
   return (
     <div className="min-h-screen overflow-hidden relative" style={{ background: "var(--bg)" }}>
-      {/* Accent radial glow per slide */}
-      <div
-        className="absolute inset-0 pointer-events-none transition-all duration-700"
+      {/* Ambient blurred video behind every slide. Adds motion + depth.
+          Falls back silently if /hero-loop.mp4 is missing. */}
+      <video
+        src="/hero-loop.mp4"
+        autoPlay
+        muted
+        loop
+        playsInline
+        disablePictureInPicture
+        aria-hidden="true"
+        className="absolute inset-0 w-full h-full pointer-events-none"
         style={{
-          background: `radial-gradient(ellipse at 50% 40%, ${s.accent} 0%, transparent 60%)`,
-          opacity: 0.18,
+          objectFit: "cover",
+          filter: "blur(24px) brightness(0.45) saturate(1.2)",
+          transform: "scale(1.12)",
+          opacity: 0.55,
+          zIndex: 0,
         }}
+        onError={(e) => { (e.currentTarget as HTMLVideoElement).style.display = "none"; }}
+      />
+      {/* Accent radial glow per slide */}
+      <motion.div
+        className="absolute inset-0 pointer-events-none"
+        animate={{
+          background: `radial-gradient(ellipse at 50% 40%, ${s.accent} 0%, transparent 60%)`,
+          opacity: 0.22,
+        }}
+        transition={{ duration: 0.7 }}
+        style={{ zIndex: 1 }}
       />
       {/* Grid bg */}
       <div
@@ -170,24 +209,30 @@ export default function PitchPage() {
         </div>
       </header>
 
-      {/* Slide content */}
+      {/* Slide content — staggered fade-in per child for cinematic feel */}
       <main role="main" aria-label="Pitch deck" className="relative z-10 min-h-screen flex items-center justify-center px-6 py-20">
         <AnimatePresence mode="wait">
           <motion.div
             key={idx}
-            initial={{ opacity: 0, y: 30, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.96 }}
-            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            variants={{
+              hidden: { opacity: 0 },
+              visible: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.05 } },
+              exit: { opacity: 0, y: -20, transition: { duration: 0.25 } },
+            }}
             className="max-w-4xl w-full text-center"
           >
-            <div
+            <motion.div
+              variants={CHILD_VARIANTS}
               className="inline-block mb-6 pill pill-muted"
               style={{ fontSize: 12, padding: "6px 14px", color: s.accent, borderColor: s.accent, background: "rgba(var(--bg-rgb), 0.6)" }}
             >
               {s.eyebrow}
-            </div>
-            <h1
+            </motion.div>
+            <motion.h1
+              variants={CHILD_VARIANTS}
               className="font-pixel tracking-wider mb-7"
               style={{
                 color: "var(--fg)",
@@ -197,9 +242,45 @@ export default function PitchPage() {
               }}
             >
               {s.title}
-            </h1>
+            </motion.h1>
+
+            {/* Foreground video block — only on slides that opt in via slide.video */}
+            {s.video && (
+              <motion.div
+                variants={CHILD_VARIANTS}
+                className="mx-auto mb-7 relative"
+                style={{
+                  width: "min(720px, 88vw)",
+                  aspectRatio: "16 / 9",
+                  background: "var(--surface)",
+                  border: `2px solid ${s.accent}`,
+                  boxShadow: `0 0 0 2px var(--bg), 0 0 0 4px ${s.accent}, 8px 8px 0 var(--shadow)`,
+                  overflow: "hidden",
+                }}
+              >
+                <video
+                  src={s.video}
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  disablePictureInPicture
+                  className="w-full h-full"
+                  style={{ objectFit: "cover", display: "block" }}
+                  onError={(e) => { (e.currentTarget.parentElement as HTMLDivElement).style.display = "none"; }}
+                />
+                <span
+                  className="absolute top-2 right-2 pill pill-info"
+                  style={{ fontSize: 9, padding: "2px 8px", background: "rgba(7,7,11,0.7)" }}
+                >
+                  ● LIVE LOOP · muted
+                </span>
+              </motion.div>
+            )}
+
             {s.body && (
-              <p
+              <motion.p
+                variants={CHILD_VARIANTS}
                 className="font-mono mx-auto mb-7 leading-relaxed"
                 style={{
                   color: "var(--muted)",
@@ -208,10 +289,11 @@ export default function PitchPage() {
                 }}
               >
                 {s.body}
-              </p>
+              </motion.p>
             )}
             {s.bullets && (
-              <ul
+              <motion.ul
+                variants={CHILD_VARIANTS}
                 className="font-mono text-left mx-auto mb-7 space-y-3"
                 style={{
                   maxWidth: "60ch",
@@ -220,21 +302,29 @@ export default function PitchPage() {
                 }}
               >
                 {s.bullets.map((b, i) => (
-                  <li key={i} className="flex items-start gap-3">
+                  <motion.li
+                    key={i}
+                    initial={{ opacity: 0, x: -16 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.15 + i * 0.08, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                    className="flex items-start gap-3"
+                  >
                     <span style={{ color: s.accent, flexShrink: 0 }}>★</span>
                     <span style={{ lineHeight: 1.5 }}>{b}</span>
-                  </li>
+                  </motion.li>
                 ))}
-              </ul>
+              </motion.ul>
             )}
             {s.cta && (
-              <Link
-                href={s.cta.href}
-                className="btn-pixel success magnet"
-                style={{ fontSize: 16, padding: "12px 28px" }}
-              >
-                {s.cta.label}
-              </Link>
+              <motion.div variants={CHILD_VARIANTS}>
+                <Link
+                  href={s.cta.href}
+                  className="btn-pixel success magnet"
+                  style={{ fontSize: 16, padding: "12px 28px" }}
+                >
+                  {s.cta.label}
+                </Link>
+              </motion.div>
             )}
           </motion.div>
         </AnimatePresence>

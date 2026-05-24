@@ -841,6 +841,35 @@ export default function OSPage() {
       {booted && (
         <>
           <div className={`absolute inset-0 ${wallAnimated ? "wallpaper-animated" : ""}`} style={{ background: wallCss }} />
+          {wallEntry.video && (
+            <>
+              {/* Video wallpaper — muted, looping, blurred, no sound. Renders
+                  behind everything else; gracefully falls back to gradient
+                  if the file is missing (onError hides the element). */}
+              <video
+                key={wallEntry.id}
+                src={wallEntry.video}
+                autoPlay
+                muted
+                loop
+                playsInline
+                disablePictureInPicture
+                className="absolute inset-0 w-full h-full"
+                style={{
+                  objectFit: "cover",
+                  filter: `blur(${wallEntry.videoBlur ?? 12}px) brightness(0.7) saturate(1.1)`,
+                  transform: "scale(1.08)", // crop the blurred edge so no halo bleeds in
+                  pointerEvents: "none",
+                  zIndex: 0,
+                }}
+                aria-hidden="true"
+                onError={(e) => { (e.currentTarget as HTMLVideoElement).style.display = "none"; }}
+              />
+              {wallEntry.videoOverlay && (
+                <div className="absolute inset-0" style={{ background: wallEntry.videoOverlay, pointerEvents: "none", zIndex: 1 }} />
+              )}
+            </>
+          )}
           <div
             className="absolute inset-0 opacity-15"
             style={{
