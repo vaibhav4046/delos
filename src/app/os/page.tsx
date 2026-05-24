@@ -535,21 +535,25 @@ export default function OSPage() {
     const rows = Math.ceil(n / cols);
     const cellW = innerW / cols;
     const cellH = innerH / rows;
+    // BUG-4 fix · map to NEW objects so React re-renders. Was mutating
+    // existing references in-place; framer-motion saw same object identity
+    // and skipped the position animation, so windows looked stacked.
     setWindows((p) => {
-      const next = [...p];
-      let i = 0;
-      for (const w of next) {
-        if (w.minimized) continue;
+      let visIdx = 0;
+      return p.map((w) => {
+        if (w.minimized) return w;
+        const i = visIdx++;
         const r = Math.floor(i / cols);
         const c = i % cols;
-        w.x = c * cellW;
-        w.y = TOP + r * cellH;
-        w.width = cellW;
-        w.height = cellH;
-        w.maximized = false;
-        i += 1;
-      }
-      return next;
+        return {
+          ...w,
+          x: c * cellW,
+          y: TOP + r * cellH,
+          width: cellW,
+          height: cellH,
+          maximized: false,
+        };
+      });
     });
     pushToast(`tiled ${n} window${n === 1 ? "" : "s"} into ${cols}×${rows} grid`, "info");
   }
@@ -560,19 +564,21 @@ export default function OSPage() {
     if (visible.length === 0) return;
     const baseW = Math.min(720, viewport.width * 0.6);
     const baseH = Math.min(520, (viewport.height - 48 - 56) * 0.7);
+    // BUG-4 sibling fix — same reference-identity fix as gridArrange.
     setWindows((p) => {
-      const next = [...p];
-      let i = 0;
-      for (const w of next) {
-        if (w.minimized) continue;
-        w.x = 48 + i * 32;
-        w.y = 64 + i * 32;
-        w.width = baseW;
-        w.height = baseH;
-        w.maximized = false;
-        i += 1;
-      }
-      return next;
+      let visIdx = 0;
+      return p.map((w) => {
+        if (w.minimized) return w;
+        const i = visIdx++;
+        return {
+          ...w,
+          x: 48 + i * 32,
+          y: 64 + i * 32,
+          width: baseW,
+          height: baseH,
+          maximized: false,
+        };
+      });
     });
     pushToast(`cascaded ${visible.length} window${visible.length === 1 ? "" : "s"}`, "info");
   }
@@ -1313,8 +1319,11 @@ function HintSticky({
     <div
       className="fixed z-[70] hidden md:block"
       style={{
-        right: 16,
-        bottom: 72,
+        // BUG-9 fix · sticky used to live bottom-right under FX widget +
+        // Tile/Cascade/Launchpad chiclet row → bottom clipped. Move to
+        // bottom-left so it stops fighting with the widget stack.
+        left: 16,
+        bottom: 80,
         width: 268,
         background: "#fff7a8",
         color: "#1a1a26",

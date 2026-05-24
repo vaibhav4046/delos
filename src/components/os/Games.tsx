@@ -22,6 +22,9 @@ export function SnakeGame() {
   const [dir, setDir] = useState<Dir>("R");
   const [food, setFood] = useState<[number, number]>([4, 10]);
   const [alive, setAlive] = useState(true);
+  // BUG-7 fix · don't tick until user presses first arrow key. Previously
+  // snake auto-moved right + died against the wall in ~1s, looked broken.
+  const [started, setStarted] = useState(false);
   const [score, setScore] = useState(0);
   const [high, setHigh] = useState(0);
   const dirRef = useRef(dir);
@@ -37,6 +40,8 @@ export function SnakeGame() {
       // Catastrophic chat-input garbling bug surfaced during QA otherwise.
       if (isTypingTarget(e.target)) return;
       const k = e.key.toLowerCase();
+      const isArrow = k === "w" || k === "a" || k === "s" || k === "d" || k.startsWith("arrow");
+      if (isArrow && !started) setStarted(true);
       if ((k === "w" || k === "arrowup") && dirRef.current !== "D") setDir("U");
       if ((k === "s" || k === "arrowdown") && dirRef.current !== "U") setDir("D");
       if ((k === "a" || k === "arrowleft") && dirRef.current !== "R") setDir("L");
@@ -44,10 +49,10 @@ export function SnakeGame() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [started]);
 
   useEffect(() => {
-    if (!alive) return;
+    if (!alive || !started) return;
     const t = setInterval(() => {
       setSnake((prev) => {
         const head = prev[0];
@@ -91,6 +96,7 @@ export function SnakeGame() {
     setFood([4, 10]);
     setAlive(true);
     setScore(0);
+    setStarted(false);
   }
 
   return (
@@ -102,7 +108,16 @@ export function SnakeGame() {
           <span className="pill pill-muted">HI {high}</span>
         </div>
       </div>
-      <div className="grid mx-auto" style={{ gridTemplateColumns: `repeat(${SNAKE_GRID}, 1fr)`, width: 320, aspectRatio: "1 / 1", background: "var(--bg)", border: "2px solid var(--surface-2)" }}>
+      <div className="relative mx-auto" style={{ width: 320 }}>
+      {!started && alive && (
+        <div
+          className="absolute inset-0 flex items-center justify-center font-pixel text-xs tracking-widest pointer-events-none"
+          style={{ color: "var(--accent)", background: "rgba(7,7,11,0.6)", zIndex: 5, textShadow: "0 0 8px var(--accent)" }}
+        >
+          PRESS ARROW KEYS TO START
+        </div>
+      )}
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${SNAKE_GRID}, 1fr)`, width: 320, aspectRatio: "1 / 1", background: "var(--bg)", border: "2px solid var(--surface-2)" }}>
         {Array.from({ length: SNAKE_GRID * SNAKE_GRID }).map((_, i) => {
           const y = Math.floor(i / SNAKE_GRID);
           const x = i % SNAKE_GRID;
@@ -119,6 +134,7 @@ export function SnakeGame() {
             />
           );
         })}
+      </div>
       </div>
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[10px] text-[color:var(--muted)] flex-1">WASD or arrows. Click area first to focus.</span>

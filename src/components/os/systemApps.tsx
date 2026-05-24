@@ -802,6 +802,26 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
   const [stage, setStage] = useState<"idle" | "plan" | "spec" | "validate" | "mount" | "done">("idle");
   const [builtins, setBuiltins] = useState<Array<{ id: string; name: string; icon: string }>>([]);
   const [installingId, setInstallingId] = useState<string | null>(null);
+  // BUG-1 fix · only overwrite the textarea when it's empty, still on the
+  // default seed, OR the user has explicitly tapped Apply on a confirm.
+  // Was: chip clicks silently wiped a typed-out spec mid-scroll.
+  const DEFAULT_SEED = "Build me a stopwatch with start/stop/reset.";
+  function fillPromptSafe(next: string) {
+    if (busy) return;
+    const trimmed = prompt.trim();
+    const seedEqualsDefault = trimmed === DEFAULT_SEED || trimmed === "";
+    if (seedEqualsDefault) {
+      setPrompt(next);
+      return;
+    }
+    // Non-blocking confirm with native browser dialog — keeps the wipe rare
+    // and intentional. Skips on mobile if window.confirm is missing.
+    if (typeof window !== "undefined" && typeof window.confirm === "function") {
+      const ok = window.confirm("Replace your current prompt with this template?");
+      if (!ok) return;
+    }
+    setPrompt(next);
+  }
 
   useEffect(() => {
     let alive = true;
@@ -905,10 +925,16 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
         broadcastAgent("memory", "idle");
       }, 1200);
     } catch (e) {
-      setErr((e as Error).message);
+      const msg = (e as Error).message;
+      setErr(msg);
       setStage("idle");
       broadcastAgent("planner", "idle");
       broadcastAgent("executor", "idle");
+      // BUG-2 fix · surface the failure as a toast so users don't see the
+      // button just flip back to "BUILD APP" with nothing happening.
+      try {
+        window.dispatchEvent(new CustomEvent("toast", { detail: { text: `Build failed: ${msg.slice(0, 80)}`, tone: "bad" } }));
+      } catch {}
     } finally {
       clearTimeout(tStage1);
       clearTimeout(tStage2);
@@ -940,7 +966,7 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
           <button
             key={p}
             disabled={busy}
-            onClick={() => setPrompt(p)}
+            onClick={() => fillPromptSafe(p)}
             className="pill pill-muted"
             style={{ cursor: busy ? "not-allowed" : "pointer", fontSize: 9 }}
           >
@@ -961,7 +987,7 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
               <button
                 key={t.id}
                 disabled={busy}
-                onClick={() => setPrompt(t.prompt)}
+                onClick={() => fillPromptSafe(t.prompt)}
                 className="card-pixel text-left flex flex-col gap-1"
                 style={{
                   padding: 6,

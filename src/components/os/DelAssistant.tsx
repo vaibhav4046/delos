@@ -441,7 +441,10 @@ export function DelAssistant() {
   }
 
   async function sendAutonomous(text: string) {
-    if (!active) return;
+    // BUG-5 fix · defensive empty-input guard. Caller already trims + bails
+    // in send(), but autonomous mode also fires off agent broadcasts that
+    // bump the counter strip — keep the early-return here too.
+    if (!text || !text.trim() || !active) return;
     const userMsg: Msg = { id: `m-${Date.now()}-u`, role: "user", content: text, ts: Date.now(), mode: active.mode };
     updateActive((c) => ({
       ...c,
