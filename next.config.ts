@@ -25,7 +25,10 @@ const SECURITY_HEADERS = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(), interest-cohort=()" },
+  // geolocation=(self) allows weather widget + voice agents to request user location.
+  // Was geolocation=() (denied at the platform layer) — that bug masked every GPS
+  // call from the browser and forced IP fallback for everyone.
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self), interest-cohort=()" },
 ];
 
 const nextConfig: NextConfig = {

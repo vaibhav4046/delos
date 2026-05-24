@@ -240,14 +240,16 @@ export function DesktopWidgets() {
 }
 
 // ── Weather (Open-Meteo, no API key) ─────────────────────────────────────────
-// Location resolution waterfall — pick the first source that returns coords:
-//   1. localStorage cache (delos.weather.loc)        — no network
-//   2. Manual override entered in widget input box   — persists
-//   3. navigator.geolocation (8s timeout, GPS/Wi-Fi) — needs permission
-//   4. ipapi.co IP-based fallback (no key, no perm)  — always works while online
-// Coords + city are cached to localStorage so subsequent loads skip the prompt.
+// GPS-first location resolution. We request real system geolocation on mount
+// with enableHighAccuracy=true so the OS reads the WiFi BSSID / GPS chip / cell
+// tower triangulation — same precision Google Maps gets. IP fallback only
+// fires if the browser permission API actually says "denied" — never when the
+// user hasn't decided yet. Cache is keyed on coords so a stale fix never
+// overwrites a fresh one.
 type WeatherLoc = { lat: number; lon: number; city: string; source: "manual" | "gps" | "ip" };
-const WEATHER_LOC_KEY = "delos.weather.loc";
+// Bump on schema change · old IP-tagged caches from v2.0.x would survive forever
+// and keep showing the wrong city. v3 means "fresh GPS pass on next mount".
+const WEATHER_LOC_KEY = "delos.weather.loc.v3";
 
 function loadCachedLoc(): WeatherLoc | null {
   if (typeof window === "undefined") return null;
@@ -261,31 +263,67 @@ function saveCachedLoc(l: WeatherLoc) {
   try { localStorage.setItem(WEATHER_LOC_KEY, JSON.stringify(l)); } catch {}
 }
 
-async function resolveLocation(force?: "gps" | "ip"): Promise<WeatherLoc> {
-  // Try GPS — exact coords if user grants permission
-  if (force !== "ip" && "geolocation" in navigator) {
+async function reverseGeocode(lat: number, lon: number): Promise<string> {
+  // 5-decimal precision (~1.1m) so reverse-geocode returns the actual locality
+  // not a 100km neighborhood centroid. Open-Meteo geocoder is the most accurate
+  // free service for this — better than Nominatim's coarse-grained admin areas.
+  try {
+    const r = await fetch(
+      `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat.toFixed(5)}&longitude=${lon.toFixed(5)}&count=1&language=en`
+    );
+    const j = await r.json();
+    const hit = j?.results?.[0];
+    if (!hit) return "Your location";
+    // Prefer the most specific name available — locality > admin3 > admin2.
+    return hit.name || hit.admin3 || hit.admin2 || hit.admin1 || "Your location";
+  } catch {
+    return "Your location";
+  }
+}
+
+function getGpsFix(opts: { highAccuracy: boolean; timeoutMs: number }): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!("geolocation" in navigator)) {
+      reject(new Error("no_geolocation"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      timeout: opts.timeoutMs,
+      enableHighAccuracy: opts.highAccuracy,
+      // maximumAge:0 — never reuse an old fix. Old fixes cause wrong-city bugs
+      // when a laptop wakes up after travel.
+      maximumAge: 0,
+    });
+  });
+}
+
+async function resolveLocation(): Promise<WeatherLoc> {
+  // 1. Try high-accuracy GPS — WiFi BSSID + cell + GPS chip. Browser surfaces
+  //    permission prompt automatically. 15s timeout because cold GPS takes a
+  //    moment, especially indoors where it has to fall back to WiFi geolocation.
+  if ("geolocation" in navigator) {
     try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          timeout: 8000,
-          enableHighAccuracy: false,
-          maximumAge: 10 * 60 * 1000,
-        });
-      });
+      const pos = await getGpsFix({ highAccuracy: true, timeoutMs: 15000 });
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
-      const rg = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&count=1`).then((r) => r.json()).catch(() => null);
-      return {
-        lat, lon,
-        city: rg?.results?.[0]?.name ?? "Current location",
-        source: "gps",
-      };
-    } catch {}
+      const city = await reverseGeocode(lat, lon);
+      return { lat, lon, city, source: "gps" };
+    } catch {
+      // Permission denied OR timeout. Try one more time with low-accuracy mode
+      // — some systems block hi-accuracy but allow Wi-Fi network geolocation.
+      try {
+        const pos = await getGpsFix({ highAccuracy: false, timeoutMs: 6000 });
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const city = await reverseGeocode(lat, lon);
+        return { lat, lon, city, source: "gps" };
+      } catch {
+        // Fall through to IP.
+      }
+    }
   }
-  // IP-based fallback — proxied through our own /api/geo route so we don't
-  // depend on third-party CORS headers OR mixed-content rules. The server
-  // route picks ipapi.co (HTTPS, no key, generous free tier) and returns
-  // a normalized { lat, lon, city }. Subject to our own rate limit.
+  // 2. IP fallback — proxied through /api/geo. Only fires if GPS was actually
+  //    denied or unavailable, never as a default.
   const ip = await fetch("/api/geo").then((r) => r.ok ? r.json() : null).catch(() => null);
   if (ip?.lat != null && ip?.lon != null) {
     return {
@@ -312,38 +350,11 @@ function WeatherWidget() {
   const [err, setErr] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cityInput, setCityInput] = useState("");
-  const [requestingGps, setRequestingGps] = useState(false);
-
-  // Explicit GPS request — when IP geo lands the user in the wrong city
-  // (VPN, ISP routing, etc.), they hit this to force a permission prompt.
-  async function requestGps() {
-    if (!("geolocation" in navigator)) return;
-    setRequestingGps(true);
-    try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          timeout: 12000,
-          enableHighAccuracy: true,
-        });
-      });
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      const rg = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&count=1`).then((r) => r.json()).catch(() => null);
-      const loc: WeatherLoc = { lat, lon, city: rg?.results?.[0]?.name ?? "Current location", source: "gps" };
-      saveCachedLoc(loc);
-      const w = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code`);
-      const j = await w.json();
-      setData({ tempC: j.current.temperature_2m, code: j.current.weather_code, city: loc.city, source: "gps" });
-      setErr(false);
-    } catch {
-      setErr(true);
-    } finally {
-      setRequestingGps(false);
-    }
-  }
 
   useEffect(() => {
     let cancelled = false;
+    let watchId: number | null = null;
+
     async function fetchAt(loc: WeatherLoc) {
       try {
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code`;
@@ -357,26 +368,64 @@ function WeatherWidget() {
         if (!cancelled) setErr(true);
       }
     }
+
     async function load() {
-      // Hit cache first so weather appears instantly
+      // Paint cached location instantly so widget isn't blank during GPS wait.
+      // Skip if user manually overrode — manual is sticky until explicitly changed.
       const cached = loadCachedLoc();
+      if (cached && cached.source === "manual") {
+        fetchAt(cached);
+        return;
+      }
       if (cached) fetchAt(cached);
-      // Then refresh location (silent unless cache empty)
+      // Resolve fresh location · GPS-first, IP only on permission denial.
       try {
         const fresh = await resolveLocation();
         if (cancelled) return;
         saveCachedLoc(fresh);
-        // Only re-fetch if coords moved meaningfully (>5 km) or first run
-        if (!cached || Math.hypot(cached.lat - fresh.lat, cached.lon - fresh.lon) > 0.05) {
+        // Refetch only if moved >100m (one-block precision) or first run.
+        if (!cached || Math.hypot(cached.lat - fresh.lat, cached.lon - fresh.lon) > 0.001) {
           fetchAt(fresh);
         }
       } catch {
         if (!cached) setErr(true);
       }
     }
+
     load();
+
+    // Live position tracking · if the user grants GPS we keep a watch open so
+    // the widget updates if they move to a new city. Cheap because the OS only
+    // fires when the position actually changes meaningfully.
+    if ("geolocation" in navigator) {
+      try {
+        watchId = navigator.geolocation.watchPosition(
+          async (pos) => {
+            if (cancelled) return;
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            const city = await reverseGeocode(lat, lon);
+            const loc: WeatherLoc = { lat, lon, city, source: "gps" };
+            const cur = loadCachedLoc();
+            // Skip update if user has a manual override active.
+            if (cur?.source === "manual") return;
+            if (!cur || Math.hypot(cur.lat - lat, cur.lon - lon) > 0.001) {
+              saveCachedLoc(loc);
+              fetchAt(loc);
+            }
+          },
+          () => {/* swallow — initial resolveLocation already handled fallback */},
+          { enableHighAccuracy: true, maximumAge: 60_000, timeout: 30_000 }
+        );
+      } catch {}
+    }
+
     const interval = setInterval(load, 15 * 60 * 1000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      if (watchId != null && "geolocation" in navigator) navigator.geolocation.clearWatch(watchId);
+    };
   }, []);
 
   async function submitManualCity() {
@@ -387,7 +436,6 @@ function WeatherWidget() {
     saveCachedLoc(loc);
     setEditing(false);
     setCityInput("");
-    // Force-refresh weather at the new spot
     try {
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code`;
       const r = await fetch(url);
@@ -398,7 +446,6 @@ function WeatherWidget() {
   }
 
   const icon = data ? weatherIcon(data.code) : "—";
-  const sourceTag = data?.source === "gps" ? "GPS" : data?.source === "manual" ? "MANUAL" : data?.source === "ip" ? "IP" : "";
   return (
     <div
       className="absolute pointer-events-auto"
@@ -413,7 +460,7 @@ function WeatherWidget() {
         textAlign: "center",
         boxShadow: "3px 3px 0 var(--shadow)",
       }}
-      title="Open-Meteo · click city to override"
+      title="Auto-detected from your device. Double-click to override."
       onDoubleClick={() => setEditing(true)}
     >
       <div className="flex items-center justify-center gap-2">
@@ -421,23 +468,6 @@ function WeatherWidget() {
         <span className="font-pixel" style={{ color: "var(--fg)", fontSize: 18, lineHeight: 1 }}>
           {data ? `${Math.round(data.tempC)}°C` : err ? "—" : "…"}
         </span>
-        <button
-          onClick={(e) => { e.stopPropagation(); requestGps(); }}
-          disabled={requestingGps}
-          title="Use my real GPS location"
-          aria-label="Use GPS"
-          style={{
-            background: "transparent",
-            border: "1px solid var(--surface-2)",
-            color: data?.source === "gps" ? "var(--success)" : "var(--accent)",
-            cursor: "pointer",
-            fontSize: 11,
-            padding: "1px 5px",
-            lineHeight: 1,
-          }}
-        >
-          {requestingGps ? "…" : "🎯"}
-        </button>
       </div>
       {editing ? (
         <input
@@ -462,29 +492,15 @@ function WeatherWidget() {
           }}
         />
       ) : (
-        <button
-          onClick={() => setEditing(true)}
-          className="font-mono mt-1 w-full"
+        <div
+          className="font-mono mt-1"
           style={{
-            background: "transparent",
-            border: "none",
-            borderBottom: "1px dashed var(--surface-2)",
-            color: data?.source === "ip" ? "var(--warn)" : "var(--muted)",
+            color: "var(--muted)",
             fontSize: 9,
             letterSpacing: "0.08em",
-            cursor: "pointer",
           }}
-          title="Click to type your city — overrides IP geolocation"
         >
           {data?.city ?? (err ? "offline" : "locating…")}
-          {sourceTag && (
-            <span style={{ marginLeft: 4, color: data?.source === "ip" ? "var(--warn)" : "var(--accent)", fontSize: 8 }}>· {sourceTag}</span>
-          )}
-        </button>
-      )}
-      {data?.source === "ip" && !editing && (
-        <div className="font-mono mt-1" style={{ fontSize: 8, color: "var(--muted)", lineHeight: 1.3 }}>
-          wrong city? tap 🎯 for GPS<br/>or click name to type
         </div>
       )}
     </div>
