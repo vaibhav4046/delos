@@ -1,8 +1,17 @@
 import { subscribeLive, listRuns, ensureDemoSeed } from "@/lib/runLog";
+import { NextRequest } from "next/server";
+import { resolveTenant } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Tenant gate (QA report BUG-3) — /api/live was streaming every run across
+  // every tenant to anyone. Now: snapshot + live events are filtered to the
+  // caller's resolved tenant. Demo-seeded "seed-demo-*" run is allowed to
+  // pass for marketing surface (it has no PII).
+  const { tenantId } = await resolveTenant(req);
+  const allowed = (rec: { tenantId: string; runId: string }) =>
+    rec.tenantId === tenantId || rec.runId.startsWith("seed-demo-");
   const stream = new ReadableStream({
     start(controller) {
       const enc = new TextEncoder();
@@ -14,8 +23,13 @@ export async function GET() {
       // Initial snapshot — last 50 runs. Seed first if cold Lambda has empty cache
       // so judges landing on /live always see at least one completed run.
       ensureDemoSeed();
-      send({ type: "snapshot", runs: listRuns(50).map((r) => snap(r)) });
+      send({
+        type: "snapshot",
+        runs: listRuns(50).filter(allowed).map((r) => snap(r)),
+        scope: tenantId,
+      });
       const unsub = subscribeLive((ev) => {
+        if (!allowed(ev.rec)) return;
         send({ type: ev.type, rec: snap(ev.rec) });
       });
       // Heartbeat to keep connection alive

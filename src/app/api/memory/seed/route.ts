@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { safeAddMemory, ensureTenant } from "@/lib/hydra";
-import { env } from "@/lib/env";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
+import { resolveTenant } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
@@ -60,8 +60,9 @@ export async function POST(req: NextRequest) {
       { status: 429, headers: lim.headers },
     );
   }
-  const body = await req.json().catch(() => ({})) as { tenantId?: string };
-  const tenantId = (body.tenantId && body.tenantId.length <= 120 ? body.tenantId : env.DELRIO_TENANT_ID);
+  // BOLA fix (QA report BUG-1) — tenantId comes from session, never body.
+  // Previously any caller could seed memory under any tenantId.
+  const { tenantId } = await resolveTenant(req);
   await ensureTenant(tenantId);
   const added: string[] = [];
   const failed: string[] = [];

@@ -10,6 +10,7 @@ import { env } from "@/lib/env";
 import { getServerSession } from "@/lib/session";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
+import { zodErr, bindRun } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
   }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return new Response(JSON.stringify({ error: parsed.error.message }), { status: 400 });
+    return zodErr(parsed.error);
   }
   const { goal: rawGoal, chaos, interrupt, maxSteps, models, mcpServers, tenantId, temperature, identity } = parsed.data;
   // JarvisOS: prepend identity preamble so every agent's outputs match the user's tone, format, role.
@@ -98,6 +99,11 @@ export async function POST(req: NextRequest) {
             // First event is always `meta` with runId — establish log record
             if (ev.t === "meta" && !resolvedRunId) {
               resolvedRunId = ev.runId;
+              // Record runId→tenant binding so /api/steer can verify ownership.
+              // Lives in a per-Lambda Map; survives long enough for STEER on
+              // any same-region request, and unknown bindings get the same
+              // optimistic-queue treatment as before.
+              bindRun(ev.runId, effectiveTenant);
               const rec = recordRunStart({ runId: ev.runId, tenantId: effectiveTenant, goal });
               broadcastLive({ type: "start", rec });
             }

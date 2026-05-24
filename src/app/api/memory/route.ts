@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { safeRecall, getLocalFallback, safeAddMemory, ensureTenant } from "@/lib/hydra";
-import { env } from "@/lib/env";
+import { resolveTenant } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
@@ -37,11 +37,14 @@ async function autoSeedIfEmpty(tenantId: string) {
 
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q") ?? "recent runs";
-  const tenantId = req.nextUrl.searchParams.get("tenantId") || env.DELRIO_TENANT_ID;
+  // BOLA fix (QA report BUG-1) — tenantId is resolved server-side from the
+  // signed session cookie, never from the query string. Anonymous callers
+  // are scoped to a per-IP anon tenant so they only see their own writes.
+  const { tenantId, source } = await resolveTenant(req);
   const topKParam = req.nextUrl.searchParams.get("topK");
   const topK = topKParam ? Math.max(1, Math.min(50, Number(topKParam))) : 12;
   await autoSeedIfEmpty(tenantId);
   const hits = await safeRecall({ tenantId, query: q, topK });
   const local = getLocalFallback().slice(-50).reverse();
-  return Response.json({ query: q, hits, local, tenantId });
+  return Response.json({ query: q, hits, local, tenantId, scope: source });
 }
