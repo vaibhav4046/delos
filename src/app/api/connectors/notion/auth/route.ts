@@ -2,7 +2,7 @@
 // Requires NOTION_OAUTH_CLIENT_ID + NOTION_OAUTH_REDIRECT_URI envs.
 // Without them, returns 503 with setup instructions (honest probe).
 
-import { env } from "@/lib/env";
+import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
 
@@ -29,8 +29,8 @@ export async function GET() {
     );
   }
 
-  // Anti-CSRF state token — bind to tenant. In prod, persist in HydraDB or signed cookie.
-  const state = `delos-${env.DELRIO_TENANT_ID}-${Math.random().toString(36).slice(2, 14)}`;
+  // Anti-CSRF state: cryptographically random nonce persisted in cookie.
+  const state = `delos-${randomBytes(18).toString("base64url")}`;
 
   const authUrl = new URL("https://api.notion.com/v1/oauth/authorize");
   authUrl.searchParams.set("client_id", clientId);
@@ -39,5 +39,10 @@ export async function GET() {
   authUrl.searchParams.set("redirect_uri", redirectUri);
   authUrl.searchParams.set("state", state);
 
-  return Response.redirect(authUrl.toString(), 302);
+  const res = new Response(null, { status: 302, headers: { Location: authUrl.toString() } });
+  res.headers.append(
+    "Set-Cookie",
+    `delos_oauth_state_notion=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+  );
+  return res;
 }

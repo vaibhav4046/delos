@@ -39,6 +39,15 @@ export async function GET(req: NextRequest) {
   if (!code || !state || !state.startsWith("delos-")) {
     return Response.json({ ok: false, error: "missing or invalid state/code" }, { status: 400 });
   }
+  // CSRF: state must match the cookie set by the initiator. The Gmail flow
+  // also covers signin-only ("-signin" suffix) which the google sign-in
+  // route handles via delos_oauth_state_google.
+  const isSignIn = state.endsWith("-signin");
+  const cookieName = isSignIn ? "delos_oauth_state_google" : "delos_oauth_state_gmail";
+  const expectedState = req.cookies.get(cookieName)?.value ?? "";
+  if (!expectedState || expectedState !== state) {
+    return Response.redirect(`${url.origin}/os?connector_error=gmail_state_mismatch`, 302);
+  }
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -117,8 +126,18 @@ export async function GET(req: NextRequest) {
       "Set-Cookie",
       `delos_session=${session}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 24 * 3600}`,
     );
+    // Burn the one-shot state cookies.
+    res.headers.append(
+      "Set-Cookie",
+      `${cookieName}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+    );
     return res;
   }
 
-  return Response.redirect(`${url.origin}/os?connector_success=gmail`, 302);
+  const fallback = new Response(null, { status: 302, headers: { Location: `${url.origin}/os?connector_success=gmail` } });
+  fallback.headers.append(
+    "Set-Cookie",
+    `${cookieName}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+  );
+  return fallback;
 }

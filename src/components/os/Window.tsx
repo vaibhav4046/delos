@@ -4,6 +4,10 @@ import * as Icons from "lucide-react";
 import { motion, useDragControls } from "framer-motion";
 import { AppErrorBoundary } from "./ErrorBoundary";
 
+// Snap targets — half-screen edges, quarter-screen corners, full top/bottom.
+// Wired up to Win+arrow shortcuts and drag-to-edge detection.
+export type SnapKind = "L" | "R" | "T" | "B" | "TL" | "TR" | "BL" | "BR" | "FULL";
+
 export type WindowChild = {
   id: string;
   title: string;
@@ -37,7 +41,7 @@ export function Window({
   onMinimize: () => void;
   onMaximize: () => void;
   onRefresh: () => void;
-  onSnap: (side: "L" | "R") => void;
+  onSnap: (side: SnapKind) => void;
   onDragEnd: (x: number, y: number) => void;
   bounds: { width: number; height: number };
   maximized?: boolean;
@@ -87,9 +91,21 @@ export function Window({
           if (maximized) return;
           const nx = win.x + info.offset.x;
           const ny = win.y + info.offset.y;
-          // Edge-snap detection
-          if (nx <= 8) onSnap("L");
-          else if (nx + win.width >= bounds.width - 8) onSnap("R");
+          // Edge-snap detection — Aero-style 8 zones:
+          //   top-edge → FULL maximize · bottom strip → minimize-style stay
+          //   left/right edge → half · within ~25% corner → quarter snap
+          const cornerY = bounds.height * 0.28;
+          const cornerYBot = bounds.height * 0.72;
+          const leftEdge = nx <= 8;
+          const rightEdge = nx + win.width >= bounds.width - 8;
+          const topEdge = ny <= 56; // below top bar
+          if (topEdge && !leftEdge && !rightEdge) onSnap("FULL");
+          else if (leftEdge && ny < cornerY) onSnap("TL");
+          else if (leftEdge && ny > cornerYBot) onSnap("BL");
+          else if (rightEdge && ny < cornerY) onSnap("TR");
+          else if (rightEdge && ny > cornerYBot) onSnap("BR");
+          else if (leftEdge) onSnap("L");
+          else if (rightEdge) onSnap("R");
           else onDragEnd(nx, ny);
         }}
         onMouseDown={onFocus}

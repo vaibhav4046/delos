@@ -4,7 +4,7 @@ import Link from "next/link";
 import * as Icons from "lucide-react";
 import { Boot } from "@/components/os/Boot";
 import * as BrandIcons from "@/components/BrandIcons";
-import { Window, type WindowChild } from "@/components/os/Window";
+import { Window, type WindowChild, type SnapKind } from "@/components/os/Window";
 import { ToastStack, type ToastItem } from "@/components/os/Toast";
 import { Logo } from "@/components/Logo";
 import { Terminal, MissionControl, NotesApp, AppBuilder, AboutApp } from "@/components/os/systemApps";
@@ -267,6 +267,8 @@ export default function OSPage() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [launchpadOpen, setLaunchpadOpen] = useState(false);
+  const [hintsDismissed, setHintsDismissed] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const zCounter = useRef(10);
   const spawnOffset = useRef(0);
@@ -464,22 +466,97 @@ export default function OSPage() {
     setWindows((p) => p.map((w) => (w.id === id ? { ...w, refreshKey: w.refreshKey + 1 } : w)));
     pushToast("refreshed", "info");
   }
-  function snapWin(id: string, side: "L" | "R") {
+  function snapWin(id: string, side: SnapKind) {
+    const TOP = 48;       // top bar
+    const BOTTOM = 56;    // dock reserve
+    const innerH = viewport.height - TOP - BOTTOM;
+    const innerW = viewport.width;
+    const halfH = innerH / 2;
+    const halfW = innerW / 2;
+    const layouts: Record<SnapKind, { x: number; y: number; width: number; height: number }> = {
+      L:    { x: 0,        y: TOP,         width: halfW, height: innerH },
+      R:    { x: halfW,    y: TOP,         width: halfW, height: innerH },
+      T:    { x: 0,        y: TOP,         width: innerW, height: halfH },
+      B:    { x: 0,        y: TOP + halfH, width: innerW, height: halfH },
+      TL:   { x: 0,        y: TOP,         width: halfW, height: halfH },
+      TR:   { x: halfW,    y: TOP,         width: halfW, height: halfH },
+      BL:   { x: 0,        y: TOP + halfH, width: halfW, height: halfH },
+      BR:   { x: halfW,    y: TOP + halfH, width: halfW, height: halfH },
+      FULL: { x: 0,        y: TOP,         width: innerW, height: innerH },
+    };
+    const layout = layouts[side];
     setWindows((p) =>
       p.map((w) =>
-        w.id === id
-          ? {
-              ...w,
-              x: side === "L" ? 0 : viewport.width / 2,
-              y: 48,
-              width: viewport.width / 2,
-              height: viewport.height - 48 - 56,
-              maximized: false,
-            }
-          : w,
+        w.id === id ? { ...w, ...layout, maximized: false } : w,
       ),
     );
-    pushToast(`snapped ${side === "L" ? "left" : "right"}`, "info");
+    const labels: Record<SnapKind, string> = {
+      L: "left half", R: "right half", T: "top half", B: "bottom half",
+      TL: "top-left", TR: "top-right", BL: "bottom-left", BR: "bottom-right",
+      FULL: "full screen",
+    };
+    pushToast(`snapped ${labels[side]}`, "info");
+  }
+
+  // Auto-tile every open (non-minimized) window into a balanced grid.
+  // 1 → fullscreen · 2 → halves · 3 → big L + 2 right · 4 → 2x2 · ≥5 → wraps.
+  function gridArrange() {
+    const visible = windows.filter((w) => !w.minimized);
+    if (visible.length === 0) {
+      pushToast("no windows to tile", "warn");
+      return;
+    }
+    const TOP = 48;
+    const BOTTOM = 56;
+    const innerH = viewport.height - TOP - BOTTOM;
+    const innerW = viewport.width;
+    const n = visible.length;
+    let cols = Math.ceil(Math.sqrt(n));
+    if (n === 2) cols = 2;
+    if (n === 3) cols = 3;
+    const rows = Math.ceil(n / cols);
+    const cellW = innerW / cols;
+    const cellH = innerH / rows;
+    setWindows((p) => {
+      const next = [...p];
+      let i = 0;
+      for (const w of next) {
+        if (w.minimized) continue;
+        const r = Math.floor(i / cols);
+        const c = i % cols;
+        w.x = c * cellW;
+        w.y = TOP + r * cellH;
+        w.width = cellW;
+        w.height = cellH;
+        w.maximized = false;
+        i += 1;
+      }
+      return next;
+    });
+    pushToast(`tiled ${n} window${n === 1 ? "" : "s"} into ${cols}×${rows} grid`, "info");
+  }
+
+  // Cascade — stack windows diagonally so each title bar is visible.
+  function cascadeArrange() {
+    const visible = windows.filter((w) => !w.minimized);
+    if (visible.length === 0) return;
+    const baseW = Math.min(720, viewport.width * 0.6);
+    const baseH = Math.min(520, (viewport.height - 48 - 56) * 0.7);
+    setWindows((p) => {
+      const next = [...p];
+      let i = 0;
+      for (const w of next) {
+        if (w.minimized) continue;
+        w.x = 48 + i * 32;
+        w.y = 64 + i * 32;
+        w.width = baseW;
+        w.height = baseH;
+        w.maximized = false;
+        i += 1;
+      }
+      return next;
+    });
+    pushToast(`cascaded ${visible.length} window${visible.length === 1 ? "" : "s"}`, "info");
   }
   function focusWin(id: string) {
     zCounter.current += 1;
@@ -626,11 +703,34 @@ export default function OSPage() {
           refreshWin(focusedId);
         }
       }
+      // Launchpad — F4 or Cmd+Space (same vibe as Mac Launchpad / Windows Start)
+      if (e.key === "F4" || (isMod && e.code === "Space")) {
+        e.preventDefault();
+        setLaunchpadOpen((v) => !v);
+        return;
+      }
+      // Win+Arrow snap shortcuts (only when meta key is down — leave Cmd+Left for browsers)
+      if (e.metaKey && focusedId && !e.ctrlKey) {
+        if (e.key === "ArrowLeft")  { e.preventDefault(); snapWin(focusedId, e.shiftKey ? "BL" : e.altKey ? "TL" : "L"); }
+        if (e.key === "ArrowRight") { e.preventDefault(); snapWin(focusedId, e.shiftKey ? "BR" : e.altKey ? "TR" : "R"); }
+        if (e.key === "ArrowUp")    { e.preventDefault(); snapWin(focusedId, "FULL"); }
+        if (e.key === "ArrowDown")  { e.preventDefault(); minimizeWin(focusedId); }
+      }
+      // Tile shortcut — Cmd+G
+      if (isMod && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        gridArrange();
+      }
+      // Cascade — Cmd+Shift+C
+      if (isMod && e.shiftKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        cascadeArrange();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusedId, paletteOpen, ctxMenu]);
+  }, [focusedId, paletteOpen, ctxMenu, windows.length]);
 
   const commands: Command[] = useMemo(() => {
     const launches: Command[] = dockOrder.map((key) => ({

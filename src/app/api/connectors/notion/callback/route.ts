@@ -20,6 +20,11 @@ export async function GET(req: NextRequest) {
   if (!code || !state || !state.startsWith("delos-")) {
     return Response.json({ ok: false, error: "missing or invalid state/code" }, { status: 400 });
   }
+  // CSRF: callback state must match the cookie set by the initiator.
+  const expectedState = req.cookies.get("delos_oauth_state_notion")?.value ?? "";
+  if (!expectedState || expectedState !== state) {
+    return Response.redirect(`${url.origin}/os?connector_error=notion_state_mismatch`, 302);
+  }
 
   const clientId = process.env.NOTION_OAUTH_CLIENT_ID;
   const clientSecret = process.env.NOTION_OAUTH_CLIENT_SECRET;
@@ -40,7 +45,6 @@ export async function GET(req: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    const errText = await tokenRes.text().catch(() => "");
     return Response.redirect(
       `${url.origin}/os?connector_error=notion_${encodeURIComponent(`token_exchange_${tokenRes.status}`)}`,
       302,
@@ -75,5 +79,10 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  return Response.redirect(`${url.origin}/os?connector_success=notion`, 302);
+  const res = new Response(null, { status: 302, headers: { Location: `${url.origin}/os?connector_success=notion` } });
+  res.headers.append(
+    "Set-Cookie",
+    `delos_oauth_state_notion=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+  );
+  return res;
 }
