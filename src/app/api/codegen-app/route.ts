@@ -50,8 +50,13 @@ const GROQ_CASCADE = [
 // sliding cap even when the plan call is fresh in the same window.
 // 10 files × 5.5K + plan 4K = 59K tokens but spread over ~30s = ~110K/min raw,
 // so the sliding window naturally drains between batches.
-const WRITE_PARALLEL = 1;
-const BATCH_SLEEP_MS = 2500;
+// Codegen used to write 1-at-a-time + 2.5s sleep to avoid Groq's 30K TPM
+// ceiling. With Cerebras + DeepSeek + OpenRouter now in the cascade (each
+// on independent quotas, sub-second latency for Cerebras), the TPM bottleneck
+// disappears — bump to 3-wide writes + 600ms sleep so 12-file clones land
+// well under Vercel's 90s ceiling instead of timing out on Uber/Claude/etc.
+const WRITE_PARALLEL = 3;
+const BATCH_SLEEP_MS = 600;
 
 /**
  * Send a JSON-mode completion to Groq. Throws on non-2xx so the caller can
@@ -368,14 +373,17 @@ async function llmJson(prompt: string, system: string, maxTokens: number): Promi
   // into Cerebras / Together. The codegen pipeline keeps going through
   // EVERY available free model before surfacing an error.
   const providers: Array<{ name: string; call: () => Promise<string> }> = [
-    { name: "groq",       call: () => groqJson(prompt, system, maxTokens) },
+    // Cerebras llama-3.3-70b — sub-second inference, the only way 12-file
+    // clones land under Vercel's 90s function ceiling. Used to be position
+    // #2 but Groq's 200-1000ms latency + sleep was timing out Uber / Claude
+    // clones at the WRITE pass. Cerebras leads now.
     { name: "cerebras",   call: () => cerebrasJson(prompt, system, maxTokens) },
+    { name: "groq",       call: () => groqJson(prompt, system, maxTokens) },
     // DeepSeek deepseek-chat — best code quality of any free-tier provider
-    // in our benchmark. Steps in early so the codegen has a strong second
-    // option before falling to OpenRouter / Gemini.
+    // in our benchmark. Strong second option before falling to OpenRouter.
     { name: "deepseek",   call: () => deepseekJson(prompt, system, maxTokens) },
     // OpenRouter qwen-3-coder — coder specialist. Pricier latency
-    // than Groq but better JSX quality. Steps in on Groq 429.
+    // than Groq but better JSX quality.
     { name: "openrouter", call: () => openRouterJson(prompt, system, maxTokens) },
     { name: "gemini",     call: () => geminiJson(prompt, system, Math.max(maxTokens, 6000)) },
     { name: "together",   call: () => togetherJson(prompt, system, maxTokens) },
