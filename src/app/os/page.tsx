@@ -578,6 +578,9 @@ export default function OSPage() {
   function moveWin(id: string, x: number, y: number) {
     setWindows((p) => p.map((w) => (w.id === id ? { ...w, x, y } : w)));
   }
+  function resizeWin(id: string, rect: { x: number; y: number; width: number; height: number }) {
+    setWindows((p) => p.map((w) => (w.id === id ? { ...w, ...rect, maximized: false } : w)));
+  }
 
   useEffect(() => {
     function onToast(e: Event) {
@@ -627,17 +630,23 @@ export default function OSPage() {
           break;
       }
     }
+    function onTileAll() { gridArrange(); }
+    function onCascadeAll() { cascadeArrange(); }
     desktopBus.addEventListener("toast", onToast);
     desktopBus.addEventListener("spawn-spec", onSpawn);
     window.addEventListener("toast", onToast as EventListener);
     window.addEventListener("spawn-spec", onSpawn as EventListener);
     window.addEventListener("delos-voice-action", onVoiceAction as EventListener);
+    window.addEventListener("delos-tile-all", onTileAll);
+    window.addEventListener("delos-cascade-all", onCascadeAll);
     return () => {
       desktopBus.removeEventListener("toast", onToast);
       desktopBus.removeEventListener("spawn-spec", onSpawn);
       window.removeEventListener("toast", onToast as EventListener);
       window.removeEventListener("spawn-spec", onSpawn as EventListener);
       window.removeEventListener("delos-voice-action", onVoiceAction as EventListener);
+      window.removeEventListener("delos-tile-all", onTileAll);
+      window.removeEventListener("delos-cascade-all", onCascadeAll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -885,6 +894,7 @@ export default function OSPage() {
                 onMaximize={() => maximizeWin(w.id)}
                 onRefresh={() => refreshWin(w.id)}
                 onSnap={(side) => snapWin(w.id, side)}
+                onResize={(rect) => resizeWin(w.id, rect)}
                 onDragEnd={(x, y) => moveWin(w.id, x, y)}
                 bounds={viewport}
               />

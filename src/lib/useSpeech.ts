@@ -400,17 +400,52 @@ export type VoiceAction = {
   reply: string;
 };
 
+// Network-resilient command interpreter. Retries up to 2 times on transient
+// failure (5xx / network) with exponential backoff. Hard-fail after 10s total.
+// Falls back to a local "answer" payload so the voice loop never silently
+// stalls — user always hears something.
 export async function interpretCommand(transcript: string): Promise<VoiceAction | null> {
-  try {
-    const r = await fetch("/api/voice-command", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transcript }),
-    });
-    if (!r.ok) return null;
-    const j = (await r.json()) as VoiceAction;
-    return j;
-  } catch {
-    return null;
+  const deadline = Date.now() + 10_000;
+  let attempt = 0;
+  let lastErr: unknown = null;
+  while (Date.now() < deadline && attempt < 3) {
+    attempt += 1;
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 6500);
+    try {
+      const r = await fetch("/api/voice-command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timeout);
+      if (r.status === 429) {
+        // rate limited — surface to caller, don't retry
+        return { intent: "answer", reply: "Slow down — voice agent is rate-limited. Try again in a moment." };
+      }
+      if (r.status >= 500) {
+        lastErr = new Error(`http ${r.status}`);
+        await sleep(250 * attempt);
+        continue;
+      }
+      if (!r.ok) return null;
+      const j = (await r.json()) as VoiceAction;
+      return j;
+    } catch (e) {
+      clearTimeout(timeout);
+      lastErr = e;
+      // network blip / abort — back off and retry
+      await sleep(250 * attempt);
+    }
   }
+  if (lastErr) {
+    console.warn("[voice] interpretCommand failed after retries:", lastErr);
+  }
+  // Friendly fallback so TTS still says something.
+  return { intent: "answer", reply: "I lost the network connection. Please try again." };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
