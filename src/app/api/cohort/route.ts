@@ -4,9 +4,14 @@ import { generateText } from "ai";
 import { resolveModel, withModels, type ModelKey } from "@/lib/llm";
 import { runQuickAgent } from "@/lib/agents/quick";
 import { generateJson } from "@/lib/agents/jsonGen";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// Cohort fans out to N models in parallel — capped low to protect Groq TPM.
+const COHORT_LIMIT_PER_MIN = 6;
+const COHORT_WINDOW_MS = 60_000;
 
 const modelKey = z.enum([
   "groq:openai/gpt-oss-120b",
@@ -34,6 +39,14 @@ const verdictSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const ip = clientIp(req);
+  const lim = rateLimit(`cohort:ip:${ip}`, COHORT_LIMIT_PER_MIN, COHORT_WINDOW_MS);
+  if (!lim.ok) {
+    return Response.json(
+      { error: "Too many cohort requests. Try again shortly." },
+      { status: 429, headers: lim.headers },
+    );
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return Response.json({ error: parsed.error.message }, { status: 400 });

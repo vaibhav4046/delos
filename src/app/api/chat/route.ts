@@ -3,9 +3,15 @@ import { z } from "zod";
 import { streamText } from "ai";
 import { resolveModel, withModels, type ModelKey } from "@/lib/llm";
 import { callTool, listTools } from "@/lib/mcp/client";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// Cap LLM cost abuse: 20 streams/min per IP. A real chat user sends 1-2
+// per minute; bots scraping our LLM keys would push much higher.
+const CHAT_LIMIT_PER_MIN = 20;
+const CHAT_WINDOW_MS = 60_000;
 
 const modelKey = z.enum([
   "groq:openai/gpt-oss-120b",
@@ -33,6 +39,14 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const ip = clientIp(req);
+  const lim = rateLimit(`chat:ip:${ip}`, CHAT_LIMIT_PER_MIN, CHAT_WINDOW_MS);
+  if (!lim.ok) {
+    return new Response(JSON.stringify({ error: "Too many chat requests. Try again shortly." }), {
+      status: 429,
+      headers: { ...lim.headers, "Content-Type": "application/json" },
+    });
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return new Response(JSON.stringify({ error: parsed.error.message }), { status: 400 });

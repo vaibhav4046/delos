@@ -3,7 +3,7 @@
 // "this app is not verified" warning. For Gmail data access (sensitive),
 // use /api/connectors/gmail/auth instead — that path still requires verification.
 
-import { env } from "@/lib/env";
+import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
 
@@ -30,7 +30,11 @@ export async function GET() {
     );
   }
 
-  const state = `delos-${env.DELRIO_TENANT_ID}-${Math.random().toString(36).slice(2, 14)}-signin`;
+  // Cryptographically random state, persisted in a short-lived cookie. The
+  // callback must echo it back exactly — otherwise an attacker could feed a
+  // victim a pre-prepared ?code= URL and have them sign in as the attacker.
+  const nonce = randomBytes(24).toString("base64url");
+  const state = `${nonce}-signin`;
 
   const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   u.searchParams.set("client_id", clientId);
@@ -43,5 +47,10 @@ export async function GET() {
   // include_granted_scopes lets users who already authorized Gmail keep that grant
   u.searchParams.set("include_granted_scopes", "true");
 
-  return Response.redirect(u.toString(), 302);
+  const res = new Response(null, { status: 302, headers: { Location: u.toString() } });
+  res.headers.append(
+    "Set-Cookie",
+    `delos_oauth_state_google=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+  );
+  return res;
 }

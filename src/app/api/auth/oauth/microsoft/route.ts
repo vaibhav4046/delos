@@ -1,7 +1,7 @@
 // Microsoft OAuth2 (Azure AD) sign-in initiator.
 // Requires MS_CLIENT_ID + MS_OAUTH_REDIRECT_URI envs. Honest 503 with setup instructions otherwise.
 
-import { env } from "@/lib/env";
+import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
 
@@ -31,7 +31,8 @@ export async function GET() {
     );
   }
 
-  const state = `delos-${env.DELRIO_TENANT_ID}-${Math.random().toString(36).slice(2, 14)}`;
+  // CSRF: random state persisted in cookie; callback must echo it back.
+  const state = randomBytes(24).toString("base64url");
   const u = new URL(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`);
   u.searchParams.set("client_id", clientId);
   u.searchParams.set("redirect_uri", redirectUri);
@@ -39,5 +40,11 @@ export async function GET() {
   u.searchParams.set("scope", SCOPES);
   u.searchParams.set("state", state);
   u.searchParams.set("response_mode", "query");
-  return Response.redirect(u.toString(), 302);
+
+  const res = new Response(null, { status: 302, headers: { Location: u.toString() } });
+  res.headers.append(
+    "Set-Cookie",
+    `delos_oauth_state_ms=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+  );
+  return res;
 }

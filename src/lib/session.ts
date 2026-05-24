@@ -11,7 +11,17 @@ export type Session = {
   tenantId: string;
 };
 
-const SECRET = process.env.AUTH_SECRET ?? "delos-dev-secret";
+// Resolve the signing secret once at module load. In production a missing
+// AUTH_SECRET means *anyone* who knows the literal default below can forge
+// a delos_session cookie — refuse to start instead.
+const SECRET = (() => {
+  const s = process.env.AUTH_SECRET;
+  if (s) return s;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUTH_SECRET is required in production");
+  }
+  return "delos-dev-secret";
+})();
 
 function hmacShort(body: string): string {
   return createHmac("sha256", SECRET).update(body).digest("base64url").slice(0, 32);

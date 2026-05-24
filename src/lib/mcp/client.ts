@@ -1,13 +1,17 @@
 import type { JsonRpcResponse, MCPToolSpec } from "./types";
+import { safeFetch } from "../safeUrl";
 
 let nextId = 1;
 
 async function rpc(url: string, method: string, params?: Record<string, unknown>): Promise<unknown> {
   const id = nextId++;
-  const res = await fetch(url, {
+  // User-supplied MCP URLs flow into /api/chat → here. Without the SSRF guard
+  // an attacker could point at a private metadata IP or internal service.
+  const res = await safeFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id, method, params: params ?? {} }),
+    timeoutMs: 10_000,
   });
   if (!res.ok) throw new Error(`MCP HTTP ${res.status} from ${url}`);
   const body = (await res.json()) as JsonRpcResponse;

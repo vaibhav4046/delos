@@ -32,8 +32,15 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const errParam = url.searchParams.get("error");
+  const returnedState = url.searchParams.get("state") ?? "";
   if (errParam) return Response.redirect(`${url.origin}/auth?error=ms_${encodeURIComponent(errParam)}`, 302);
   if (!code) return Response.json({ ok: false, error: "missing code" }, { status: 400 });
+
+  // CSRF: callback state must match the cookie set by the initiator.
+  const expectedState = req.cookies.get("delos_oauth_state_ms")?.value ?? "";
+  if (!expectedState || expectedState !== returnedState) {
+    return Response.redirect(`${url.origin}/auth?error=ms_state_mismatch`, 302);
+  }
 
   const clientId = process.env.MS_CLIENT_ID;
   const clientSecret = process.env.MS_CLIENT_SECRET;
@@ -84,6 +91,11 @@ export async function GET(req: NextRequest) {
   res.headers.append(
     "Set-Cookie",
     `delos_session=${session}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 24 * 3600}`,
+  );
+  // Burn the one-shot state cookie so it can't be replayed.
+  res.headers.append(
+    "Set-Cookie",
+    `delos_oauth_state_ms=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
   );
   void env; // referenced via deriveTenant
   return res;

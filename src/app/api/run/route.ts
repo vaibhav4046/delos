@@ -8,9 +8,13 @@ import { recordRunStart, recordEvent, broadcastLive, getRun, flushRunSnapshot } 
 import { recordRunStats } from "@/lib/stats";
 import { env } from "@/lib/env";
 import { getServerSession } from "@/lib/session";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+const RUN_LIMIT_PER_MIN = 10;
+const RUN_WINDOW_MS = 60_000;
 
 const modelKey = z
   .enum([
@@ -50,6 +54,14 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const ip = clientIp(req);
+  const lim = rateLimit(`run:ip:${ip}`, RUN_LIMIT_PER_MIN, RUN_WINDOW_MS);
+  if (!lim.ok) {
+    return new Response(JSON.stringify({ error: "Too many run requests. Try again shortly." }), {
+      status: 429,
+      headers: { ...lim.headers, "Content-Type": "application/json" },
+    });
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return new Response(JSON.stringify({ error: parsed.error.message }), { status: 400 });

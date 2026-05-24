@@ -45,6 +45,19 @@ export async function GET(req: NextRequest) {
     return Response.redirect(`${url.origin}/auth?error=expired_token`, 302);
   }
 
+  // Single-use enforcement: bail if this token hash was already consumed.
+  // Magic links live 15 min, so without this check an attacker who captures
+  // the URL (browser history, referrer leak, screen share) can mint multiple
+  // sessions until natural expiry.
+  const consumedHits = await safeRecall({
+    tenantId: env.DELRIO_TENANT_ID,
+    query: `AUTH_CONSUMED hash=${tokenHash}`,
+    topK: 5,
+  });
+  if (consumedHits.some((h) => h.text.startsWith("AUTH_CONSUMED") && h.text.includes(`hash=${tokenHash}`))) {
+    return Response.redirect(`${url.origin}/auth?error=token_already_used`, 302);
+  }
+
   // Mint 30-day session.
   const iat = Math.floor(Date.now() / 1000);
   const exp = iat + 30 * 24 * 3600;

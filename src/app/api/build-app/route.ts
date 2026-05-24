@@ -4,9 +4,13 @@ import { buildAppFromPrompt } from "@/lib/agents/appBuilder";
 import { safeAddMemory } from "@/lib/hydra";
 import { env } from "@/lib/env";
 import { withModels, type ModelOverrides, type ModelKey } from "@/lib/llm";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+const BUILD_LIMIT_PER_MIN = 8;
+const BUILD_WINDOW_MS = 60_000;
 
 const modelKey = z
   .enum([
@@ -29,6 +33,14 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const ip = clientIp(req);
+  const lim = rateLimit(`buildapp:ip:${ip}`, BUILD_LIMIT_PER_MIN, BUILD_WINDOW_MS);
+  if (!lim.ok) {
+    return Response.json(
+      { error: "Too many build-app requests. Try again shortly." },
+      { status: 429, headers: lim.headers },
+    );
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
