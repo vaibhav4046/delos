@@ -85,7 +85,12 @@ export type SiteStats = {
 };
 
 export async function getSiteStats(): Promise<SiteStats> {
-  const tools = { local: 6, mcp: 11, total: 17 };
+  // BUG-6 fix · single source of truth for tool count. Local registry is the
+  // canonical inventory; MCP demo count stays static (it's our own server).
+  const { buildRegistry } = await import("@/lib/tools/builtin");
+  const localCount = buildRegistry().list().length;
+  const mcpCount = 11;
+  const tools = { local: localCount, mcp: mcpCount, total: localCount + mcpCount };
   const endpoints = await countEndpoints();
   const apps = await countApps();
   const bag: StatsBag = G.__delrioStats ?? { runs_today: 0, avg_drift_7d: 0.07, replans_per_run_7d: 0.4, last_updated: Date.now() };

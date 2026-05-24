@@ -1,26 +1,34 @@
 import { safeAddMemory, ensureTenant } from "@/lib/hydra";
-import { env } from "@/lib/env";
+import { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { zodErr } from "@/lib/apiAuth";
+import { zodErr, resolveTenant } from "@/lib/apiAuth";
+import { sanitizeMemoryText, assertSafeTags, sanitizeTags } from "@/lib/sanitize";
 export const runtime = "nodejs";
 
+// tenantId removed from request body (QA BUG-1) — server resolves it from
+// session cookie or per-IP anon scope. Same goes for /seed, /import,
+// /export, /memory.
 const Req = z.object({
   text: z.string().min(3).max(2000),
-  tenantId: z.string().default(env.DELRIO_TENANT_ID),
   tags: z.array(z.string()).default([]),
 });
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const parsed = Req.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return zodErr(parsed.error);
-  const { text, tenantId, tags } = parsed.data;
+  const { text, tags } = parsed.data;
+  // BUG-9 · hard-reject reserved tag names so callers learn the contract.
+  try { assertSafeTags(tags); } catch (r) { if (r instanceof Response) return r; throw r; }
+  const { tenantId } = await resolveTenant(req);
+  const safeText = sanitizeMemoryText(text);
+  const safeTags = sanitizeTags([...tags, "pinned"]);
   await ensureTenant(tenantId);
   await safeAddMemory({
     tenantId,
-    text,
+    text: safeText,
     metadata: {
-      tags: [...tags, "pinned"],
+      tags: safeTags,
       pinned: true,
       pinnedAt: Date.now(),
     },

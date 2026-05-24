@@ -29,6 +29,8 @@ const SECURITY_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  // BUG-7 fix · stop advertising the framework version in response headers.
+  poweredByHeader: false,
   async headers() {
     return [
       {
