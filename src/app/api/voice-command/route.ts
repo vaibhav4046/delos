@@ -53,7 +53,7 @@ const actionSchema = z.object({
   app: z.enum([
     "assistant", "identity", "ingest", "terminal", "browser", "builder",
     "cohort", "cores", "arena", "voice", "cowork", "mission", "marketplace",
-    "analytics", "files", "notes", "calendar", "calc", "sysinfo",
+    "oss", "analytics", "files", "notes", "calendar", "calc", "sysinfo",
     "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom",
     "settings", "about", "claude", "chatgpt", "perplexity",
   ]).optional(),
@@ -99,6 +99,7 @@ Map this to ONE action. Available intents:
    • cowork — Cowork autonomous orchestrator ("cowork", "autonomous mode")
    • mission — Mission Control ("mission control", "mission")
    • marketplace — Tool/MCP marketplace ("marketplace", "power-ups", "tools")
+   • oss — OSS Library, curated open-source projects DelOS pulls from ("oss library", "open source library", "show me the open source projects", "pi agent kit", "karpathy skills", "codegraph", "fincept", "presenton", "odoo", "understand anything")
    • analytics — Analytics dashboard ("analytics", "stats", "dashboard")
    • files — File explorer ("files", "file manager", "documents")
    • notes — Notes ("notes", "sticky notes")

@@ -26,6 +26,7 @@ import { IdentityApp } from "@/components/os/IdentityApp";
 import { CoresApp } from "@/components/os/CoresApp";
 import { CodebaseApp } from "@/components/os/CodebaseApp";
 import { IngestApp } from "@/components/os/IngestApp";
+import { OssLibraryApp } from "@/components/os/OssLibraryApp";
 import { OnboardingPortal, hasOnboarded } from "@/components/os/OnboardingPortal";
 import { setTenantId as setTenantIdGlobal } from "@/lib/useTenant";
 import { useViewport } from "@/lib/useViewport";
@@ -167,6 +168,12 @@ const SYSTEM_APPS: Record<string, DockItem> = {
     label: "Marketplace",
     icon: "Wrench",
     spawn: () => ({ id: "marketplace", title: "Power-Ups Marketplace", icon: "Wrench", width: 540, height: 520, content: <MarketplaceApp /> }),
+  },
+  oss: {
+    id: "oss",
+    label: "OSS Library",
+    icon: "LibraryBig",
+    spawn: () => ({ id: "oss", title: "OSS Library", icon: "LibraryBig", width: 560, height: 600, content: <OssLibraryApp /> }),
   },
   notes: {
     id: "notes",
@@ -666,8 +673,8 @@ export default function OSPage() {
       "assistant", "identity", "cohort", "arena", "voice", "cowork",
       // Builders (4)
       "builder", "codebase", "cores", "mission",
-      // Tools (5)
-      "ingest", "terminal", "browser", "marketplace", "analytics",
+      // Tools (6)
+      "ingest", "terminal", "browser", "marketplace", "oss", "analytics",
       // Files & notes (5)
       "files", "notes", "calendar", "calc", "sysinfo",
       // Games (6)

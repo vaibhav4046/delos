@@ -440,21 +440,26 @@ export function VoiceApp() {
             <span className="pill pill-warn mt-0.5 accent-pulse" style={{ fontSize: 9, flexShrink: 0 }}>
               ● LIVE
             </span>
-            <span className="text-[11px] leading-relaxed text-[color:var(--fg)] break-words">
-              {stt.transcript}
-              {stt.interim && (
-                <span style={{ color: "var(--muted)", fontStyle: "italic" }}>
-                  {stt.transcript ? " " : ""}
-                  {stt.interim}
-                </span>
-              )}
-              <span className="cursor" />
-            </span>
+            <div className="flex-1 min-w-0">
+              <span className="text-[11px] leading-relaxed text-[color:var(--fg)] break-words">
+                {stt.transcript}
+                {stt.interim && (
+                  <span style={{ color: "var(--muted)", fontStyle: "italic" }}>
+                    {stt.transcript ? " " : ""}
+                    {stt.interim}
+                  </span>
+                )}
+                <span className="cursor" />
+              </span>
+              <VoiceWaveform color="var(--accent)" bars={22} />
+            </div>
           </div>
         )}
         {phase === "transcribing" && (
           <div className="flex items-center gap-2 text-[color:var(--muted)]">
-            <Icons.Loader2 size={12} className="animate-spin" /> transcribing via Whisper…
+            <Icons.Loader2 size={12} className="animate-spin" />
+            <span>transcribing via Whisper…</span>
+            <VoiceWaveform color="var(--accent)" bars={18} />
           </div>
         )}
         {phase === "planning" && (
@@ -538,6 +543,55 @@ export function VoiceApp() {
       </div>
 
       {stt.error && <div className="pill pill-bad self-center">{stt.error}</div>}
+    </div>
+  );
+}
+
+// Yellow live-audio bars visible during listening + transcribing. Each bar is a
+// pre-shuffled CSS animation so the heights look organic without hooking the
+// actual mic stream (which would force AudioContext init + worklet plumbing
+// and stall Safari). Pure visual cue.
+function VoiceWaveform({ color = "var(--accent)", bars = 18 }: { color?: string; bars?: number }) {
+  const seeds = Array.from({ length: bars }, (_, i) => ({
+    delay: (i * 60) % 900,
+    duration: 480 + ((i * 73) % 420),
+    minH: 6 + ((i * 11) % 8),
+  }));
+  return (
+    <div
+      aria-hidden
+      className="voice-waveform"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 3,
+        height: 22,
+        marginTop: 4,
+        paddingLeft: 2,
+      }}
+    >
+      {seeds.map((s, i) => (
+        <span
+          key={i}
+          style={{
+            display: "inline-block",
+            width: 3,
+            height: s.minH,
+            background: color,
+            borderRadius: 1,
+            transformOrigin: "center",
+            animation: `voiceBar ${s.duration}ms ease-in-out ${s.delay}ms infinite alternate`,
+            boxShadow: `0 0 6px ${color}`,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes voiceBar {
+          0%   { transform: scaleY(0.4); opacity: 0.55; }
+          50%  { transform: scaleY(1.45); opacity: 1; }
+          100% { transform: scaleY(0.7); opacity: 0.8; }
+        }
+      `}</style>
     </div>
   );
 }

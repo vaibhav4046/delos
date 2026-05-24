@@ -3,29 +3,62 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as Icons from "lucide-react";
 import { onIntent } from "@/lib/intentBus";
 
-type Bookmark = { id: string; title: string; url: string };
+type Bookmark = { id: string; title: string; url: string; category?: BookmarkCategory };
+type BookmarkCategory = "delos" | "search" | "ai" | "finance" | "edu" | "tools" | "games" | "productivity";
 type SearchHit = { title: string; url: string; snippet: string };
 
 const DEFAULT_BOOKMARKS: Bookmark[] = [
-  { id: "del", title: "DelOS", url: "/" },
-  { id: "docs", title: "DelOS Docs", url: "/docs" },
-  { id: "duck", title: "DuckDuckGo", url: "https://duckduckgo.com" },
-  { id: "wiki", title: "Wikipedia", url: "https://wikipedia.org" },
-  { id: "hn", title: "Hacker News", url: "https://news.ycombinator.com" },
-  { id: "mdn", title: "MDN Web Docs", url: "https://developer.mozilla.org" },
-  { id: "hydra", title: "HydraDB", url: "https://hydradb.com" },
-  { id: "groq", title: "Groq Console", url: "https://console.groq.com" },
-  // OSS library — projects shipped for DelOS as one-click bookmarks. Source
-  // repos are large enough they ship as references rather than full ports;
-  // click → opens in a new tab (X-Frame-Options blocks iframe embed).
-  { id: "understand-anything", title: "Understand Anything (vision QA)", url: "https://github.com/Lum1104/Understand-Anything" },
-  { id: "codegraph", title: "CodeGraph (LLM graph)", url: "https://github.com/colbymchenry/codegraph" },
-  { id: "ai-eng", title: "AI Engineering from Scratch", url: "https://github.com/rohitg00/ai-engineering-from-scratch" },
-  { id: "fincept", title: "Fincept Terminal (finance)", url: "https://github.com/Fincept-Corporation/FinceptTerminal" },
-  { id: "presenton", title: "Presenton (slides)", url: "https://github.com/presenton/presenton" },
-  { id: "multica", title: "Multica (multi-agent)", url: "https://github.com/multica-ai/multica" },
-  { id: "secret-knowledge", title: "Book of Secret Knowledge", url: "https://github.com/trimstray/the-book-of-secret-knowledge" },
-  { id: "longlive", title: "NVlabs LongLive", url: "https://github.com/NVlabs/LongLive" },
+  // DelOS core
+  { id: "del", title: "DelOS", url: "/", category: "delos" },
+  { id: "docs", title: "Docs", url: "/docs", category: "delos" },
+  { id: "memory", title: "Memory", url: "/memory", category: "delos" },
+  { id: "status", title: "Status", url: "/status", category: "delos" },
+  // Search + reference
+  { id: "duck", title: "DuckDuckGo", url: "https://duckduckgo.com", category: "search" },
+  { id: "wiki", title: "Wikipedia", url: "https://wikipedia.org", category: "search" },
+  { id: "hn", title: "Hacker News", url: "https://news.ycombinator.com", category: "search" },
+  { id: "mdn", title: "MDN", url: "https://developer.mozilla.org", category: "search" },
+  // AI / OSS frameworks
+  { id: "pi", title: "Pi (earendil-works)", url: "https://github.com/earendil-works/pi", category: "ai" },
+  { id: "understand-anything", title: "Understand Anything", url: "https://github.com/Lum1104/Understand-Anything", category: "ai" },
+  { id: "codegraph", title: "CodeGraph", url: "https://github.com/colbymchenry/codegraph", category: "ai" },
+  { id: "karpathy-skills", title: "Karpathy Skills", url: "https://github.com/multica-ai/andrej-karpathy-skills", category: "ai" },
+  { id: "cyber-skills", title: "Anthropic Cybersec Skills", url: "https://github.com/mukul975/Anthropic-Cybersecurity-Skills", category: "ai" },
+  { id: "multica", title: "Multica (multi-agent)", url: "https://github.com/multica-ai/multica", category: "ai" },
+  { id: "longlive", title: "NVlabs LongLive", url: "https://github.com/NVlabs/LongLive", category: "ai" },
+  // Finance / Productivity / Education
+  { id: "fincept", title: "Fincept Terminal", url: "https://github.com/Fincept-Corporation/FinceptTerminal", category: "finance" },
+  { id: "ai-eng", title: "AI Engineering from Scratch", url: "https://github.com/rohitg00/ai-engineering-from-scratch", category: "edu" },
+  { id: "secret-knowledge", title: "Book of Secret Knowledge", url: "https://github.com/trimstray/the-book-of-secret-knowledge", category: "edu" },
+  { id: "presenton", title: "Presenton (slides)", url: "https://github.com/presenton/presenton", category: "productivity" },
+  { id: "odoo", title: "Odoo (ERP)", url: "https://github.com/odoo/odoo", category: "productivity" },
+  // Tools
+  { id: "hydra", title: "HydraDB", url: "https://hydradb.com", category: "tools" },
+  { id: "groq", title: "Groq Console", url: "https://console.groq.com", category: "tools" },
+  // Games
+  { id: "contra", title: "Contra (run-n-gun)", url: "https://github.com/clear-code-projects/Contra", category: "games" },
+];
+
+const CATEGORY_LABELS: Record<BookmarkCategory, string> = {
+  delos: "DELOS",
+  search: "SEARCH",
+  ai: "AI · AGENTS",
+  finance: "FINANCE",
+  edu: "EDUCATION",
+  productivity: "PRODUCTIVITY",
+  tools: "TOOLS",
+  games: "GAMES",
+};
+
+const CATEGORY_ORDER: BookmarkCategory[] = [
+  "delos",
+  "ai",
+  "search",
+  "productivity",
+  "finance",
+  "edu",
+  "tools",
+  "games",
 ];
 
 const STORE_KEY = "delos.browser.v1";
@@ -269,14 +302,33 @@ export function BrowserApp() {
         <button onClick={openExternal} className="pill pill-muted cursor-pointer" title="Open in new tab"><Icons.ExternalLink size={12} /></button>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto" style={{ maxHeight: 32 }}>
-        {bookmarks.map((b) => (
-          <span key={b.id} className="pill pill-muted flex items-center gap-1 cursor-pointer flex-shrink-0" onClick={() => navigate(b.url)}>
-            <Icons.Bookmark size={9} />
-            <span style={{ maxWidth: 100 }} className="truncate">{b.title}</span>
-            <button onClick={(e) => { e.stopPropagation(); removeBookmark(b.id); }} aria-label="remove"><Icons.X size={9} /></button>
-          </span>
-        ))}
+      <div className="flex gap-3 overflow-x-auto" style={{ maxHeight: 60, paddingBottom: 4 }}>
+        {CATEGORY_ORDER.map((cat) => {
+          const inCat = bookmarks.filter((b) => (b.category ?? "tools") === cat);
+          if (inCat.length === 0) return null;
+          return (
+            <div key={cat} className="flex flex-col gap-0.5 flex-shrink-0" style={{ minWidth: 0 }}>
+              <span className="font-pixel text-[8px] tracking-widest" style={{ color: "var(--muted)" }}>
+                {CATEGORY_LABELS[cat]}
+              </span>
+              <div className="flex gap-1">
+                {inCat.map((b) => (
+                  <span
+                    key={b.id}
+                    className="pill pill-muted flex items-center gap-1 cursor-pointer flex-shrink-0"
+                    onClick={() => navigate(b.url)}
+                  >
+                    <Icons.Bookmark size={9} />
+                    <span style={{ maxWidth: 110 }} className="truncate">{b.title}</span>
+                    <button onClick={(e) => { e.stopPropagation(); removeBookmark(b.id); }} aria-label="remove">
+                      <Icons.X size={9} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="flex-1 relative overflow-auto" style={{ background: "var(--surface)", border: "2px solid var(--surface-2)" }}>
