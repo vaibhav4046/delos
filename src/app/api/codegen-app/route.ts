@@ -33,12 +33,18 @@ const CODEGEN_WINDOW_MS = 60_000;
 // is fine for prototype clones.
 const DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
-// Per-file write call: ~2K input prompt + 4.5K output = 6.5K tokens.
-// 2 in parallel = ~13K simultaneous, well under the 30K-TPM sliding cap.
-// Batches sleep 1.5s in between so the sliding window drains.
-const WRITE_PARALLEL = 2;
-const BATCH_SLEEP_MS = 1500;
+// Per-file write call: ~2K input prompt + 3.5K output = 5.5K tokens.
+// Serial writes (parallel=1) + 2.5s sleep keeps us well under the 30K-TPM
+// sliding cap even when the plan call is fresh in the same window.
+// 10 files × 5.5K + plan 4K = 59K tokens but spread over ~30s = ~110K/min raw,
+// so the sliding window naturally drains between batches.
+const WRITE_PARALLEL = 1;
+const BATCH_SLEEP_MS = 2500;
 
+/**
+ * Send a JSON-mode completion to Groq. Throws on non-2xx so the caller can
+ * decide to fall back to Mistral.
+ */
 async function groqJson(
   prompt: string,
   system: string,
@@ -68,6 +74,61 @@ async function groqJson(
   }
   const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
   return j.choices[0]?.message?.content ?? "";
+}
+
+/**
+ * Mistral fallback — different provider, different rate-limit bucket.
+ * Used automatically when Groq returns 429. mistral-small-latest is free-tier,
+ * JSON-mode supported, decent code generator.
+ */
+async function mistralJson(
+  prompt: string,
+  system: string,
+  maxTokens: number,
+): Promise<string> {
+  const key = process.env.MISTRAL_API_KEY;
+  if (!key) throw new Error("no Mistral key — set MISTRAL_API_KEY to enable fallback");
+  const r = await fetch("https://api.mistral.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "mistral-small-latest",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`mistral ${r.status}: ${errText.slice(0, 240)}`);
+  }
+  const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
+  return j.choices[0]?.message?.content ?? "";
+}
+
+/**
+ * Single entry point: try Groq, on 429 fall through to Mistral. Anything else
+ * propagates the original error so genuine schema / network failures don't
+ * silently retry against a slower provider.
+ */
+async function llmJson(prompt: string, system: string, maxTokens: number): Promise<string> {
+  try {
+    return await groqJson(prompt, system, maxTokens);
+  } catch (e) {
+    const msg = (e as Error).message || "";
+    if (msg.includes("429") || /rate.?limit/i.test(msg) || msg.includes("Too Many Requests")) {
+      console.warn("[codegen] Groq 429, falling back to Mistral");
+      return await mistralJson(prompt, system, maxTokens);
+    }
+    throw e;
+  }
 }
 
 export const runtime = "nodejs";
@@ -220,7 +281,7 @@ Return JSON only:
     const sysPlan = "Respond with ONE JSON object only. No prose. No markdown fences.";
     let plan: FilePlan | null = null;
     try {
-      const rawPlan = await groqJson(planPrompt, sysPlan, 4000);
+      const rawPlan = await llmJson(planPrompt, sysPlan, 4000);
       const obj = JSON.parse(rawPlan);
       const v = planSchema.safeParse(obj);
       if (v.success) plan = v.data;
@@ -228,7 +289,7 @@ Return JSON only:
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes("429") || msg.includes("Rate limit")) {
-        throw new Error("Groq TPM limit hit. Try again in ~60 seconds, or use a shorter prompt.");
+        throw new Error("Both Groq + Mistral hit rate limit on the plan call. Try again in ~60 seconds, or use a shorter prompt.");
       }
       throw new Error(`plan failed: ${msg.slice(0, 200)}`);
     }
@@ -276,7 +337,9 @@ Output JSON only:
       const sysWrite = "Respond with ONE JSON object only. No prose, no markdown fences, no commentary. Write production-quality code — real handlers, real state, real mock data, never stubs.";
       // 4500 max_tokens gives ~3.5KB of code per file. 2 in parallel keeps
       // total TPM under 13K so we don't trip Groq's 30K-per-minute ceiling.
-      const raw = await groqJson(writePrompt, sysWrite, 4500);
+      // 3500 max_tokens per file — tight enough to fit several writes in a
+      // single TPM window even if the fallback kicks in.
+      const raw = await llmJson(writePrompt, sysWrite, 3500);
       const obj = JSON.parse(raw) as { path?: string; content?: string; language?: string };
       // Normalize the language before Zod-validating so model variant strings
       // ("ts", "react-ts", missing) don't fail the enum.
@@ -313,7 +376,7 @@ Output JSON only:
           // ships partially. 429 inside a parallel batch usually means we
           // overshot TPM — bail to the friendly message.
           if (reason.includes("429") || reason.includes("Rate limit")) {
-            throw new Error("Groq TPM limit hit during multi-file write. Try again in ~60 seconds.");
+            throw new Error("Both Groq + Mistral hit rate limit mid-write. Try again in ~60 seconds.");
           }
           fileResults.push({
             path: batch[j].path,
