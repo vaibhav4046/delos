@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { models, getEffectiveTemperature } from "../llm";
-import { generateJson } from "./jsonGen";
+import { generateJson, generateJsonWithFallback } from "./jsonGen";
 
 const verdictSchema = z.object({
   verdict: z.enum(["pass", "retry", "replan"]),
@@ -46,20 +46,26 @@ Output JSON:
 { "verdict": "pass|retry|replan", "driftScore": 0.0, "critique": "one sentence about step↔intent match", "fix": "optional one-sentence directive", "newGoal": "if verdict=replan, a clean imperative goal string under 120 chars (e.g. 'Search authoritative sources for X, then summarize.'). Omit if no replan." }`;
 
   try {
-    return await generateJson({
-      model: models.critic,
+    return await generateJsonWithFallback({
+      primary: models.critic,
+      fallbacks: models.fallbackChain,
       schema: verdictSchema,
       prompt,
       temperature: getEffectiveTemperature(0.1),
       onUsage: args.onUsage,
     });
   } catch {
-    return await generateJson({
-      model: models.fallback,
-      schema: verdictSchema,
-      prompt,
-      temperature: getEffectiveTemperature(0.1),
-      onUsage: args.onUsage,
-    });
+    // Heuristic critic of last resort · LLM unavailable across all providers.
+    // Use structural cues: a non-empty tool result that mentions the intent
+    // keywords is a pass; otherwise retry once before escalating.
+    const result = args.lastStep.toolResult.toLowerCase();
+    const intentWords = args.lastStep.intent.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    const hit = intentWords.some((w) => result.includes(w));
+    return {
+      verdict: hit ? ("pass" as const) : ("retry" as const),
+      driftScore: hit ? 0.1 : 0.4,
+      critique: "Heuristic verdict · LLM critic unavailable, scored by keyword overlap.",
+    };
   }
 }
+void generateJson;

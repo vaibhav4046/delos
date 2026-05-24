@@ -4,7 +4,8 @@ import { resolveTenant } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
-const G = globalThis as unknown as { __delrioSeeded?: boolean };
+const G = globalThis as unknown as { __delrioSeededTenants?: Set<string> };
+G.__delrioSeededTenants ??= new Set();
 
 const SEED = [
   { text: "Research run — graph databases beat vector databases for AI agent memory because traversal-based recall (run→tool→error→retry→success) preserves causal chains that vectors lose. Cited HydraDB paper + Pinecone vs Neo4j benchmarks. Final: graph wins for agent memory.", tags: ["run-summary", "research", "graph-db", "vector-db", "agent-memory"], goalFamily: "graph DBs vs vector DBs" },
@@ -22,9 +23,9 @@ const SEED = [
 ];
 
 async function autoSeedIfEmpty(tenantId: string) {
-  if (G.__delrioSeeded) return;
-  G.__delrioSeeded = true;
-  if (getLocalFallback().length > 0) return;
+  if (G.__delrioSeededTenants?.has(tenantId)) return;
+  G.__delrioSeededTenants?.add(tenantId);
+  if (getLocalFallback(tenantId).length > 0) return;
   await ensureTenant(tenantId);
   for (const m of SEED) {
     await safeAddMemory({
@@ -49,6 +50,6 @@ export async function GET(req: NextRequest) {
   const topK = topKParam ? Math.max(1, Math.min(50, Number(topKParam))) : 12;
   await autoSeedIfEmpty(tenantId);
   const hits = await safeRecall({ tenantId, query: q, topK });
-  const local = getLocalFallback().slice(-50).reverse();
+  const local = getLocalFallback(tenantId).slice(-50).reverse();
   return Response.json({ query: q, hits, local, tenantId, scope: source });
 }

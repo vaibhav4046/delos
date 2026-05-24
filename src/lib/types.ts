@@ -45,6 +45,7 @@ export type ToolResult = { ok: true; data: unknown } | { ok: false; error: strin
 export type StoredMemory = {
   id: string;
   runId: string;
+  tenantId?: string;
   text: string;
   tags: string[];
   createdAt: number;

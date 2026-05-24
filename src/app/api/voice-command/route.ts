@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { generateJson } from "@/lib/agents/jsonGen";
+import { generateJsonWithFallback } from "@/lib/agents/jsonGen";
 import { models, withModels, type ModelOverrides, type ModelKey } from "@/lib/llm";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { parseVoiceLocal } from "@/lib/voiceParser";
@@ -171,9 +171,12 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
     // Self-timeout shorter than Vercel maxDuration (15s) so we ALWAYS return
     // structured JSON instead of being killed mid-stream and returning the
     // Vercel HTML 504 page. 11s leaves ~4s headroom for network + response.
+    // generateJsonWithFallback hops Groq → Mistral-large → Mistral-small →
+    // Gemini-flash on rate-limit, so default voice path survives a dry Groq.
     const llmCall = withModels(overrides, () =>
-      generateJson({
-        model: models.executor,
+      generateJsonWithFallback({
+        primary: models.executor,
+        fallbacks: models.fallbackChain,
         schema: actionSchema,
         prompt,
         temperature: 0.1,

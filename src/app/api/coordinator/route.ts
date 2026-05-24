@@ -6,7 +6,7 @@ import { z } from "zod";
 import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { safeRecall } from "@/lib/hydra";
-import { generateJson } from "@/lib/agents/jsonGen";
+import { generateJson, generateJsonWithFallback } from "@/lib/agents/jsonGen";
 import { models, withModels, getEffectiveTemperature, withTemperature, type ModelOverrides, type ModelKey } from "@/lib/llm";
 
 import { zodErr } from "@/lib/apiAuth";
@@ -95,8 +95,9 @@ Return JSON only.
   try {
     const plan = await withModels(overridesArg, () =>
       withTemperature(temperature, () =>
-        generateJson({
-          model: models.planner,
+        generateJsonWithFallback({
+          primary: models.planner,
+          fallbacks: models.fallbackChain,
           schema: planSchema,
           prompt,
           temperature: getEffectiveTemperature(0.4),

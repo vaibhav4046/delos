@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { models, getEffectiveTemperature } from "../llm";
 import type { Tool } from "../tools/registry";
-import { generateJson } from "./jsonGen";
+import { generateJson, generateJsonWithFallback } from "./jsonGen";
 
 function describeToolArgs(t: Tool): string {
   const shape = getShape(t.schema);
@@ -65,8 +65,9 @@ ${errBlock}
 Output JSON:
 { "tool": "<tool_name>", "args": { ...kw args for the tool... }, "reasoning": "<one line>" }`;
 
-  const obj = await generateJson({
-    model: models.executor,
+  const obj = await generateJsonWithFallback({
+    primary: models.executor,
+    fallbacks: models.fallbackChain,
     schema: callSchema,
     prompt,
     temperature: getEffectiveTemperature(0.2),
@@ -97,12 +98,31 @@ Write a tight 2-5 sentence answer directly addressing the goal. No filler.
 Output JSON:
 { "answer": "..." }`;
 
-  const obj = await generateJson({
-    model: models.executor,
-    schema: z.object({ answer: z.string().min(1) }),
-    prompt,
-    temperature: getEffectiveTemperature(0.4),
-    onUsage: args.onUsage,
-  });
-  return obj.answer;
+  // finalAnswer is on the critical path · we MUST have a string out of this
+  // function or the run ends with no `answer` event. Provider failover +
+  // a synthesized fallback if every model misses.
+  try {
+    const obj = await generateJsonWithFallback({
+      primary: models.executor,
+      fallbacks: models.fallbackChain,
+      schema: z.object({ answer: z.string().min(1) }),
+      prompt,
+      temperature: getEffectiveTemperature(0.4),
+      onUsage: args.onUsage,
+    });
+    return obj.answer;
+  } catch {
+    // Stitch a deterministic answer from the work done · happens on full
+    // multi-provider rate-limit. Better than ending the run silently.
+    const wins = args.toolHistory.filter((h) => h.ok);
+    if (wins.length > 0) {
+      const last = wins[wins.length - 1];
+      return `(model unavailable · fallback) Completed via ${last.tool}: ${last.summary.slice(0, 200)}`;
+    }
+    if (args.scratch.length > 0) {
+      return `(model unavailable · fallback) Notes: ${args.scratch.slice(-3).join(" · ").slice(0, 240)}`;
+    }
+    return "(model unavailable · no usable result from this run · try a different model in Settings)";
+  }
 }
+void generateJson;

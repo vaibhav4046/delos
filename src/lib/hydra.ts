@@ -102,6 +102,7 @@ export async function safeAddMemory(args: Parameters<typeof addMemory>[0]) {
   localFallback.push({
     id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     runId: (args.metadata?.runId as string) ?? "unknown",
+    tenantId: args.tenantId,
     text: args.text,
     tags: (args.metadata?.tags as string[]) ?? [],
     createdAt: Date.now(),
@@ -122,7 +123,8 @@ export async function safeRecall(args: Parameters<typeof recall>[0]): Promise<Re
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
     .filter((w) => w.length > 2 && !stop.has(w));
-  const scored = localFallback.map((m) => {
+  const tenantMemories = localFallback.filter((m) => m.tenantId === args.tenantId);
+  const scored = tenantMemories.map((m) => {
     const text = m.text.toLowerCase();
     let score = 0;
     for (const w of qWords) {
@@ -139,6 +141,6 @@ export async function safeRecall(args: Parameters<typeof recall>[0]): Promise<Re
     .map((s) => ({ text: s.mem.text, score: Math.min(1, 0.4 + s.score * 0.6) }));
 }
 
-export function getLocalFallback(): StoredMemory[] {
-  return [...localFallback];
+export function getLocalFallback(tenantId?: string): StoredMemory[] {
+  return tenantId ? localFallback.filter((m) => m.tenantId === tenantId) : [...localFallback];
 }

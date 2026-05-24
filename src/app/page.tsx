@@ -77,21 +77,25 @@ function Header() {
     <header
       className="sticky top-0 z-50 glass-header"
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
-        <Link href="/" className="flex items-center gap-2">
+      {/* Header was clipping at 390px because nav children couldn't shrink
+          below their text widths and gap stacked them past viewport. flex-
+          wrap lets the nav reflow onto a second line on narrow viewports;
+          shrink-0 on the brand keeps the wordmark intact. */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <Link href="/" className="flex items-center gap-2 shrink-0">
           <Wordmark size={26} />
         </Link>
-        <nav className="flex items-center gap-1.5 sm:gap-2 text-sm">
-          <Link href="/os?guest=1" className="btn-pixel success text-sm">★ DelOS</Link>
-          <Link href="/auth" className="btn-pixel ghost text-sm">Sign in</Link>
-          <Link href="/pitch" className="btn-pixel ghost text-sm hidden sm:inline-flex">Pitch</Link>
-          <Link href="/play" className="btn-pixel ghost text-sm hidden sm:inline-flex">Demo</Link>
-          <Link href="/arena" className="btn-pixel ghost text-sm hidden md:inline-flex">Arena</Link>
-          <Link href="/live" className="btn-pixel ghost text-sm hidden md:inline-flex">Live</Link>
-          <Link href="/memory" className="btn-pixel ghost text-sm hidden md:inline-flex">Memory</Link>
-          <Link href="/skills" className="btn-pixel ghost text-sm hidden lg:inline-flex">Skills</Link>
-          <Link href="/scorecard" className="btn-pixel ghost text-sm hidden lg:inline-flex">Score</Link>
-          <Link href="/docs" className="btn-pixel ghost text-sm hidden lg:inline-flex">Docs</Link>
+        <nav className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm flex-wrap justify-end min-w-0">
+          <Link href="/os?guest=1" className="btn-pixel success text-xs sm:text-sm">★ DelOS</Link>
+          <Link href="/auth" className="btn-pixel ghost text-xs sm:text-sm">Sign in</Link>
+          <Link href="/pitch" className="btn-pixel ghost text-xs sm:text-sm hidden sm:inline-flex">Pitch</Link>
+          <Link href="/play" className="btn-pixel ghost text-xs sm:text-sm hidden sm:inline-flex">Demo</Link>
+          <Link href="/arena" className="btn-pixel ghost text-xs sm:text-sm hidden md:inline-flex">Arena</Link>
+          <Link href="/live" className="btn-pixel ghost text-xs sm:text-sm hidden md:inline-flex">Live</Link>
+          <Link href="/memory" className="btn-pixel ghost text-xs sm:text-sm hidden md:inline-flex">Memory</Link>
+          <Link href="/skills" className="btn-pixel ghost text-xs sm:text-sm hidden lg:inline-flex">Skills</Link>
+          <Link href="/scorecard" className="btn-pixel ghost text-xs sm:text-sm hidden lg:inline-flex">Score</Link>
+          <Link href="/docs" className="btn-pixel ghost text-xs sm:text-sm hidden lg:inline-flex">Docs</Link>
         </nav>
       </div>
     </header>

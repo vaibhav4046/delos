@@ -26,15 +26,24 @@ export function buildModels(overrides?: ModelOverrides) {
   const planner = resolveModel(overrides?.planner ?? DEFAULTS.planner);
   const executor = resolveModel(overrides?.executor ?? DEFAULTS.executor);
   const critic = resolveModel(overrides?.critic ?? DEFAULTS.critic);
+  // Cross-provider fallback ladder for autonomous routes. Order = Mistral
+  // (separate quota from Groq, fast, reliable on this account) → Mistral-
+  // small (in case mistral-large is throttled too) → Gemini Flash (1M tok/
+  // day, free). When Groq 429s the circuit-breaker in jsonGen.ts shelves
+  // it for 10 minutes and we hop straight to Mistral. With this list
+  // /api/run / coordinator / build-app never hard-fail on Groq quota.
+  const fallback = mistral("mistral-small-latest");
+  const fallbackChain: LanguageModel[] = [
+    mistral("mistral-large-latest"),
+    mistral("mistral-small-latest"),
+    google("gemini-2.5-flash"),
+  ];
   return {
     planner,
     executor,
     critic,
-    // Fallback when the primary Groq model 429s on TPD. Gemini was the
-    // previous fallback but the hackathon Google account exhausts its
-    // free quota within the first hour of demo traffic. Mistral Small
-    // has a separate quota and is reliably available on this account.
-    fallback: mistral("mistral-small-latest"),
+    fallback,
+    fallbackChain,
     embedding: google.textEmbeddingModel("text-embedding-004"),
   };
 }

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { models, getEffectiveTemperature } from "../llm";
 import type { Plan } from "../types";
 import type { Tool } from "../tools/registry";
-import { generateJson } from "./jsonGen";
+import { generateJson, generateJsonWithFallback } from "./jsonGen";
 
 const planSchema = z.object({
   rationale: z.string(),
@@ -71,8 +71,11 @@ Output JSON with exact shape:
   "subgoals": ["question 1", "question 2"]   // optional, 0-3 entries
   "steps": [ { "id": "s1", "intent": "...", "tool": "<tool_name_or_omit>", "args": { ... } } ] }`;
 
-  const obj = await generateJson({
-    model: models.planner,
+  // Cross-provider fallback chain · default planner is Groq, but Groq
+  // routinely 429s on free tier mid-demo. Mistral / Gemini Flash pick up.
+  const obj = await generateJsonWithFallback({
+    primary: models.planner,
+    fallbacks: models.fallbackChain,
     schema: planSchema,
     prompt,
     temperature: getEffectiveTemperature(0.3),
@@ -80,3 +83,5 @@ Output JSON with exact shape:
   });
   return { goal: args.goal, rationale: obj.rationale, steps: obj.steps, subgoals: obj.subgoals };
 }
+// Silence unused import warning · keep available for places that don't want fallback.
+void generateJson;

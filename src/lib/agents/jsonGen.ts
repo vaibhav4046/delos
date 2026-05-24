@@ -20,6 +20,74 @@ function safeModelName(m: LanguageModel): string {
   return x.modelId ?? x.provider ?? "unknown";
 }
 
+// ─── Provider circuit breaker ──────────────────────────────────────────────
+// In-process map of provider → cooldown-until timestamp. When a provider 429s
+// we shelve it for COOLDOWN_MS so subsequent calls skip straight to the
+// fallback list instead of re-burning quota that we already know is exhausted.
+// Plain Map is fine — Vercel Lambdas live ~5 min, longer than the cooldown
+// we want, so the state stays warm across requests in the same container.
+const COOLDOWN: Map<string, number> = new Map();
+const COOLDOWN_MS = 10 * 60_000; // 10 minutes
+
+function modelProvider(m: LanguageModel): string {
+  const x = m as { provider?: string; modelId?: string };
+  if (x.provider) return x.provider;
+  const id = x.modelId ?? "";
+  // Convention from llm.ts: providers prefix model ids as "groq:..." etc.
+  const sep = id.indexOf("/");
+  return sep > 0 ? id.slice(0, sep) : id;
+}
+
+export function isProviderCool(provider: string): boolean {
+  const t = COOLDOWN.get(provider);
+  if (t == null) return false;
+  if (t > Date.now()) return true;
+  COOLDOWN.delete(provider);
+  return false;
+}
+
+export function shelveProvider(provider: string, ms = COOLDOWN_MS): void {
+  COOLDOWN.set(provider, Date.now() + ms);
+}
+
+// Try `primary` first; on rate_limited shelve the provider and walk through
+// `fallbacks` until one succeeds. Returns first successful parse or throws
+// sanitized error after exhausting list. Use this anywhere quota matters
+// (run / coordinator / build-app / cohort).
+export async function generateJsonWithFallback<T>(args: {
+  primary: LanguageModel;
+  fallbacks: LanguageModel[];
+  schema: z.ZodType<T>;
+  prompt: string;
+  temperature?: number;
+  maxRetries?: number;
+  onUsage?: (u: LLMUsage) => void;
+}): Promise<T> {
+  const candidates = [args.primary, ...args.fallbacks];
+  let lastErr = "all_providers_failed";
+  for (const m of candidates) {
+    const provider = modelProvider(m);
+    if (isProviderCool(provider)) continue;
+    try {
+      return await generateJson({
+        model: m,
+        schema: args.schema,
+        prompt: args.prompt,
+        temperature: args.temperature,
+        maxRetries: args.maxRetries ?? 2, // tighter per-provider since we have fallbacks
+        onUsage: args.onUsage,
+      });
+    } catch (e) {
+      const msg = (e as Error).message;
+      lastErr = sanitizeProviderError(msg);
+      if (lastErr === "rate_limited") shelveProvider(provider);
+      // Continue to next provider on rate_limited / upstream_5xx / timeout.
+      if (lastErr === "auth_failed" || lastErr === "network_error") continue;
+    }
+  }
+  throw new Error(`all_providers_failed (${lastErr})`);
+}
+
 export async function generateJson<T>(args: {
   model: LanguageModel;
   schema: z.ZodType<T>;

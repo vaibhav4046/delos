@@ -52,10 +52,11 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   yield { t: "meta", runId, at: Date.now() };
   yield { t: "phase", phase: "boot", note: `run ${runId}`, at: Date.now() };
 
-  await ensureTenant(env.DELRIO_TENANT_ID);
+  const tenantId = opts.tenantId ?? env.DELRIO_TENANT_ID;
+  await ensureTenant(tenantId);
 
   yield { t: "phase", phase: "recall", note: "querying HydraDB save-state", at: Date.now() };
-  const memHits = await safeRecall({ tenantId: opts.tenantId ?? env.DELRIO_TENANT_ID, query: goal, topK: 4 });
+  const memHits = await safeRecall({ tenantId, query: goal, topK: 4 });
   yield { t: "memory_recall", query: goal, hits: memHits.length, at: Date.now() };
 
   const registry = buildRegistry();
@@ -312,7 +313,7 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   yield { t: "phase", phase: "store", at: Date.now() };
   const memText = `Run completed for goal: "${originalGoal}". Final answer: ${answer.slice(0, 200)}. Tools used: ${toolHistory.map((t) => t.tool).join(", ")}.`;
   await safeAddMemory({
-    tenantId: opts.tenantId ?? env.DELRIO_TENANT_ID,
+    tenantId,
     text: memText,
     metadata: { runId, tags: ["run-summary"], goalFamily: initialGoal.slice(0, 40) },
   });

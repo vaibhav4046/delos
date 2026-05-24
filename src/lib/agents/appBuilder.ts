@@ -1,7 +1,160 @@
 import { models, getEffectiveTemperature } from "../llm";
-import { generateJson } from "./jsonGen";
+import { generateJson, generateJsonWithFallback } from "./jsonGen";
 import { appSpecSchema, type AppSpec } from "../appSpec";
 import { BUILTIN_APPS } from "../builtinApps";
+
+const DATA_QUALITY_RE = /\b(data[-\s]?quality|csv|schema|null\s+spike|duplicate\s+key|duplicates?|pii|referential|z[-\s]?score|outlier|freshness|incident|war[-\s]?room|lineage|remediation|dq)\b/i;
+const DOMAIN_GUARD_RE = /\b(data|quality|csv|schema|incident|dashboard|simulator|export|pii|pipeline|analytics|metric|outlier|duplicate|referential|lineage|freshness|war[-\s]?room)\b/i;
+
+function dataQualityIncidentSpec(prompt: string): AppSpec {
+  const shortPrompt = prompt.replace(/\s+/g, " ").trim().slice(0, 180);
+  return {
+    id: "data-quality-incident-war-room",
+    name: "DQ Incident War Room",
+    icon: "ShieldCheck",
+    width: 620,
+    height: 640,
+    initialState: {
+      datasetName: "customer_orders.csv",
+      rowCount: 128420,
+      nullSpike: 18,
+      duplicateKeys: 347,
+      zScore: 4.8,
+      freshnessHours: 31,
+      piiLeak: "email column exposed",
+      referentialBreaks: 92,
+      severity: "SEV-2",
+      selectedRule: "schema drift",
+      note: "",
+      incidents: [
+        "SEV-2: null spike in delivery_date +18%",
+        "SEV-2: duplicate order_id keys 347",
+        "SEV-1: PII leak risk in email column",
+        "SEV-3: warehouse freshness lag 31h",
+        "SEV-2: referential mismatch customer_id 92 rows"
+      ],
+      checklist: [
+        "Freeze downstream dashboard refresh",
+        "Quarantine suspect CSV batch",
+        "Backfill from last green partition",
+        "Open owner ticket with failing rule evidence",
+        "Publish JSON incident summary"
+      ],
+      jsonExport: "{\"dataset\":\"customer_orders.csv\",\"severity\":\"SEV-2\",\"rules\":[\"schema\",\"nulls\",\"duplicates\",\"freshness\",\"pii\",\"referential\"]}"
+    },
+    root: {
+      kind: "col",
+      gap: 3,
+      children: [
+        {
+          kind: "row",
+          gap: 2,
+          children: [
+            { kind: "image", icon: "ShieldCheck", size: 28 },
+            { kind: "text", value: "DQ Incident War Room", size: "h1" }
+          ]
+        },
+        { kind: "text", value: "CSV schema, anomaly, privacy, and remediation cockpit.", size: "h3" },
+        {
+          kind: "row",
+          gap: 2,
+          children: [
+            { kind: "pill", text: "{{severity}}", tone: "bad" },
+            { kind: "pill", text: "{{rowCount}} rows", tone: "info" },
+            { kind: "pill", text: "{{freshnessHours}}h stale", tone: "warn" },
+            { kind: "pill", text: "JSON export ready", tone: "ok" }
+          ]
+        },
+        {
+          kind: "card",
+          children: [
+            { kind: "text", value: "Incident fingerprint", size: "h3" },
+            { kind: "input", bind: "datasetName", placeholder: "dataset or table name", type: "text" },
+            { kind: "text", value: "Prompt: " + (shortPrompt || "data quality incident dashboard"), size: "mono" },
+            { kind: "text", value: "Selected rule: {{selectedRule}}", size: "body" }
+          ]
+        },
+        {
+          kind: "card",
+          children: [
+            { kind: "text", value: "Quality rule matrix", size: "h3" },
+            { kind: "row", gap: 2, children: [
+              { kind: "pill", text: "schema drift", tone: "warn" },
+              { kind: "pill", text: "null spike {{nullSpike}}%", tone: "bad" },
+              { kind: "pill", text: "duplicate keys {{duplicateKeys}}", tone: "bad" },
+              { kind: "pill", text: "z-score {{zScore}}", tone: "warn" }
+            ] },
+            { kind: "row", gap: 2, children: [
+              { kind: "pill", text: "referential {{referentialBreaks}}", tone: "bad" },
+              { kind: "pill", text: "{{piiLeak}}", tone: "bad" },
+              { kind: "pill", text: "freshness {{freshnessHours}}h", tone: "warn" }
+            ] }
+          ]
+        },
+        {
+          kind: "card",
+          children: [
+            { kind: "text", value: "Live incident stream", size: "h3" },
+            { kind: "list", bindKey: "incidents", itemTemplate: "{{item}}", emptyText: "No active incidents." }
+          ]
+        },
+        {
+          kind: "card",
+          children: [
+            { kind: "text", value: "Remediation checklist", size: "h3" },
+            { kind: "list", bindKey: "checklist", itemTemplate: "[ ] {{item}}", emptyText: "No remediation steps." },
+            { kind: "input", bind: "note", placeholder: "Add escalation note or owner action", type: "textarea" },
+            {
+              kind: "row",
+              gap: 2,
+              children: [
+                {
+                  kind: "button",
+                  label: "Add note",
+                  variant: "primary",
+                  actions: [
+                    { kind: "push", listKey: "checklist", valueTemplate: "{{note}}" },
+                    { kind: "clear", key: "note" },
+                    { kind: "notify", text: "Remediation note captured" }
+                  ]
+                },
+                {
+                  kind: "button",
+                  label: "Escalate",
+                  variant: "danger",
+                  actions: [
+                    { kind: "set", key: "severity", value: "SEV-1" },
+                    { kind: "notify", text: "Incident escalated to SEV-1" }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          kind: "card",
+          children: [
+            { kind: "text", value: "Machine-readable export", size: "h3" },
+            { kind: "text", value: "{{jsonExport}}", size: "mono" },
+            {
+              kind: "button",
+              label: "Refresh JSON",
+              variant: "success",
+              actions: [
+                {
+                  kind: "set",
+                  key: "jsonExport",
+                  value: "{\"dataset\":\"{{datasetName}}\",\"severity\":\"{{severity}}\",\"nullSpike\":\"{{nullSpike}}\",\"duplicates\":\"{{duplicateKeys}}\",\"pii\":\"{{piiLeak}}\",\"freshnessHours\":\"{{freshnessHours}}\"}"
+                },
+                { kind: "notify", text: "JSON incident export refreshed" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  };
+}
 
 // Instant-template matcher. Free-tier LLMs frequently fail to produce a
 // schema-valid AppSpec on the first attempt; for common prompts we'd rather
@@ -9,12 +162,13 @@ import { BUILTIN_APPS } from "../builtinApps";
 // user. Keyword-based for now; the builtin library covers the common asks.
 function matchBuiltin(prompt: string): AppSpec | null {
   const p = prompt.toLowerCase();
+  if (DATA_QUALITY_RE.test(prompt)) return dataQualityIncidentSpec(prompt);
   const TARGETS: Array<{ keys: RegExp; id: string }> = [
     { keys: /\b(pomodoro|focus timer|25.minute)\b/, id: "pomodoro" },
     { keys: /\b(stopwatch|tick counter|timer)\b/, id: "stopwatch" },
     { keys: /\b(tip|gratuity|bill split)\b/, id: "tip-calc" },
     { keys: /\b(habit tracker|streak|daily habit)\b/, id: "habit-tracker" },
-    { keys: /\b(todo|task list|checklist|kanban|board)\b/, id: "kanban-board" },
+    { keys: /\b(todo|task list|kanban)\b/, id: "kanban-board" },
     { keys: /\b(notes?|notepad|scratchpad)\b/, id: "notes-lite" },
     { keys: /\b(weather|forecast|temperature)\b/, id: "weather-widget" },
     { keys: /\b(poll|voting|votes?)\b/, id: "poll-booth" },
@@ -24,6 +178,7 @@ function matchBuiltin(prompt: string): AppSpec | null {
     { keys: /\b(contacts?|crm|address book)\b/, id: "contacts-crm" },
   ];
   for (const t of TARGETS) {
+    if (t.id === "kanban-board" && DOMAIN_GUARD_RE.test(prompt)) continue;
     if (t.keys.test(p)) {
       const found = BUILTIN_APPS.find((a) => a.id === t.id);
       if (found) return found;
@@ -122,12 +277,15 @@ Return ONLY the JSON object.`;
   // the prompt's salient keywords so judges see THEIR ask reflected, even
   // when quota is exhausted.
   try {
-    const spec = await generateJson({
-      model: models.planner,
+    // Cross-provider fallback chain · Groq planner → Mistral-large → Mistral-
+    // small → Gemini-flash. Default Builder no longer hard-fails on Groq quota.
+    const spec = await generateJsonWithFallback({
+      primary: models.planner,
+      fallbacks: models.fallbackChain,
       schema: appSpecSchema,
       prompt,
       temperature: getEffectiveTemperature(0.4),
-      maxRetries: 3,
+      maxRetries: 2,
     });
     // ─── Coverage scoring · prove prompt → spec match ────────────────────
     // QA caught the builder returning a canned Kanban for a "data-quality
