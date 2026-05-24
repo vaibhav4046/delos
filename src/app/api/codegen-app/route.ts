@@ -316,7 +316,10 @@ Output JSON only:
           fileResults.push({
             path: batch[j].path,
             content: `// codegen write failed: ${reason}\n// brief: ${batch[j].purpose}\n`,
-            language: (batch[j].language ?? "text") as z.infer<typeof fileSchema>["language"],
+            // Normalize, otherwise the model's raw language string ("react-ts",
+            // "react", etc.) from the plan stage flows straight into the final
+            // projectSchema enum and fails validation. Bit me on Perplexity.
+            language: normalizeLanguage(batch[j].language, batch[j].path),
           });
         }
       }
