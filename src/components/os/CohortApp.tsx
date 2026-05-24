@@ -24,8 +24,11 @@ export function CohortApp() {
 
   useEffect(() => {
     return onIntent("cohort.run", (i) => {
+      // Pass goal explicitly so run() doesn't capture the stale React state
+      // from the moment this useEffect's closure was built. Same gotcha as
+      // CodebaseApp — fixed there too.
       setGoal(i.goal);
-      setTimeout(() => run(), 50);
+      setTimeout(() => run(i.goal), 50);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -37,7 +40,8 @@ export function CohortApp() {
     setSelected(next);
   }
 
-  async function run() {
+  async function run(overrideGoal?: string) {
+    const useGoal = overrideGoal ?? goal;
     setRunning(true);
     setErr(null);
     setMembers([]);
@@ -58,7 +62,7 @@ export function CohortApp() {
       const res = await fetch("/api/cohort", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal, members: list, judge }),
+        body: JSON.stringify({ goal: useGoal, members: list, judge }),
       });
       if (!res.body) throw new Error("no stream");
       const reader = res.body.getReader();
@@ -156,7 +160,7 @@ export function CohortApp() {
         </select>
       </div>
 
-      <button onClick={run} disabled={running} className="btn-pixel success">
+      <button onClick={() => run()} disabled={running} className="btn-pixel success">
         {running ? "RUNNING…" : "▶ RUN COHORT"}
       </button>
 

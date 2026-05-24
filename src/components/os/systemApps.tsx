@@ -50,11 +50,12 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
     if (stt.transcript) setGoal(stt.transcript);
   }, [stt.transcript]);
 
-  // Voice-action / intent bus subscription
+  // Voice-action / intent bus subscription. Passes goal explicitly so run()
+  // doesn't fire with the stale state captured in this effect's closure.
   useEffect(() => {
     return onIntent("terminal.run", (i) => {
       setGoal(i.goal);
-      setTimeout(() => run(), 50);
+      setTimeout(() => run(i.goal), 50);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -77,10 +78,11 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
     } catch {}
   }
 
-  async function run() {
+  async function run(overrideGoal?: string) {
     if (running) return;
+    const useGoal = overrideGoal ?? goal;
     // Easter-egg shortcut: goals starting with ":" are intercepted before /api/run
-    const trimmed = goal.trim();
+    const trimmed = useGoal.trim();
     if (trimmed.startsWith(":") && trimmed.length < 30) {
       window.dispatchEvent(new CustomEvent("delos-terminal-cmd", { detail: { cmd: trimmed } }));
       window.dispatchEvent(new CustomEvent("toast", { detail: { text: `easter egg fired: ${trimmed}`, tone: "ok" } }));
@@ -101,7 +103,7 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal, chaos: [], maxSteps: 4, models: getModelOverrides(), mcpServers: getMcpServers(), tenantId: getTenantId(), temperature: getTemperature(), identity: renderIdentityPreamble(getIdentity()) || undefined }),
+        body: JSON.stringify({ goal: useGoal, chaos: [], maxSteps: 4, models: getModelOverrides(), mcpServers: getMcpServers(), tenantId: getTenantId(), temperature: getTemperature(), identity: renderIdentityPreamble(getIdentity()) || undefined }),
         signal: ctrl.signal,
       });
       if (!res.body) throw new Error("no stream");
@@ -191,7 +193,7 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
             {stt.state === "listening" ? <Icons.MicOff size={12} /> : <Icons.Mic size={12} />}
           </button>
         )}
-        <button className="btn-pixel" style={{ padding: "8px 12px", fontSize: 11 }} onClick={run} disabled={running}>
+        <button className="btn-pixel" style={{ padding: "8px 12px", fontSize: 11 }} onClick={() => run()} disabled={running}>
           {running ? "…" : "RUN"}
         </button>
       </div>
