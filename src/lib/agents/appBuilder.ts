@@ -1,6 +1,36 @@
 import { models, getEffectiveTemperature } from "../llm";
 import { generateJson } from "./jsonGen";
 import { appSpecSchema, type AppSpec } from "../appSpec";
+import { BUILTIN_APPS } from "../builtinApps";
+
+// Instant-template matcher. Free-tier LLMs frequently fail to produce a
+// schema-valid AppSpec on the first attempt; for common prompts we'd rather
+// ship a hand-crafted polished app than fail and surface a Zod error to the
+// user. Keyword-based for now; the builtin library covers the common asks.
+function matchBuiltin(prompt: string): AppSpec | null {
+  const p = prompt.toLowerCase();
+  const TARGETS: Array<{ keys: RegExp; id: string }> = [
+    { keys: /\b(pomodoro|focus timer|25.minute)\b/, id: "pomodoro" },
+    { keys: /\b(stopwatch|tick counter|timer)\b/, id: "stopwatch" },
+    { keys: /\b(tip|gratuity|bill split)\b/, id: "tip-calc" },
+    { keys: /\b(habit tracker|streak|daily habit)\b/, id: "habit-tracker" },
+    { keys: /\b(todo|task list|checklist|kanban|board)\b/, id: "kanban-board" },
+    { keys: /\b(notes?|notepad|scratchpad)\b/, id: "notes-lite" },
+    { keys: /\b(weather|forecast|temperature)\b/, id: "weather-widget" },
+    { keys: /\b(poll|voting|votes?)\b/, id: "poll-booth" },
+    { keys: /\b(chat|messaging|conversation)\b/, id: "chat-room" },
+    { keys: /\b(markdown|md editor|preview)\b/, id: "markdown-editor" },
+    { keys: /\b(expense|budget|spending|finance)\b/, id: "expense-tracker" },
+    { keys: /\b(contacts?|crm|address book)\b/, id: "contacts-crm" },
+  ];
+  for (const t of TARGETS) {
+    if (t.keys.test(p)) {
+      const found = BUILTIN_APPS.find((a) => a.id === t.id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
 const exampleSpec = `{
   "id": "counter",
@@ -27,6 +57,11 @@ const exampleSpec = `{
 }`;
 
 export async function buildAppFromPrompt(userPrompt: string): Promise<AppSpec> {
+  // Fast path · keyword-match to a hand-crafted builtin so common prompts
+  // ship a polished app instantly. LLM path is reserved for novel asks.
+  const instant = matchBuiltin(userPrompt);
+  if (instant) return instant;
+
   const prompt = `You design SMALL pixel-style desktop apps as JSON specs that render inside a retro Mario-themed OS called DelOS.
 
 USER REQUEST:

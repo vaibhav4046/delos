@@ -133,7 +133,6 @@ export default function DocsPage() {
           <nav className="flex items-center gap-2 text-sm">
             <Link href="/os" className="btn-pixel success">★ DelOS</Link>
             <Link href="/" className="btn-pixel ghost hidden sm:inline-flex">Home</Link>
-            <Link href="/pricing" className="btn-pixel ghost hidden sm:inline-flex">Pricing</Link>
             <Link href="/status" className="btn-pixel ghost hidden md:inline-flex">Status</Link>
           </nav>
         </div>

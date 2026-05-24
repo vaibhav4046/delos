@@ -67,7 +67,6 @@ export default function StatusPage() {
             <Link href="/os" className="btn-pixel success">★ DelOS</Link>
             <Link href="/" className="btn-pixel ghost hidden sm:inline-flex">Home</Link>
             <Link href="/docs" className="btn-pixel ghost hidden sm:inline-flex">Docs</Link>
-            <Link href="/pricing" className="btn-pixel ghost hidden md:inline-flex">Pricing</Link>
           </nav>
         </div>
       </header>

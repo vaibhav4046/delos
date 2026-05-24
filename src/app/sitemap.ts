@@ -12,7 +12,6 @@ const ROUTES = [
   "/scorecard",
   "/demo",
   "/docs",
-  "/pricing",
   "/status",
   "/extension",
   "/leaderboard",
