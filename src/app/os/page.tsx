@@ -268,7 +268,18 @@ export default function OSPage() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [launchpadOpen, setLaunchpadOpen] = useState(false);
+  // Sticky-note dismissal persists across reloads — returning users don't
+  // need to see the "how to use snap" cheat sheet every session.
   const [hintsDismissed, setHintsDismissed] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("delos.hintsDismissed") === "1") setHintsDismissed(true);
+    } catch {}
+  }, []);
+  function dismissHints() {
+    setHintsDismissed(true);
+    try { localStorage.setItem("delos.hintsDismissed", "1"); } catch {}
+  }
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const zCounter = useRef(10);
   const spawnOffset = useRef(0);
@@ -922,7 +933,7 @@ export default function OSPage() {
           />
           {!hintsDismissed && (
             <HintSticky
-              onDismiss={() => setHintsDismissed(true)}
+              onDismiss={dismissHints}
               onTile={gridArrange}
               onCascade={cascadeArrange}
               onLaunchpad={() => setLaunchpadOpen(true)}
