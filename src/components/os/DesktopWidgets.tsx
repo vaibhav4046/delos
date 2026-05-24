@@ -282,13 +282,16 @@ async function resolveLocation(force?: "gps" | "ip"): Promise<WeatherLoc> {
       };
     } catch {}
   }
-  // IP-based fallback — works without permission, free, no key
-  const ip = await fetch("https://ipapi.co/json/").then((r) => r.json()).catch(() => null);
-  if (ip?.latitude != null && ip?.longitude != null) {
+  // IP-based fallback — proxied through our own /api/geo route so we don't
+  // depend on third-party CORS headers OR mixed-content rules. The server
+  // route picks ipapi.co (HTTPS, no key, generous free tier) and returns
+  // a normalized { lat, lon, city }. Subject to our own rate limit.
+  const ip = await fetch("/api/geo").then((r) => r.ok ? r.json() : null).catch(() => null);
+  if (ip?.lat != null && ip?.lon != null) {
     return {
-      lat: Number(ip.latitude),
-      lon: Number(ip.longitude),
-      city: ip.city || ip.region || ip.country_name || "Unknown",
+      lat: Number(ip.lat),
+      lon: Number(ip.lon),
+      city: ip.city || ip.region || ip.country || "Unknown",
       source: "ip",
     };
   }
