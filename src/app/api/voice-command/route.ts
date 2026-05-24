@@ -111,6 +111,12 @@ Map this to ONE action. Available intents:
    • about — About DelOS ("about", "version", "info")
    • claude / chatgpt / perplexity — retro AI chat apps.
 - run_mission: open terminal AND immediately run the mission. payload = the goal sentence.
+  ALSO use run_mission for any real-world TASK the agent should plan + execute end-to-end:
+  "book me a flight from X to Y next Friday", "find me cheap hotels in Paris",
+  "research the top 5 YC W26 AI startups", "summarize today's HN front page",
+  "send a follow-up email to my recruiter at Anthropic", "schedule a meeting
+  with Andy for Tuesday". payload = the full task sentence verbatim — the
+  orchestrator will plan it as a multi-step research/draft/execute mission.
 - build_app: open builder AND start building. payload = the app description.
   ALSO use build_app when the user asks for a productivity widget by name —
   kanban, pomodoro, tip calculator, habit tracker, expense tracker, contacts,
@@ -119,6 +125,9 @@ Map this to ONE action. Available intents:
   done columns". "make me a pomodoro" → build_app, payload="Pomodoro timer".
 - run_cohort: open cohort AND start running with the goal. payload = the question.
 - recall_memory: ask Del Assistant to recall something from memory. payload = the question / search query.
+  ALWAYS use this for phrases like "recall my last X", "what did I X yesterday",
+  "show me my previous Y", "what was the winner of the last cohort", "find
+  my mission about Z", "do I have a note on W". payload = the search subject.
 - change_wallpaper: cycle wallpaper. no payload.
 - close_window: close focused window. no payload.
 - navigate: navigate to a route. payload = "/", "/play", "/memory", "/os".
