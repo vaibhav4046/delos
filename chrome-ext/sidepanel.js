@@ -1,5 +1,18 @@
-// DelOS side panel — full DelOS companion. Runs missions, cohort, memory, voice
-// from any Chrome tab. Talks to delrio.vercel.app endpoints.
+// DelOS side panel v2.2 — autonomous voice tab agent.
+//
+// Voice flow (when "autonomous" is checked):
+//   1. Web Speech API → final transcript.
+//   2. POST /api/voice-command → { intent, app, payload, reply }.
+//   3. Map intent → tab action via background.js RPC, or fall back to
+//      /api/quick-agent for free-text answers.
+//   4. TTS the reply, then (if "loop" is checked) reopen the mic.
+//
+// Intents we handle natively against the active tab (no /api/run trip):
+//   read_tab / summarize_tab / click / fill / scroll / open_url /
+//   navigate / open_tab / close_tab / reload / back / forward / links
+//
+// Everything else still falls through to /api/quick-agent so the agent
+// can answer general questions ("what time is it in Tokyo").
 
 const MODELS = [
   "groq:openai/gpt-oss-120b",
@@ -30,9 +43,12 @@ const state = {
   voiceRec: null,
   voiceLoop: false,
   voiceBusy: false,
+  voiceAuto: true,
+  activeTab: "voice",
+  runBase: Date.now(),
 };
 
-// ---- Storage ----
+// ───────────────────────── storage / sync ─────────────────────────
 async function loadCfg() {
   const stored = await chrome.storage.local.get(["endpoint", "tenantId", "modelOverrides", "mcpServers", "syncedFrom"]);
   state.cfg.endpoint = stored.endpoint || DEFAULTS.endpoint;
@@ -64,18 +80,18 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderSettings();
     refreshConn();
     if (changes.tenantId || changes.mcpServers) {
-      $("#syncedFrom").textContent = `synced from main app · ${new Date().toLocaleTimeString()}`;
+      $("#syncedFrom").textContent = `synced · ${new Date().toLocaleTimeString()}`;
     }
   }
 });
 
-// ---- Connection check ----
+// ───────────────────────── connection ────────────────────────────
 async function refreshConn() {
   const pill = $("#conn");
   pill.className = "pill pill-warn";
   pill.textContent = "● checking";
   try {
-    const r = await fetch(`${state.cfg.endpoint}/api/mcp/demo`, { method: "GET" });
+    const r = await fetch(`${state.cfg.endpoint}/api/health`, { method: "GET" });
     if (r.ok) {
       pill.className = "pill pill-ok";
       pill.textContent = "● connected";
@@ -83,23 +99,24 @@ async function refreshConn() {
       pill.className = "pill pill-bad";
       pill.textContent = `● ${r.status}`;
     }
-  } catch (e) {
+  } catch {
     pill.className = "pill pill-bad";
     pill.textContent = "● offline";
   }
 }
 
-// ---- Tab switching ----
+// ───────────────────────── tabs ──────────────────────────────────
 $$(".tab").forEach((t) =>
   t.addEventListener("click", () => {
     $$(".tab").forEach((x) => x.classList.remove("on"));
     $$(".panel").forEach((x) => x.classList.remove("on"));
     t.classList.add("on");
     $(`[data-panel="${t.dataset.tab}"]`).classList.add("on");
+    state.activeTab = t.dataset.tab;
   }),
 );
 
-// ---- Settings modal ----
+// ───────────────────────── settings ──────────────────────────────
 function renderSettings() {
   $("#cfgEndpoint").value = state.cfg.endpoint;
   $("#cfgTenant").value = state.cfg.tenantId || "";
@@ -125,7 +142,7 @@ $("#cfgSave").addEventListener("click", async () => {
   refreshConn();
 });
 
-// ---- Helpers ----
+// ───────────────────────── render helpers ────────────────────────
 function tag(cls, label) {
   return `<span class="tag ${cls}">${label}</span>`;
 }
@@ -146,6 +163,13 @@ function setStats(s) {
   el.innerHTML = ["tok in", "tok out", "calls", "ms"]
     .map((k, i) => `<div class="stat"><div class="v">${s[i] ?? 0}</div><div class="k">${k}</div></div>`)
     .join("") + `<div class="stat"><div class="v">${s[4] ?? "·"}</div><div class="k">cost</div></div>`;
+}
+
+function setVoiceStatus(kind, label, meta = "") {
+  const el = $("#voiceStatus");
+  el.className = `voice-status ${kind}`;
+  $("#voiceStatusLabel").textContent = label;
+  $("#voiceStatusMeta").textContent = meta;
 }
 
 function renderEvent(ev) {
@@ -185,7 +209,7 @@ function renderEvent(ev) {
   return "";
 }
 
-// ---- Mission run ----
+// ───────────────────────── mission run (kept) ────────────────────
 const runStats = { pin: 0, pout: 0, calls: 0, llmMs: 0 };
 
 $("#runBtn").addEventListener("click", run);
@@ -195,18 +219,10 @@ $("#grabTab").addEventListener("click", grabTabContext);
 $("#micBtn").addEventListener("click", () => toggleSttIntoGoal());
 
 async function grabTabContext() {
-  try {
-    chrome.runtime.sendMessage({ kind: "delrio-grab-tab" }, (res) => {
-      if (!res || res.error) {
-        appendLog("log", `${tag("bad", "tab")} ${esc(res?.error || "no data")}`);
-        return;
-      }
-      const ctx = res.data;
-      $("#goal").value = `Based on this page (${ctx.url}):\n${ctx.text.slice(0, 800)}\n\n${$("#goal").value || "summarize in 3 bullets."}`;
-    });
-  } catch (e) {
-    appendLog("log", `${tag("bad", "tab")} ${esc(e.message)}`);
-  }
+  const res = await tabAction("read");
+  if (!res?.ok) return appendLog("log", `${tag("bad", "tab")} ${esc(res?.error || "no data")}`);
+  const ctx = res.data;
+  $("#goal").value = `Based on this page (${ctx.url}):\n${ctx.text.slice(0, 800)}\n\n${$("#goal").value || "summarize in 3 bullets."}`;
 }
 
 async function run() {
@@ -265,9 +281,6 @@ async function run() {
             runStats.llmMs += ev.ms;
             setStats([runStats.pin, runStats.pout, runStats.calls, runStats.llmMs, "·"]);
           }
-          if (ev.t === "answer") {
-            if ($("#voiceSpeak")?.checked && state.activeTab === "voice") speakText(ev.text);
-          }
         } catch {}
       }
     }
@@ -295,12 +308,11 @@ async function sendSteer() {
 }
 
 function rewriteUrl(u) {
-  // If MCP server is registered with relative path, point at extension endpoint
   if (u?.startsWith("/")) return `${state.cfg.endpoint}${u}`;
   return u;
 }
 
-// ---- Cohort ----
+// ───────────────────────── cohort (kept) ─────────────────────────
 $("#cohortBtn").addEventListener("click", runCohort);
 
 async function runCohort() {
@@ -357,7 +369,14 @@ async function runCohort() {
   }
 }
 
-// ---- Voice ----
+// ───────────────────────── tab action RPC ────────────────────────
+function tabAction(action, args = {}) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ kind: "delos-tab-action", action, args }, (res) => resolve(res || { ok: false, error: "no response" }));
+  });
+}
+
+// ───────────────────────── voice agent (autonomous) ──────────────
 function getSttCtor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition;
 }
@@ -365,7 +384,9 @@ function getSttCtor() {
 function speakText(text) {
   if (!window.speechSynthesis) return;
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
+  const u = new SpeechSynthesisUtterance(String(text).slice(0, 600));
+  u.rate = 1.0;
+  u.pitch = 1.0;
   window.speechSynthesis.speak(u);
 }
 
@@ -385,10 +406,9 @@ function toggleSttIntoGoal() {
   rec.interimResults = true;
   rec.continuous = false;
   rec.onresult = (e) => {
-    let final = "", interim = "";
+    let final = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) final += e.results[i][0].transcript;
-      else interim += e.results[i][0].transcript;
     }
     if (final) $("#goal").value = ($("#goal").value + " " + final).trim();
   };
@@ -404,7 +424,7 @@ $("#stopSpeakBtn").addEventListener("click", () => window.speechSynthesis?.cance
 async function voiceTurn() {
   const Ctor = getSttCtor();
   if (!Ctor) {
-    appendLog("voiceLog", `${tag("bad", "voice")} unsupported`);
+    appendLog("voiceLog", `${tag("bad", "voice")} unsupported in this browser`);
     return;
   }
   if (state.voiceRec) {
@@ -412,12 +432,14 @@ async function voiceTurn() {
     return;
   }
   state.voiceLoop = $("#voiceLoop").checked;
+  state.voiceAuto = $("#voiceAuto").checked;
   const rec = new Ctor();
   rec.lang = "en-US";
   rec.interimResults = true;
   rec.continuous = false;
   let live = "", finalText = "";
-  appendLog("voiceLog", `${tag("warn", "LIVE")} listening…`);
+  setVoiceStatus("listening", "LISTENING…", "speak now");
+  $("#voiceBtn").textContent = "■ STOP";
   rec.onresult = (e) => {
     finalText = "";
     live = "";
@@ -425,52 +447,198 @@ async function voiceTurn() {
       if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
       else live += e.results[i][0].transcript;
     }
+    if (live) setVoiceStatus("listening", "LISTENING…", live.slice(0, 60));
   };
   rec.onend = async () => {
     state.voiceRec = null;
     $("#voiceBtn").textContent = "🎤 HOLD TO TALK";
     const text = (finalText || live).trim();
     if (!text) {
-      appendLog("voiceLog", `${tag("muted", "·")} no speech`);
+      setVoiceStatus("idle", "READY", "no speech");
       return;
     }
     appendLog("voiceLog", `<b>YOU</b> ${esc(text)}`);
     state.voiceBusy = true;
+    setVoiceStatus("thinking", "THINKING", "classifying intent");
+
     try {
-      const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, models: state.cfg.modelOverrides, tenantId: state.cfg.tenantId || undefined }),
-      });
-      const j = await r.json();
-      const reply = j.text || `err: ${j.error || "unknown"}`;
-      appendLog("voiceLog", `<b style="color:var(--accent)">AGENT</b> ${esc(reply)}`);
-      if ($("#voiceSpeak").checked) speakText(reply);
-      if (state.voiceLoop) setTimeout(voiceTurn, 600);
+      if (state.voiceAuto) {
+        await handleAutonomous(text);
+      } else {
+        await handleAsk(text);
+      }
     } catch (e) {
       appendLog("voiceLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
     } finally {
       state.voiceBusy = false;
+      setVoiceStatus("idle", "READY", state.voiceLoop ? "looping…" : "tap to talk");
+      if (state.voiceLoop) setTimeout(voiceTurn, 800);
     }
   };
   rec.onerror = (e) => {
     appendLog("voiceLog", `${tag("bad", "voice")} ${esc(e.error || "error")}`);
     state.voiceRec = null;
     $("#voiceBtn").textContent = "🎤 HOLD TO TALK";
+    setVoiceStatus("idle", "READY", "error — retry");
   };
   rec.start();
   state.voiceRec = rec;
-  $("#voiceBtn").textContent = "■ STOP";
 }
 
-// ---- Memory ----
+// Heuristic local intent classifier — runs before /api/voice-command so the
+// common cases ("scroll down", "click sign in", "summarize this page",
+// "open github") don't burn an LLM call. Returns null if no local match;
+// then we fall through to the server classifier.
+function localIntent(text) {
+  const t = text.trim().toLowerCase();
+  // Tab-content reading
+  if (/^(read|tell me|what does this page say|read this( (page|tab))?)\b/i.test(t)) {
+    return { intent: "read_tab" };
+  }
+  if (/^(summari[sz]e|sum up|tldr|tl;dr)(\s+(this|the)?\s*(page|tab|article|video|post)?)?/i.test(t)) {
+    return { intent: "summarize_tab" };
+  }
+  // Scrolling
+  let m = t.match(/^scroll\s+(up|down|top|bottom)$/);
+  if (m) return { intent: "scroll", direction: m[1] };
+  if (/^scroll$/.test(t)) return { intent: "scroll", direction: "down" };
+  // Click
+  m = t.match(/^(click|press|tap)\s+(on\s+)?(.+)$/);
+  if (m) return { intent: "click", target: m[3].replace(/\.$/, "") };
+  // Fill
+  m = t.match(/^(fill|type|enter|set)\s+(?:the\s+)?(.+?)\s+(?:with|to|=)\s+(.+)$/);
+  if (m) return { intent: "fill", field: m[2], value: m[3] };
+  // Navigation
+  m = t.match(/^(open|go to|navigate to|visit|launch)\s+(.+)$/);
+  if (m) return { intent: "open_url", url: m[2] };
+  if (/^reload$|^refresh$/.test(t)) return { intent: "reload" };
+  if (/^go back$|^back$/.test(t)) return { intent: "back" };
+  if (/^go forward$|^forward$/.test(t)) return { intent: "forward" };
+  if (/^close (this )?tab$|^close it$/.test(t)) return { intent: "close_tab" };
+  return null;
+}
+
+async function handleAutonomous(transcript) {
+  // 1) Try local pattern matcher first — fast, free, deterministic.
+  let intent = localIntent(transcript);
+
+  // 2) Fall back to server intent classifier for fuzzier inputs.
+  if (!intent) {
+    try {
+      const r = await fetch(`${state.cfg.endpoint}/api/voice-command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript, tenantId: state.cfg.tenantId || undefined }),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        // Bridge server intent vocabulary → our tab-action vocabulary.
+        if (j.intent === "open_app" && j.app) intent = { intent: "open_url", url: j.app };
+        else if (j.intent === "navigate" && j.payload) intent = { intent: "open_url", url: j.payload };
+        else if (j.intent === "answer") intent = { intent: "answer", reply: j.reply };
+        else intent = { intent: "answer", reply: j.reply || "ok" };
+      }
+    } catch {}
+  }
+  if (!intent) intent = { intent: "ask" };
+
+  setVoiceStatus("acting", intent.intent.toUpperCase(), "");
+
+  // 3) Execute the intent against the current tab or the agent.
+  switch (intent.intent) {
+    case "read_tab": {
+      const res = await tabAction("read");
+      const text = res?.data?.text?.slice(0, 240) || "(no text)";
+      appendLog("voiceLog", `${tag("cyan", "read")} ${esc(text)}…`);
+      speakText(text);
+      break;
+    }
+    case "summarize_tab": {
+      const res = await tabAction("read");
+      if (!res?.ok) { speakText("Could not read the page."); break; }
+      const ctx = res.data;
+      const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: `Summarize this web page in 3 short bullets.\n\nTitle: ${ctx.title}\nURL: ${ctx.url}\n\n${ctx.text}`,
+          models: state.cfg.modelOverrides,
+          tenantId: state.cfg.tenantId || undefined,
+        }),
+      });
+      const j = await r.json();
+      const reply = j.text || `err: ${j.error || "unknown"}`;
+      appendLog("voiceLog", `<div class="answer">${tag("info", "summary")} ${esc(reply)}</div>`);
+      if ($("#voiceSpeak").checked) speakText(reply);
+      break;
+    }
+    case "click": {
+      const res = await tabAction("click", { needle: intent.target });
+      const ok = res?.data?.ok;
+      appendLog("voiceLog", `${tag(ok ? "ok" : "bad", "click")} ${esc(intent.target)} ${ok ? "✓" : ""}`);
+      if ($("#voiceSpeak").checked) speakText(ok ? `Clicked ${intent.target}.` : `Could not find ${intent.target}.`);
+      break;
+    }
+    case "fill": {
+      const res = await tabAction("fill", { field: intent.field, value: intent.value });
+      const ok = res?.data?.ok;
+      appendLog("voiceLog", `${tag(ok ? "ok" : "bad", "fill")} ${esc(intent.field)} = ${esc(intent.value)} ${ok ? "✓" : ""}`);
+      if ($("#voiceSpeak").checked) speakText(ok ? `Filled ${intent.field}.` : `Could not find a ${intent.field} field.`);
+      break;
+    }
+    case "scroll": {
+      await tabAction("scroll", { direction: intent.direction || "down" });
+      appendLog("voiceLog", `${tag("info", "scroll")} ${esc(intent.direction || "down")}`);
+      break;
+    }
+    case "open_url": {
+      await tabAction("navigate", { url: intent.url });
+      appendLog("voiceLog", `${tag("info", "→")} ${esc(intent.url)}`);
+      if ($("#voiceSpeak").checked) speakText(`Opening ${intent.url}.`);
+      break;
+    }
+    case "reload":
+    case "back":
+    case "forward":
+    case "close_tab": {
+      await tabAction(intent.intent);
+      appendLog("voiceLog", `${tag("info", intent.intent)} ✓`);
+      break;
+    }
+    case "answer": {
+      const reply = intent.reply || "ok";
+      appendLog("voiceLog", `<div class="answer">${tag("info", "agent")} ${esc(reply)}</div>`);
+      if ($("#voiceSpeak").checked) speakText(reply);
+      break;
+    }
+    case "ask":
+    default: {
+      await handleAsk(transcript);
+      break;
+    }
+  }
+}
+
+async function handleAsk(transcript) {
+  const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: transcript, models: state.cfg.modelOverrides, tenantId: state.cfg.tenantId || undefined }),
+  });
+  const j = await r.json();
+  const reply = j.text || `err: ${j.error || "unknown"}`;
+  appendLog("voiceLog", `<div class="answer">${tag("info", "agent")} ${esc(reply)}</div>`);
+  if ($("#voiceSpeak").checked) speakText(reply);
+}
+
+// ───────────────────────── memory (kept) ─────────────────────────
 $("#memBtn").addEventListener("click", recallMem);
 
 async function recallMem() {
   const q = $("#memQuery").value.trim() || "recent agent runs";
   $("#memLog").innerHTML = "";
   try {
-    const url = `${state.cfg.endpoint}/api/memory?q=${encodeURIComponent(q)}${state.cfg.tenantId ? `&tenantId=${encodeURIComponent(state.cfg.tenantId)}` : ""}&topK=12`;
+    const url = `${state.cfg.endpoint}/api/memory?q=${encodeURIComponent(q)}&topK=12`;
     const r = await fetch(url);
     const j = await r.json();
     if (j.hits?.length === 0 && j.local?.length === 0) {
@@ -489,11 +657,7 @@ async function recallMem() {
   }
 }
 
-// ---- Track active tab ----
-$$(".tab").forEach((t) => t.addEventListener("click", () => { state.activeTab = t.dataset.tab; }));
-state.activeTab = "mission";
-
-// ---- Bootstrap ----
+// ───────────────────────── boot ─────────────────────────────────
 (async function init() {
   await loadCfg();
   renderSettings();
@@ -502,10 +666,17 @@ state.activeTab = "mission";
   if (stored.pendingGoal) {
     $("#goal").value = stored.pendingGoal;
     await chrome.storage.local.remove("pendingGoal");
+    // If a selection-context-menu drop arrived, jump to Mission tab.
+    $$(".tab").forEach((x) => x.classList.remove("on"));
+    $$(".panel").forEach((x) => x.classList.remove("on"));
+    $('[data-tab="mission"]')?.classList.add("on");
+    $('[data-panel="mission"]')?.classList.add("on");
+    state.activeTab = "mission";
   }
   $("#log").innerHTML = '<div class="empty">terminal ready <span class="cursor"></span></div>';
   $("#cohortResults").innerHTML = '<div class="empty">no cohort run yet</div>';
-  $("#voiceLog").innerHTML = '<div class="empty">tap mic and speak</div>';
+  $("#voiceLog").innerHTML = '<div class="empty">tap the mic, say "summarize this page"</div>';
   $("#memLog").innerHTML = '<div class="empty">search saved runs</div>';
+  setVoiceStatus("idle", "READY", "autonomous mode");
   setInterval(refreshConn, 15000);
 })();

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "DelOS — Agents Under Pressure",
   "short_name": "DelOS",
-  "version": "2.1.1",
-  "description": "Run multi-agent missions from any tab. Memory · Tools · Recovery · Adaptation. Voice + cohort + MCP companion to DelOS.",
+  "version": "2.2.0",
+  "description": "Autonomous voice agent for any tab — summarize, click, fill, scroll, navigate hands-free. Plus full DelOS mission / cohort / memory companion.",
   "author": "DelOS",
   "minimum_chrome_version": "114",
   "action": {

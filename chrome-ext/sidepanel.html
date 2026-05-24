@@ -11,7 +11,7 @@
       <div class="brand">
         <span class="brand-mark">▮</span>
         <span class="brand-name">DelOS</span>
-        <span class="brand-sub">v2.1</span>
+        <span class="brand-sub">v2.2</span>
       </div>
       <div class="hdr-right">
         <span id="conn" class="pill pill-warn">● checking</span>
@@ -20,15 +20,42 @@
     </header>
 
     <nav class="tabs">
-      <button data-tab="mission" class="tab on">Mission</button>
+      <button data-tab="voice" class="tab on">Voice</button>
+      <button data-tab="mission" class="tab">Mission</button>
       <button data-tab="cohort" class="tab">Cohort</button>
-      <button data-tab="voice" class="tab">Voice</button>
       <button data-tab="memory" class="tab">Memory</button>
     </nav>
 
     <main class="panels">
+      <!-- VOICE — autonomous tab agent (now the headline) -->
+      <section data-panel="voice" class="panel on">
+        <div id="voiceStatus" class="voice-status idle">
+          <span class="dot"></span>
+          <span class="label" id="voiceStatusLabel">READY</span>
+          <span class="meta" id="voiceStatusMeta">tap to wake</span>
+        </div>
+
+        <div class="row">
+          <button id="voiceBtn" class="primary big" style="flex:1">🎤 HOLD TO TALK</button>
+        </div>
+        <div class="row tightrow">
+          <label class="check small"><input type="checkbox" id="voiceAuto" checked /> autonomous</label>
+          <label class="check small"><input type="checkbox" id="voiceLoop" checked /> loop</label>
+          <label class="check small"><input type="checkbox" id="voiceSpeak" checked /> speak</label>
+          <button id="stopSpeakBtn" class="ghost small">🔇 mute</button>
+        </div>
+
+        <div class="hint" style="margin-bottom:8px">
+          Say <code>summarize this page</code> · <code>open github</code> · <code>click sign in</code> ·
+          <code>fill email with foo@bar</code> · <code>scroll down</code> · <code>read this</code>.
+          Autonomous mode runs intent classifier + acts on current tab.
+        </div>
+
+        <div id="voiceLog" class="log"></div>
+      </section>
+
       <!-- MISSION -->
-      <section data-panel="mission" class="panel on">
+      <section data-panel="mission" class="panel">
         <div class="row">
           <textarea id="goal" rows="2" placeholder="give the agent a mission…"></textarea>
         </div>
@@ -71,19 +98,6 @@
           <button id="cohortBtn" class="primary">▶ RUN COHORT</button>
         </div>
         <div id="cohortResults" class="log"></div>
-      </section>
-
-      <!-- VOICE -->
-      <section data-panel="voice" class="panel">
-        <div class="row">
-          <button id="voiceBtn" class="primary big">🎤 HOLD TO TALK</button>
-        </div>
-        <div class="row tightrow">
-          <label class="check small"><input type="checkbox" id="voiceLoop" /> loop</label>
-          <label class="check small"><input type="checkbox" id="voiceSpeak" checked /> speak reply</label>
-          <button id="stopSpeakBtn" class="ghost small">stop voice</button>
-        </div>
-        <div id="voiceLog" class="log"></div>
       </section>
 
       <!-- MEMORY -->
