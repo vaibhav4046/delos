@@ -30,7 +30,11 @@ export function buildModels(overrides?: ModelOverrides) {
     planner,
     executor,
     critic,
-    fallback: google("gemini-2.5-flash"),
+    // Fallback when the primary Groq model 429s on TPD. Gemini was the
+    // previous fallback but the hackathon Google account exhausts its
+    // free quota within the first hour of demo traffic. Mistral Small
+    // has a separate quota and is reliably available on this account.
+    fallback: mistral("mistral-small-latest"),
     embedding: google.textEmbeddingModel("text-embedding-004"),
   };
 }

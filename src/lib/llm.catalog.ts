@@ -9,8 +9,14 @@ export type ModelKey =
   | "google:gemini-2.5-flash"
   | "google:gemini-2.5-pro";
 
+// Groq free-tier TPD (tokens-per-day) caps are shared per model name on the
+// org. gpt-oss-120b sits at 200K/day, gpt-oss-20b at 500K/day. Default the
+// planner to the larger-quota 20B so a busy demo day doesn't 429 the first
+// step of every mission once the 120B bucket is drained. Plans don't need
+// the smarter 120B for short goals; user can still override per-role from
+// Settings or per-call via models.planner.
 export const DEFAULTS: Record<"planner" | "executor" | "critic", ModelKey> = {
-  planner: "groq:openai/gpt-oss-120b",
+  planner: "groq:openai/gpt-oss-20b",
   executor: "groq:openai/gpt-oss-20b",
   // Critic defaults to fast Groq for sub-second drift scoring.
   // Orchestrator escalates to Mistral on initial drift > 0.4 (second-opinion path).
