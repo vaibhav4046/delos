@@ -240,43 +240,133 @@ export function DesktopWidgets() {
 }
 
 // ── Weather (Open-Meteo, no API key) ─────────────────────────────────────────
+// Location resolution waterfall — pick the first source that returns coords:
+//   1. localStorage cache (delos.weather.loc)        — no network
+//   2. Manual override entered in widget input box   — persists
+//   3. navigator.geolocation (8s timeout, GPS/Wi-Fi) — needs permission
+//   4. ipapi.co IP-based fallback (no key, no perm)  — always works while online
+// Coords + city are cached to localStorage so subsequent loads skip the prompt.
+type WeatherLoc = { lat: number; lon: number; city: string; source: "manual" | "gps" | "ip" };
+const WEATHER_LOC_KEY = "delos.weather.loc";
+
+function loadCachedLoc(): WeatherLoc | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(WEATHER_LOC_KEY);
+    return raw ? (JSON.parse(raw) as WeatherLoc) : null;
+  } catch { return null; }
+}
+
+function saveCachedLoc(l: WeatherLoc) {
+  try { localStorage.setItem(WEATHER_LOC_KEY, JSON.stringify(l)); } catch {}
+}
+
+async function resolveLocation(force?: "gps" | "ip"): Promise<WeatherLoc> {
+  // Try GPS — exact coords if user grants permission
+  if (force !== "ip" && "geolocation" in navigator) {
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          timeout: 8000,
+          enableHighAccuracy: false,
+          maximumAge: 10 * 60 * 1000,
+        });
+      });
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const rg = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&count=1`).then((r) => r.json()).catch(() => null);
+      return {
+        lat, lon,
+        city: rg?.results?.[0]?.name ?? "Current location",
+        source: "gps",
+      };
+    } catch {}
+  }
+  // IP-based fallback — works without permission, free, no key
+  const ip = await fetch("https://ipapi.co/json/").then((r) => r.json()).catch(() => null);
+  if (ip?.latitude != null && ip?.longitude != null) {
+    return {
+      lat: Number(ip.latitude),
+      lon: Number(ip.longitude),
+      city: ip.city || ip.region || ip.country_name || "Unknown",
+      source: "ip",
+    };
+  }
+  throw new Error("could not resolve location");
+}
+
+async function geocodeCity(q: string): Promise<WeatherLoc | null> {
+  try {
+    const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=1`).then((r) => r.json());
+    const hit = r?.results?.[0];
+    if (!hit) return null;
+    return { lat: hit.latitude, lon: hit.longitude, city: hit.name, source: "manual" };
+  } catch { return null; }
+}
+
 function WeatherWidget() {
-  const [data, setData] = useState<{ tempC: number; code: number; city: string } | null>(null);
+  const [data, setData] = useState<{ tempC: number; code: number; city: string; source: WeatherLoc["source"] } | null>(null);
   const [err, setErr] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [cityInput, setCityInput] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
+    async function fetchAt(loc: WeatherLoc) {
       try {
-        // Try geolocation, fall back to NYC if denied/unavailable
-        let lat = 40.7128, lon = -74.006, city = "New York";
-        try {
-          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-            if (!("geolocation" in navigator)) return reject(new Error("no geo"));
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 });
-          });
-          lat = pos.coords.latitude;
-          lon = pos.coords.longitude;
-          // Reverse geocode via Open-Meteo's free endpoint
-          const rg = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&count=1`).then((r) => r.json()).catch(() => null);
-          city = rg?.results?.[0]?.name ?? "Local";
-        } catch {}
-        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`;
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code`;
         const r = await fetch(url);
         if (!r.ok) throw new Error("weather " + r.status);
         const j = await r.json();
         if (cancelled) return;
-        setData({ tempC: j.current.temperature_2m, code: j.current.weather_code, city });
+        setData({ tempC: j.current.temperature_2m, code: j.current.weather_code, city: loc.city, source: loc.source });
+        setErr(false);
       } catch {
         if (!cancelled) setErr(true);
       }
     }
+    async function load() {
+      // Hit cache first so weather appears instantly
+      const cached = loadCachedLoc();
+      if (cached) fetchAt(cached);
+      // Then refresh location (silent unless cache empty)
+      try {
+        const fresh = await resolveLocation();
+        if (cancelled) return;
+        saveCachedLoc(fresh);
+        // Only re-fetch if coords moved meaningfully (>5 km) or first run
+        if (!cached || Math.hypot(cached.lat - fresh.lat, cached.lon - fresh.lon) > 0.05) {
+          fetchAt(fresh);
+        }
+      } catch {
+        if (!cached) setErr(true);
+      }
+    }
     load();
-    const interval = setInterval(load, 15 * 60 * 1000); // refresh every 15 min
+    const interval = setInterval(load, 15 * 60 * 1000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
+  async function submitManualCity() {
+    const q = cityInput.trim();
+    if (!q) { setEditing(false); return; }
+    const loc = await geocodeCity(q);
+    if (!loc) { setErr(true); return; }
+    saveCachedLoc(loc);
+    setEditing(false);
+    setCityInput("");
+    // Force-refresh weather at the new spot
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code`;
+      const r = await fetch(url);
+      const j = await r.json();
+      setData({ tempC: j.current.temperature_2m, code: j.current.weather_code, city: loc.city, source: "manual" });
+      setErr(false);
+    } catch { setErr(true); }
+  }
+
   const icon = data ? weatherIcon(data.code) : "—";
+  const sourceTag = data?.source === "gps" ? "GPS" : data?.source === "manual" ? "MANUAL" : data?.source === "ip" ? "IP" : "";
   return (
     <div
       className="absolute pointer-events-auto"
@@ -291,7 +381,8 @@ function WeatherWidget() {
         textAlign: "center",
         boxShadow: "3px 3px 0 var(--shadow)",
       }}
-      title="Open-Meteo · no key"
+      title="Open-Meteo · click city to override"
+      onDoubleClick={() => setEditing(true)}
     >
       <div className="flex items-center justify-center gap-2">
         <span style={{ fontSize: 22, lineHeight: 1 }}>{icon}</span>
@@ -299,9 +390,48 @@ function WeatherWidget() {
           {data ? `${Math.round(data.tempC)}°C` : err ? "—" : "…"}
         </span>
       </div>
-      <div className="font-mono mt-1" style={{ color: "var(--muted)", fontSize: 9, letterSpacing: "0.08em" }}>
-        {data?.city ?? (err ? "offline" : "locating…")}
-      </div>
+      {editing ? (
+        <input
+          autoFocus
+          value={cityInput}
+          onChange={(e) => setCityInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitManualCity();
+            if (e.key === "Escape") { setEditing(false); setCityInput(""); }
+          }}
+          onBlur={submitManualCity}
+          placeholder="city name"
+          className="font-mono mt-1"
+          style={{
+            background: "var(--bg)",
+            color: "var(--fg)",
+            border: "1px solid var(--surface-2)",
+            fontSize: 10,
+            padding: "2px 4px",
+            width: "100%",
+            textAlign: "center",
+          }}
+        />
+      ) : (
+        <button
+          onClick={() => setEditing(true)}
+          className="font-mono mt-1 w-full"
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--muted)",
+            fontSize: 9,
+            letterSpacing: "0.08em",
+            cursor: "pointer",
+          }}
+          title="Double-click to change city"
+        >
+          {data?.city ?? (err ? "offline" : "locating…")}
+          {sourceTag && (
+            <span style={{ marginLeft: 4, color: "var(--accent)", fontSize: 8 }}>· {sourceTag}</span>
+          )}
+        </button>
+      )}
     </div>
   );
 }
