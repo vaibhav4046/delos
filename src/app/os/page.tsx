@@ -603,11 +603,8 @@ export default function OSPage() {
     for (const u of prewarm) {
       fetch(u, { cache: "no-store" }).catch(() => {});
     }
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("demo") === "judge") {
-      const t = window.setTimeout(() => runDemoTour(), 600);
-      return () => window.clearTimeout(t);
-    }
+    // Judge demo URL deeplink removed alongside the in-UI buttons per
+    // hackathon UX cleanup. runDemoTour is dormant code now.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1204,9 +1201,6 @@ export default function OSPage() {
               <button onClick={gridArrange} className="hidden md:inline-flex pill pill-muted" title="Tile windows (⌘G)" style={{ cursor: "pointer", fontSize: 10 }}>
                 <Icons.Grid3x3 size={10} /> TILE
               </button>
-              <button data-tour="demo-button" onClick={runDemoTour} className="hidden md:inline-flex pill pill-info" title="Run scripted 5-step judge demo (⌘ Shift D)" style={{ cursor: "pointer", fontSize: 10 }}>
-                ▶ JUDGE DEMO
-              </button>
               <CounterStrip />
               {/* Command palette opener — was floating top-right, now lives
                   inline so it stops fighting with the OPEN counter + clock
@@ -1270,7 +1264,7 @@ export default function OSPage() {
               />
             ))}
 
-            <WelcomeMat visible={windows.length === 0} onLaunch={spawnSystemApp} apps={SYSTEM_APPS} order={dockOrder} onDemo={runDemoTour} />
+            <WelcomeMat visible={windows.length === 0} onLaunch={spawnSystemApp} apps={SYSTEM_APPS} order={dockOrder} />
           </main>
 
           <div data-tour="agent-pulse" className="contents">
@@ -1479,13 +1473,11 @@ function WelcomeMat({
   onLaunch,
   apps,
   order,
-  onDemo,
 }: {
   visible: boolean;
   onLaunch: (key: string) => void;
   apps: Record<string, DockItem>;
   order: string[];
-  onDemo: () => void;
 }) {
   const All = Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>;
   // Sleek brand-aligned overrides for killer apps. Falls back to lucide otherwise.
@@ -1524,7 +1516,6 @@ function WelcomeMat({
           browser-OS · agents build apps · ⌘K palette · drag windows
         </p>
         <div className="mt-5 flex justify-center gap-2 flex-wrap">
-          <button className="btn-pixel success" onClick={onDemo} title="Scripted 5-step judge demo · MCP + VibeCode + Memory">▶ JUDGE DEMO</button>
           <button className="btn-pixel" style={{ background: "var(--accent)", color: "var(--on-accent)" }} onClick={() => onLaunch("builder")}>★ BUILD APP</button>
           <button className="btn-pixel ghost" onClick={() => onLaunch("assistant")}>ASSISTANT</button>
           <button className="btn-pixel ghost" onClick={() => onLaunch("voice")}>VOICE</button>

@@ -92,7 +92,6 @@ function Header() {
           <Link href="/os?guest=1" className="btn-pixel success text-xs sm:text-sm">★ DelOS</Link>
           <Link href="/auth" className="btn-pixel ghost text-xs sm:text-sm">Sign in</Link>
           <Link href="/pitch" className="btn-pixel ghost text-xs sm:text-sm hidden sm:inline-flex">Pitch</Link>
-          <Link href="/os?guest=1&demo=judge" className="btn-pixel ghost text-xs sm:text-sm hidden sm:inline-flex" title="Play the 60 second judge demo">Demo</Link>
           <Link href="/arena" className="btn-pixel ghost text-xs sm:text-sm hidden md:inline-flex">Arena</Link>
           <Link href="/live" className="btn-pixel ghost text-xs sm:text-sm hidden md:inline-flex">Live</Link>
           <Link href="/memory" className="btn-pixel ghost text-xs sm:text-sm hidden md:inline-flex">Memory</Link>
@@ -163,9 +162,6 @@ function Hero({ apps }: { apps: number }) {
           <div className="mt-7 flex flex-wrap gap-2 sm:gap-3">
             <Link href="/os?guest=1" className="btn-pixel success magnet" style={{ fontSize: 13, padding: "10px 16px" }}>
               ★ LAUNCH DELOS →
-            </Link>
-            <Link href="/play" className="btn-pixel ghost" style={{ fontSize: 13, padding: "10px 16px" }}>
-              ▶ CHAOS DEMO
             </Link>
             <Link href="/docs" className="btn-pixel ghost hidden sm:inline-flex" style={{ fontSize: 13, padding: "10px 16px" }}>
               DOCS
@@ -388,7 +384,6 @@ function DesktopShowcase({ apps }: { apps: number }) {
           </div>
           <div className="flex gap-2 flex-wrap">
             <Link href="/os?guest=1" className="btn-pixel">▶ OPEN DELOS</Link>
-            <Link href="/os?guest=1&demo=judge" className="btn-pixel ghost">JUST THE DEMO</Link>
           </div>
         </div>
 
