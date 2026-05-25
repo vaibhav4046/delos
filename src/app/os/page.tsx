@@ -603,6 +603,24 @@ export default function OSPage() {
     for (const u of prewarm) {
       fetch(u, { cache: "no-store" }).catch(() => {});
     }
+    // PERFECT-10 · pre-warm the browse-agent NIM lambda so the first real
+    // Mission run from the Chrome extension or any browse call lands in
+    // sub-second range instead of the 30s cold start. Fire-and-forget with
+    // a tiny task that returns fast from the cascade. Best effort.
+    setTimeout(() => {
+      fetch("/api/browse-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "ping" }),
+        cache: "no-store",
+      }).catch(() => {});
+      fetch("/api/quick-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: "ping" }),
+        cache: "no-store",
+      }).catch(() => {});
+    }, 1200);
     // Judge demo URL deeplink removed alongside the in-UI buttons per
     // hackathon UX cleanup. runDemoTour is dormant code now.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1002,10 +1020,7 @@ export default function OSPage() {
         e.preventDefault();
         spawnSystemApp("builder");
       }
-      if (isMod && e.shiftKey && e.key.toLowerCase() === "d") {
-        e.preventDefault();
-        runDemoTour();
-      }
+      // ⌘⇧D demo-tour hotkey removed alongside the UI demo buttons.
       if (isMod && e.key.toLowerCase() === "r") {
         if (focusedId) {
           e.preventDefault();
@@ -1227,7 +1242,11 @@ export default function OSPage() {
               </button>
               <span className="pill pill-info">{windows.filter((w) => !w.minimized).length} OPEN</span>
               <span suppressHydrationWarning className="font-pixel text-sm tracking-widest" style={{ color: "var(--fg)" }}>
-                {now ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "--:--:--"}
+                {/* PERFECT-10 · fall back to a freshly computed client time so the
+                    first paint shows real digits, never `--:--:--`. SSR still
+                    renders server time; suppressHydrationWarning covers the
+                    diff on first hydrate. */}
+                {(now ?? new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </span>
               <Link href="/" data-tour="exit" className="pill pill-muted" style={{ textDecoration: "none" }}>EXIT</Link>
             </div>

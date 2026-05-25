@@ -12,7 +12,6 @@ const KEY_SHORTCUTS: Array<{ keys: string; desc: string }> = [
   { keys: "⌘ /", desc: "All shortcuts modal" },
   { keys: "⌘T", desc: "New terminal" },
   { keys: "⌘⇧B", desc: "App builder" },
-  { keys: "⌘⇧D", desc: "Demo tour" },
   { keys: "Esc", desc: "Close focused window" },
   { keys: "Drag edge", desc: "Snap half" },
   { keys: "Right-click", desc: "Desktop menu" },
