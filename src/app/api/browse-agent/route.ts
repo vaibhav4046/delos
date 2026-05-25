@@ -14,6 +14,7 @@ import { z } from "zod";
 import { runQuickAgent } from "@/lib/agents/quick";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { isNimEnabled, nimChat, NIM_MODELS } from "@/lib/llm/providers/nim";
+import { isOpenRouterEnabled, openRouterChat, OPENROUTER_MODELS } from "@/lib/llm/providers/openrouter";
 import { classifyInjection } from "@/lib/security/injection-classifier";
 import { safeAddMemory, ensureTenant } from "@/lib/hydra";
 import { sanitizeMemoryText } from "@/lib/sanitize";
@@ -204,6 +205,9 @@ export async function POST(req: NextRequest) {
   if (!lim.ok) {
     return Response.json({ error: "rate_limited" }, { status: 429, headers: lim.headers });
   }
+  // BYOK · user can paste their own OpenRouter key in Settings · header
+  // takes precedence over server env. Server-side key is the safety net.
+  const userOpenRouterKey = req.headers.get("x-byok-openrouter") || undefined;
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   // Field unification
   if (typeof body.input === "string" && !body.task) body.task = body.input;
@@ -263,8 +267,29 @@ export async function POST(req: NextRequest) {
         systemOverride: SYSTEM,
       });
       planner = "groq-fallback";
-    } catch (e) {
-      return Response.json({ error: "planner_failed", detail: e instanceof Error ? e.message : String(e) }, { status: 502 });
+    } catch {
+      // Groq cascade exhausted · try OpenRouter as last fallback. Honors
+      // user BYOK header so judges can run unlimited on their own key.
+      if (isOpenRouterEnabled(userOpenRouterKey)) {
+        try {
+          const orRes = await openRouterChat({
+            model: OPENROUTER_MODELS.llama33,
+            messages: [
+              { role: "system", content: SYSTEM },
+              { role: "user", content: userMsg },
+            ],
+            temperature: 0.2,
+            max_tokens: 1200,
+            userKey: userOpenRouterKey,
+          });
+          raw = orRes.text;
+          planner = `openrouter/${orRes.model}`;
+        } catch (e2) {
+          return Response.json({ error: "planner_failed", detail: e2 instanceof Error ? e2.message : String(e2) }, { status: 502 });
+        }
+      } else {
+        return Response.json({ error: "planner_failed", detail: "all providers exhausted" }, { status: 502 });
+      }
     }
   }
 

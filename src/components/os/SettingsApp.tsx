@@ -292,6 +292,30 @@ function VoiceTab() {
             </button>
           ))}
         </div>
+        {/* V9 · BYOK OpenRouter key · used as last-resort LLM fallback when
+            Groq + NIM rate-limit or exhaust quota. Stored locally only. */}
+        <label className="block" style={{ marginTop: 12 }}>
+          <span className="text-[10px] tracking-wider text-[color:var(--muted)]">YOUR OPENROUTER KEY (BYOK · unlimited demos on your dime)</span>
+          <input
+            type="password"
+            className="input-pixel"
+            placeholder="sk-or-v1-…  (never leaves your browser · sent only as header)"
+            value={prefs.openrouterApiKey ?? ""}
+            onChange={(e) => setPrefs({ ...prefs, openrouterApiKey: e.target.value })}
+            autoComplete="off"
+          />
+          <span className="text-[9px] text-[color:var(--muted)] block mt-1">
+            Get a free key at{" "}
+            <a
+              href="https://openrouter.ai/keys"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--accent)", textDecoration: "underline" }}
+            >
+              openrouter.ai/keys
+            </a>{" "}· covers Claude, GPT, Gemini, Llama, DeepSeek, Qwen and ~100 more.
+          </span>
+        </label>
         {prefs.ttsProvider === "elevenlabs" && (
           <>
             <label className="block">

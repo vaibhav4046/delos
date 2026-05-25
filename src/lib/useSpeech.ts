@@ -15,6 +15,10 @@ export type VoicePrefs = {
   // Bring-your-own ElevenLabs key. Stored client-side only. Passed with /api/tts
   // requests so users get premium voice without us needing server-side keys.
   elevenApiKey?: string;
+  // V9 · BYOK · user-supplied OpenRouter key. Sent via `x-byok-openrouter`
+  // header on every LLM-using request. Lets judges run unlimited on their
+  // own key without us paying for tokens.
+  openrouterApiKey?: string;
   autonomy: boolean;
 };
 
