@@ -174,7 +174,15 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
       reply: `Reminder set · ${rest} in 30m.`,
     };
   }
-  if (/^(?:schedule|set\s+up|create)\s+(?:a\s+)?(?:daily|weekly|hourly)?\s*(?:email|cohort|mission|notification|reminder|notion|digest|action)\b/i.test(raw)) {
+  // VP-1 · schedule_action · loose match. Triggers when ANY of these
+  // co-occur: cadence word (daily/weekly/hourly/every) + automation noun
+  // (email/cohort/mission/notification/notion/digest/research/action).
+  // Catches "set up a daily email digest" AND "schedule a daily research mission".
+  // Calendar event regex runs AFTER this · so it gets "schedule lunch Friday" instead.
+  const isScheduleVerb = /^(?:schedule|set\s+up|create)\b/i.test(raw);
+  const hasCadence = /\b(?:daily|weekly|hourly|every|cron|automated|recurring)\b/i.test(raw);
+  const hasAutomationNoun = /\b(?:email|inbox|cohort|mission|notification|notify|notion|digest|research|action|brief|briefing|recap|summary|automation|workflow)\b/i.test(raw);
+  if (isScheduleVerb && hasCadence && hasAutomationNoun) {
     return {
       intent: "schedule_action",
       app: "schedule",
@@ -190,8 +198,10 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
   //   "add to my calendar standup Monday at 10am"
   //   "create event lunch Wednesday 1pm"
   //   "book Andy for Tuesday 2pm"
-  const calMatch = raw.match(/^(?:please\s+)?(?:schedule|create|add|book|set\s+up)\s+(?:a\s+|an\s+)?(?:event|meeting|call|sync|standup|reminder|appointment)?\s*(.+)$/i);
-  if (calMatch && /\b(?:today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\s*(?:am|pm)|at\s+\d|in\s+\d+\s*(?:min|hour|day))\b/i.test(raw)) {
+  // VP-1 · calendar event · broaden noun list so "schedule lunch Friday" works.
+  // Time signal still required so this doesn't catch "schedule a thing" without when.
+  const calMatch = raw.match(/^(?:please\s+)?(?:schedule|create|add|book|set\s+up)\s+(?:a\s+|an\s+)?(?:event|meeting|call|sync|standup|reminder|appointment|lunch|dinner|breakfast|coffee|drinks|catch\s+up|chat|talk|interview|review|demo|session|1[:-]?1|one[\s-]?on[\s-]?one)?\s*(.+)$/i);
+  if (calMatch && /\b(?:today|tonight|tomorrow|day\s+after\s+tomorrow|next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)|at\s+\d|in\s+\d+\s*(?:min|hour|day))\b/i.test(raw)) {
     return {
       intent: "create_event",
       app: "calendar",

@@ -507,8 +507,22 @@ export type VoiceAction = {
     | "open_gdrive"
     | "store_memory"
     | "clear_memory"
+    // VP-4 · server-side connector intents returned by /api/voice-command
+    | "gmail_draft_reply"
+    | "gmail_send"
+    | "gmail_list_recent"
+    | "notion_create_page"
+    | "notion_search"
+    | "gdrive_list_recent"
+    | "gdrive_read_pdf"
+    | "github_create_repo"
+    | "github_create_issue"
     | "compound"
     | "unknown";
+  // VP-4 · envelope fields the server includes for connector routing
+  kind?: "integration_unavailable" | "integration_call" | "fulfilled" | "awaiting_approval";
+  provider?: string;
+  deepLink?: string;
   app?: string;
   payload?: string;
   reply: string;

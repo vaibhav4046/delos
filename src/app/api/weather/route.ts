@@ -153,9 +153,11 @@ export async function GET(req: NextRequest) {
   let lon = lonRaw != null && lonRaw !== "" ? Number(lonRaw) : Number.NaN;
   let cityHint = u.searchParams.get("city") || "";
 
-  // City-only path · geocode the city name to coords via BigDataCloud's
-  // forward-search endpoint (free, no-key). Falls through to ipFallback
-  // if geocode misses so the widget never blank-screens.
+  // City-only path · geocode the city name to coords via Open-Meteo's
+  // forward-search endpoint (free, no-key). REJECT unknown cities with
+  // 404 instead of silently falling back to IP geo + echoing the bad
+  // name. Was "?city=zzzzzzz" → 33°C with city:"zzzzzzz" lying to user.
+  let cityHintWasInvalid = false;
   if ((!Number.isFinite(lat) || !Number.isFinite(lon)) && cityHint) {
     try {
       const g = await fetch(
@@ -171,12 +173,31 @@ export async function GET(req: NextRequest) {
           // Replace cityHint with the canonical name from the geocoder so
           // "lond" → "London" + the region/country come back consistent.
           cityHint = hit.name || cityHint;
+        } else {
+          // Geocoder ran but returned no hits → invalid city name.
+          cityHintWasInvalid = true;
         }
       }
     } catch {}
   }
 
-  // Still no coords · IP fallback so the widget always renders.
+  // Invalid city name · refuse to silently IP-geo-fallback. Return 404
+  // with a suggested correction so the widget shows a clean error rather
+  // than echoing the garbage label over real weather data.
+  if (cityHintWasInvalid && (!Number.isFinite(lat) || !Number.isFinite(lon))) {
+    return Response.json(
+      {
+        error: "city_not_found",
+        query: cityHint,
+        hint: "Check spelling · try 'London', 'New York', 'Tokyo'",
+      },
+      { status: 404 },
+    );
+  }
+
+  // Still no coords · IP fallback so the widget always renders. Drop
+  // the (likely-bogus) cityHint so the response uses the IP-derived
+  // city name instead of echoing whatever the user typed.
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     const ipLoc = await ipFallback(req);
     if (!ipLoc) {
@@ -184,7 +205,7 @@ export async function GET(req: NextRequest) {
     }
     lat = ipLoc.lat;
     lon = ipLoc.lon;
-    if (!cityHint) cityHint = ipLoc.city;
+    cityHint = ipLoc.city; // overwrite, never echo the bad input
   }
 
   const key = cacheKey(lat, lon);

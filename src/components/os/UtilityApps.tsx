@@ -175,9 +175,13 @@ export function CalendarApp() {
     const iv = setInterval(syncFromBackend, 10_000);
     const onVis = () => { if (document.visibilityState === "visible") syncFromBackend(); };
     document.addEventListener("visibilitychange", onVis);
+    // VP-3 · refresh immediately after voice create_event fires
+    const onRefresh = () => syncFromBackend();
+    window.addEventListener("delos-calendar-refresh", onRefresh as EventListener);
     return () => {
       clearInterval(iv);
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("delos-calendar-refresh", onRefresh as EventListener);
     };
   }, []);
   useEffect(() => {

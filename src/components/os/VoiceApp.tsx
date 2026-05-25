@@ -214,9 +214,34 @@ export function VoiceApp() {
   // App Builder auto-runs the build — opening it empty is not enough.
   async function executeVoiceIntent(action: VoiceAction) {
     const payload = action.payload ?? "";
+    // VP-4 · connector kind strings from /api/voice-command response · the
+    // server returns intent like 'gmail_draft_reply', 'notion_create_page',
+    // 'gdrive_list_recent', 'github_create_repo' for matched connector
+    // commands. Normalize them to assistant.ask · Del Assistant's tryMcpAction
+    // dispatches the real connector call when keys are present.
+    const connectorIntents = new Set(["gmail_draft_reply", "gmail_send", "gmail_list_recent", "notion_create_page", "notion_search", "gdrive_list_recent", "gdrive_read_pdf", "github_create_repo", "github_create_issue"]);
+    if (connectorIntents.has(action.intent as string)) {
+      // If server flagged integration_unavailable, surface a clear toast
+      const k = (action as unknown as { kind?: string }).kind;
+      const deepLink = (action as unknown as { deepLink?: string }).deepLink;
+      const provider = (action as unknown as { provider?: string }).provider;
+      if (k === "integration_unavailable") {
+        window.dispatchEvent(new CustomEvent("toast", {
+          detail: { text: `${provider ?? "Integration"} not connected · open Settings`, tone: "warn" },
+        }));
+        if (deepLink) setTimeout(() => { window.location.href = deepLink; }, 600);
+        return;
+      }
+      // Otherwise route through Del Assistant for real connector dispatch
+      window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "assistant" } }));
+      await new Promise((r) => setTimeout(r, 400));
+      window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "assistant.ask", prompt: payload || action.reply || action.intent } }));
+      return;
+    }
     switch (action.intent) {
       case "compound":
-        if (Array.isArray(action.chain)) {
+        // VP-1 · guard · only execute when chain has ≥ 2 actions
+        if (Array.isArray(action.chain) && action.chain.length >= 2) {
           for (const step of action.chain.slice(0, 4)) {
             await executeVoiceIntent({ ...step, reply: "" } as VoiceAction);
             await new Promise((r) => setTimeout(r, 350));
@@ -300,14 +325,32 @@ export function VoiceApp() {
       case "create_event": {
         // Call /api/calendar/events with the spoken text · server parses time.
         try {
+          const tz = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
           const r = await fetch("/api/calendar/events", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title: payload.slice(0, 120), when: payload, source: "voice" }),
+            headers: { "Content-Type": "application/json", "x-tz": tz },
+            body: JSON.stringify({ title: payload.slice(0, 120), when: payload, tz, source: "voice" }),
           });
-          const j = (await r.json().catch(() => ({}))) as { event?: { startAt?: number; title?: string } };
-          const when = j.event?.startAt ? new Date(j.event.startAt).toLocaleString() : "later";
-          window.dispatchEvent(new CustomEvent("toast", { detail: { text: `📅 ${j.event?.title ?? "Event"} · ${when}`, tone: "ok" } }));
+          const j = (await r.json().catch(() => ({}))) as { event?: { id?: string; startAt?: number; title?: string }; error?: string };
+          if (r.ok && j.event) {
+            const when = j.event.startAt ? new Date(j.event.startAt).toLocaleString() : "later";
+            window.dispatchEvent(new CustomEvent("toast", { detail: { text: `📅 ${j.event.title ?? "Event"} · ${when}`, tone: "ok" } }));
+            // VP-3 · push event to CalendarApp's local cache so window shows it
+            // before next 10s poll lands. Also fire delos-calendar-refresh.
+            try {
+              const raw = localStorage.getItem("delos.calendar.v1");
+              const list = raw ? JSON.parse(raw) : [];
+              if (j.event.startAt) {
+                const d = new Date(j.event.startAt);
+                const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                const cached = { id: j.event.id ?? `e-${Date.now()}`, date: ds, title: j.event.title ?? "Event", source: "voice" };
+                localStorage.setItem("delos.calendar.v1", JSON.stringify([cached, ...list].slice(0, 100)));
+              }
+            } catch {}
+            window.dispatchEvent(new CustomEvent("delos-calendar-refresh"));
+          } else {
+            window.dispatchEvent(new CustomEvent("toast", { detail: { text: `Calendar: ${j.error ?? "create failed"}`, tone: "bad" } }));
+          }
         } catch {
           window.dispatchEvent(new CustomEvent("toast", { detail: { text: "Calendar create failed", tone: "bad" } }));
         }

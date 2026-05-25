@@ -49,6 +49,7 @@ const NotificationCenter = lazy(() => import("@/components/os/NotificationCenter
 const ScheduleApp = lazy(() => import("@/components/os/ScheduleApp").then((m) => ({ default: m.ScheduleApp })));
 const WidgetsApp = lazy(() => import("@/components/os/WidgetsApp").then((m) => ({ default: m.WidgetsApp })));
 import { ScheduleTicker } from "@/components/os/ScheduleTicker";
+import { ReminderEngine } from "@/components/os/ReminderEngine";
 
 // Mini-shell that wraps a lazy app in a Suspense boundary with a tiny
 // shimmer placeholder. Without this React would throw "rendered a
@@ -1161,6 +1162,7 @@ export default function OSPage() {
       {booted && (
         <>
           <ScheduleTicker />
+          <ReminderEngine />
           <div
             className={`absolute inset-0 ${wallEntry.liveClass ?? (wallAnimated ? "wallpaper-animated" : "")}`}
             style={wallEntry.liveClass ? undefined : { background: wallCss }}

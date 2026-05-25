@@ -34,21 +34,23 @@ export function WidgetsApp() {
     return () => clearInterval(tid);
   }, []);
 
-  // Reminder due check every 30s
+  // VP-2 · firing moved to ReminderEngine at OS root · WidgetsApp now only
+  // displays. Refresh local state when storage changes externally (other tab
+  // OR ReminderEngine marks one done after firing).
   useEffect(() => {
-    const tid = setInterval(() => {
-      const t = Date.now();
-      setReminders((prev) =>
-        prev.map((r) => {
-          if (!r.done && r.dueAt <= t && r.dueAt > t - 60_000) {
-            pushNotif({ text: `⏰ Reminder: ${r.text}`, tone: "warn", source: "reminder" });
-            return { ...r, done: true };
-          }
-          return r;
-        }),
-      );
-    }, 30_000);
-    return () => clearInterval(tid);
+    function refresh() {
+      try {
+        const raw = localStorage.getItem(REMINDERS_KEY);
+        if (raw) setReminders(JSON.parse(raw));
+      } catch {}
+    }
+    const onStorage = (e: StorageEvent) => { if (e.key === REMINDERS_KEY) refresh(); };
+    window.addEventListener("storage", onStorage);
+    const iv = setInterval(refresh, 30_000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      clearInterval(iv);
+    };
   }, []);
 
   function saveReminders(next: Reminder[]) {

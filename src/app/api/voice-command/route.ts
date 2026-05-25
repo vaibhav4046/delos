@@ -98,7 +98,11 @@ export async function POST(req: NextRequest) {
   // expose them as `intents[]` alongside the primary action so the executor
   // (or external caller) can fan out across compound voice commands.
   const intents = chunkVoice(transcript);
+  // VP-1 · compound REQUIRES chain >= 2 actions · was sometimes flagged
+  // compound:true when intents had only 1 chunk after ghost-filter.
   const compound = intents.length >= 2;
+  // Guard helper · returns true only if a candidate chain truly has ≥2 items.
+  const isCompound = (chain?: unknown[]) => Array.isArray(chain) && chain.length >= 2;
   // F04 · executions[] — per-chunk parser result so the client knows what
   // each intent resolved to and whether it dispatched. Client-side VoiceApp
   // executor still fires the OS event for each.
@@ -137,18 +141,38 @@ export async function POST(req: NextRequest) {
   if (!forceLLM) {
     const local = parseVoiceLocal(transcript);
     if (local) {
-      // V03 · integration_unavailable envelope · when the spoken command
-      // implies a connector (gmail/notion/github/gdrive) and that connector
-      // isn't connected on this account, return a clean envelope the client
-      // can render as a "Connect X" CTA instead of silently routing through
-      // Del Assistant.
+      // V03 · integration envelope · ONLY fire when verb+target both present.
+      // Was too aggressive · "open github" matched github_create_issue.
+      // Now requires explicit action verb (draft/send/read/create/open) AND
+      // target token (email/notion/drive/repo/issue).
       const connectorMatch = (() => {
-        const lt = transcript.toLowerCase();
-        if (/^(?:draft|compose|send|read|show|check)\s+(?:an?\s+)?(?:email|gmail|inbox)/i.test(lt))
-          return { provider: "gmail", action: /^send/i.test(lt) ? "send" : /^draft|compose/i.test(lt) ? "draft_reply" : "list_recent" };
-        if (/notion/i.test(lt)) return { provider: "notion", action: /create|add/i.test(lt) ? "create_page" : "search" };
-        if (/(?:google\s+)?drive|gdrive/i.test(lt)) return { provider: "gdrive", action: "list_recent" };
-        if (/github|gh\s+repo|gh\s+issue/i.test(lt)) return { provider: "github", action: /repo/i.test(lt) ? "create_repo" : "create_issue" };
+        const lt = transcript.toLowerCase().trim();
+        // Gmail · only when verb is draft/compose/send/read/show/check + email/gmail/inbox
+        if (/^(?:draft|compose|write|send|fire\s+off)\s+(?:an?\s+)?(?:email|gmail|message)\b/i.test(lt)) {
+          return { provider: "gmail", action: /^(?:send|fire)/i.test(lt) ? "send" : "draft_reply" };
+        }
+        if (/^(?:read|show|check|list|open|summari[sz]e)\s+(?:my\s+)?(?:gmail|inbox|emails?)\b/i.test(lt)) {
+          return { provider: "gmail", action: "list_recent" };
+        }
+        // Notion · only with create/add/find/search + notion noun
+        if (/^(?:create|make|add|new)\s+(?:an?\s+)?notion\s+(?:page|doc|note|entry)\b/i.test(lt)) {
+          return { provider: "notion", action: "create_page" };
+        }
+        if (/^(?:find|search|show|list)\s+(?:my\s+)?notion\s+(?:pages?|docs?|notes?)\b/i.test(lt)) {
+          return { provider: "notion", action: "search" };
+        }
+        // GDrive · with show/list/find + drive noun
+        if (/^(?:show|list|find|open|search)\s+(?:my\s+)?(?:google\s+)?(?:drive|gdrive)\b/i.test(lt)) {
+          return { provider: "gdrive", action: "list_recent" };
+        }
+        // GitHub · ONLY with explicit create/open + repo/issue noun · 'open github'
+        // alone should NOT match (it's just a navigate intent)
+        if (/^(?:create|make|new)\s+(?:a\s+)?(?:github\s+|gh\s+)?repo(?:sitory)?\b/i.test(lt)) {
+          return { provider: "github", action: "create_repo" };
+        }
+        if (/^(?:open|create|log|file|make)\s+(?:an?\s+)?(?:github\s+|gh\s+)?issue\b/i.test(lt)) {
+          return { provider: "github", action: "create_issue" };
+        }
         return null;
       })();
       if (connectorMatch) {
@@ -165,7 +189,8 @@ export async function POST(req: NextRequest) {
             source: "local",
             intents,
             executions,
-            compound,
+            // VP-1 · connector calls are single-action · never compound
+            compound: false,
           });
         }
         // Connected · would dispatch via skill router. For now return fulfilled-shape.
@@ -178,14 +203,56 @@ export async function POST(req: NextRequest) {
           source: "local",
           intents,
           executions,
-          compound,
+          compound: false,
         });
       }
-      // F17 · top-level intent reflects compound state honestly
-      const topIntent = compound ? "compound" : local.intent;
-      const reply = compound
-        ? intents.map((i) => i.label).join(" · ")
+      // VP-1 · top-level intent ONLY becomes 'compound' when EITHER
+      //   (a) local parser returned 'compound' AND chain has ≥2 actions, OR
+      //   (b) chunker produced ≥2 chunks AND each chunk parses to a real intent
+      //       (synthetic compound · for "open X, calc Y, build Z, summarize").
+      const localChain = (local as { chain?: unknown[] }).chain;
+      const explicitCompound = local.intent === "compound" && isCompound(localChain);
+      // Synthetic compound · only when 3+ distinct chunks AND most parse cleanly
+      let syntheticChain: Array<{ intent: string; app?: string; payload?: string }> | null = null;
+      if (!explicitCompound && intents.length >= 3) {
+        const parsed = intents.map((c) => parseVoiceLocal(c.text)).filter((p): p is NonNullable<typeof p> => Boolean(p));
+        const nonTrivial = parsed.filter((p) => p.intent !== "answer" && p.intent !== "unknown");
+        if (nonTrivial.length >= 2) {
+          syntheticChain = nonTrivial.slice(0, 4).map((p) => ({ intent: p.intent, app: p.app, payload: p.payload }));
+        }
+      }
+      const trueCompound = explicitCompound || Boolean(syntheticChain);
+      const topIntent = trueCompound ? "compound" : local.intent;
+      // Build a readable reply for compound intents · was joining chunk
+      // labels with " · " which produced "open browser and · search
+      // hydration errors" (raw conjunctions + bullet). Now we strip
+      // trailing "and"/"then" connector words from each chunk + comma-
+      // join with a "then" before the last step. 2026-05-25 brutal-QA H1.
+      const reply = trueCompound
+        ? (() => {
+            const cleaned = intents
+              .map((i) =>
+                i.label
+                  .replace(/\s+(and|then|also|plus|,)\s*$/i, "")
+                  .replace(/^(and|then|also|plus)\s+/i, "")
+                  .trim(),
+              )
+              .filter(Boolean);
+            if (cleaned.length === 0) return local.reply;
+            if (cleaned.length === 1) return cleaned[0] + ".";
+            const head = cleaned.slice(0, -1).join(", ");
+            const tail = cleaned[cleaned.length - 1];
+            return `${head}, then ${tail}.`;
+          })()
         : local.reply;
+      // Always emit chain when present so client can fan out steps
+      const responseChain = (local as { chain?: unknown[] }).chain;
+      const effectiveChain: unknown[] | undefined =
+        syntheticChain && syntheticChain.length >= 2
+          ? syntheticChain
+          : Array.isArray(responseChain) && responseChain.length >= 2
+            ? responseChain
+            : undefined;
       return Response.json({
         ...local,
         intent: topIntent,
@@ -193,7 +260,9 @@ export async function POST(req: NextRequest) {
         source: "local",
         intents,
         executions,
-        compound,
+        // VP-1 · honest compound flag · true only when chain has ≥2 actions
+        compound: trueCompound,
+        ...(effectiveChain ? { chain: effectiveChain } : {}),
       });
     }
   }
@@ -295,7 +364,17 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
         setTimeout(() => reject(new Error("voice_command_timeout")), 8_000),
       ),
     ]);
-    return Response.json({ ...(obj as object), source: "llm", intents, executions, compound, ...(compound ? { intent: "compound" } : {}) });
+    // VP-1 · LLM path · trust LLM's own intent unless it returned 'compound' AND chain ≥2
+    const llmChain = (obj as { chain?: unknown[] }).chain;
+    const llmCompound = (obj as { intent?: string }).intent === "compound" && Array.isArray(llmChain) && llmChain.length >= 2;
+    return Response.json({
+      ...(obj as object),
+      source: "llm",
+      intents,
+      executions,
+      compound: llmCompound,
+      ...(llmCompound ? { intent: "compound" } : {}),
+    });
   } catch (e) {
     // Voice mis-classification should NEVER 500 the client — the mic loop
     // depends on a sane fallback every time. Always return a 200 with an
