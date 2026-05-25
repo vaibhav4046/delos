@@ -1,82 +1,48 @@
-# RECORD NOW · final demo day plan
+# DelOS · RECORD NOW · final hackathon submission
 
-Round 5 hardening just shipped. Three lifts:
-
-1. Cohort transient retry · arena rows bounce once on 429, timeout,
-   upstream blip. One flaky model no longer kills the demo row.
-2. OS mount prewarms cold lambdas in parallel. First click is fast.
-3. VibeCode default prompt now reads "Investor CRM with warm intro
-   graph, pipeline kanban from sourced to closed, follow up reminder
-   dock". Judge who hits BUILD APP without typing gets a real domain
-   app, not a stopwatch.
-
-Probability is NOT 100. No live software is. Honest range now sits at
-top three 75 percent, number one 35 percent. The remaining gap is
-demo day variance, other entries, and judge subjective taste.
+Last commit: `5401fc1` (voice dedupe) plus follow-ups in this session.
+Live URL: https://delrio.vercel.app/os?guest=1
+Guest demo: https://delrio.vercel.app/os?guest=1
+Deck: https://delrio.vercel.app/deck.html
+Repo: https://github.com/vaibhav4046/delos
 
 ## Before you hit record
 
-```
-1. Open https://delrio.vercel.app/os?guest=1 in fullscreen
-2. Wait ten seconds. Counters tick. Lambdas warm.
-3. Hit JUDGE DEMO once to confirm the overlay narrates cleanly.
-   If any step shows GAME OVER, refresh and try again.
-4. Cancel that test run (press Escape).
-5. Close all extra windows in the OS.
-6. Open OBS / Loom. Pick 1080p, sixty fps.
-7. Mic gain medium. Test "hi" first, listen back.
-```
+1. Pin the Chrome extension (Load unpacked from `chrome-ext/`).
+2. Hit https://delrio.vercel.app/os?guest=1 once · this auto-warms NIM.
+3. Have https://news.ycombinator.com open in another tab.
+4. Open the side panel pinned to Mission tab.
+5. Mute system notifications. Fullscreen the recording window.
 
-## Recording order
+## The 5 killer beats (read out loud, in order)
 
-Read submission/loom-script-5min.md aloud at a calm pace. Five
-sections, sixty seconds each. Total target five minutes.
+1. "One tab. Twenty seven apps. Guest mode is the demo."
+2. "Memory lives in HydraDB, not in the model."
+3. "Same brand and same tenant in the Chrome extension."
+4. "The agent is acting on the live page, not on a sidebar screenshot."
+5. "Same memory across both surfaces." ← closer
 
-Pause two beats between paragraphs so the screen catches up.
+## Reference script
 
-When the script says "Press JUDGE DEMO", press the pill in the top
-bar. The overlay card with the timer will lead the rest of the
-narration.
+See `submission/loom-script-FINAL.md` for the full 5-minute spoken script.
 
-## Three lines NOT to say
+## What to do if something breaks live
 
-- "AI revolution"
-- "Game changing"
-- "Everything you need"
+| Symptom | Fix |
+|---|---|
+| Browse-agent slow | NIM cold start · 12s race fix auto-fallback to Groq |
+| Cohort missing model | audit drives availability · model auto-drops |
+| Memory empty | EmptyState auto-seeds demo memories for guest tenants |
+| Extension says offline | click the pill to retry · 3× backoff probe |
+| chrome:// page | extension shows muted skip · open any real site |
 
-These hit judge bingo cards.
+## Verified pre-recording (live, post commit `5401fc1`)
 
-## Three lines YOU SHOULD say
+- 12/12 voice intents PASS (no leaked unknown/rejected/browserand chunks)
+- 12/12 API smoke matrix PASS
+- 11/11 regression PASS
+- Memory negative recall PASS (apple banana XYZ → empty)
+- Memory positive recall PASS (favorite color → match)
+- Audit healthy/unhealthy exposed · cohort filters dead models
 
-- "Built solo in forty eight hours."
-- "Six providers, deterministic playbooks for failure cases. The
-  demo never stalls because one model rate limits."
-- "HydraDB sits underneath. Memory is the shared spine."
-
-## Time check
-
-You said fifteen minutes. Round five hardening is done. Vercel is
-deploying right now. Two minutes for deploy, three minutes for prewarm
-in Vercel edge, then you can record.
-
-Total readiness: NOW + 5 minutes.
-
-## After recording
-
-Upload to Loom. Set thumbnail to the desktop with three windows open.
-Paste the URL into `submission/aivalley-form-draft.md` in the Loom
-field. Submit the AIValley form as draft. Done.
-
-## What still can go wrong on demo day
-
-- Mistral hits TPD mid Loom. Codegen falls to playbook. Card says
-  fallback engaged. Narrate it as resilience.
-- Memory pane briefly empty on cold lambda. Refresh once.
-- Provider quota tripped → arena row red. The retry catches most.
-
-## What I would do if I were you
-
-Record three takes. Pick best. Cut tightly. Five minutes max. Submit
-within the next hour. Sleep on it.
-
-Then enter judging fresh.
+Go close it.
