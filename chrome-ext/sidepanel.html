@@ -11,7 +11,7 @@
       <div class="brand">
         <span class="brand-mark">▮</span>
         <span class="brand-name">DelOS</span>
-        <span class="brand-sub">v2.7</span>
+        <span class="brand-sub">v2.8</span>
       </div>
       <div class="hdr-right">
         <span id="conn" class="pill pill-warn">● checking</span>
@@ -41,11 +41,11 @@
         <div class="row">
           <button id="voiceBtn" class="primary big" style="flex:1">🎤 HOLD TO TALK</button>
         </div>
+        <!-- EXT-V2-1 · TTS removed · "speak" checkbox + 🔇 mute btn deleted.
+             Voice STT still works · agent replies render in the log panel. -->
         <div class="row tightrow">
           <label class="check small"><input type="checkbox" id="voiceAuto" checked /> autonomous</label>
           <label class="check small"><input type="checkbox" id="voiceLoop" checked /> loop</label>
-          <label class="check small"><input type="checkbox" id="voiceSpeak" checked /> speak</label>
-          <button id="stopSpeakBtn" class="ghost small">🔇 mute</button>
         </div>
 
         <div class="row tightrow">
@@ -67,10 +67,11 @@
         <div class="row">
           <textarea id="browseTask" rows="3" placeholder="Give the agent a complex task — e.g. 'find me the cheapest flight from SF to NYC next Friday', 'summarize the top 5 HN front page items', 'fill this form with my resume info', 'complete my assignment on this page'…"></textarea>
         </div>
+        <!-- EXT-V2-1 · "speak progress" checkbox removed; TTS gone. -->
         <div class="row tightrow">
           <label class="check small"><input type="checkbox" id="browseUseTab" checked /> use current tab as context</label>
           <label class="check small"><input type="checkbox" id="browseAutoNav" checked /> auto-navigate</label>
-          <label class="check small"><input type="checkbox" id="browseSpeak" /> speak progress</label>
+          <label class="check small"><input type="checkbox" id="browseScreenshots" checked /> screenshots</label>
         </div>
         <div class="row">
           <button id="browseRunBtn" class="primary" style="flex:1">▶ RUN BROWSER AGENT</button>
@@ -107,8 +108,18 @@
           <input id="steerInput" placeholder="steer running agent…" />
           <button id="steerBtn" class="warn small">★ STEER</button>
         </div>
+        <div class="row tightrow">
+          <label class="check small"><input type="checkbox" id="missionScreenshots" checked /> live screenshots</label>
+          <label class="check small"><input type="checkbox" id="missionFollowups" checked /> follow-ups</label>
+        </div>
         <div class="stats" id="stats"></div>
         <div id="log" class="log"></div>
+        <!-- EXT-V2-2 · follow-up input · appears after first answer · refines
+             with prior context so user can ask "and what about X" / "deeper". -->
+        <div id="followupRow" class="row hidden" style="margin-top:8px">
+          <input id="followupInput" placeholder="ask follow-up — e.g. 'what about pricing?' / 'go deeper'…" style="flex:1" />
+          <button id="followupBtn" class="primary small">★ ASK</button>
+        </div>
       </section>
 
       <!-- COHORT -->

@@ -59,11 +59,16 @@ export async function GET(req: NextRequest) {
   const topK = topKParam ? Math.max(1, Math.min(50, Number(topKParam))) : 12;
   await autoSeedIfEmpty(tenantId);
   const hits = await safeRecall({ tenantId, query: q, topK });
-  // B08 · query-sensitive local recall. Empty/unmatched queries → empty
-  // local array (was chronological dump regardless of query, polluting
-  // the recall UI with run-summary text).
+  // B08 · query-sensitive local recall. Empty queries → chronological
+  // tail so the dashboard always shows something on first open. Unmatched
+  // queries → chronological tail too (so vague prompts like "recent" or
+  // "my stuff" surface entries instead of an empty pane). Tight queries
+  // still get the relevance-scored slice.
   const localAll = getLocalFallback(tenantId);
-  const local = q.trim() ? recallLocal(q, localAll, topK) : [];
+  let local = q.trim() ? recallLocal(q, localAll, topK) : [];
+  if (local.length === 0 && localAll.length > 0) {
+    local = localAll.slice(-topK).reverse();
+  }
   return Response.json({ query: q, hits, local, tenantId, scope: source });
 }
 
@@ -83,6 +88,9 @@ export async function POST(req: NextRequest) {
   await autoSeedIfEmpty(tenantId);
   const hits = await safeRecall({ tenantId, query: q, topK });
   const localAll = getLocalFallback(tenantId);
-  const local = q.trim() ? recallLocal(q, localAll, topK) : [];
+  let local = q.trim() ? recallLocal(q, localAll, topK) : [];
+  if (local.length === 0 && localAll.length > 0) {
+    local = localAll.slice(-topK).reverse();
+  }
   return Response.json({ query: q, hits, local, tenantId, scope: source });
 }

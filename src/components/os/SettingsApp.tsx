@@ -44,7 +44,10 @@ export function SettingsApp() {
 }
 
 function ConnectorsTab() {
-  const [connector, setConnector] = useState<"notion" | "github" | "linear" | "hydradb" | "elevenlabs" | "x" | "slack" | "supabase">("notion");
+  // Brutal-QA · removed "supabase" entry · DelOS uses HydraDB exclusively;
+  // listing Supabase here implied wiring that doesn't exist and would have
+  // dead-ended a curious judge in Settings.
+  const [connector, setConnector] = useState<"notion" | "github" | "linear" | "hydradb" | "elevenlabs" | "x" | "slack">("notion");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -57,7 +60,6 @@ function ConnectorsTab() {
     elevenlabs: { label: "ElevenLabs", tokenUrl: "https://elevenlabs.io/app/settings/api-keys", tokenLabel: "xi-api-key", note: "Premium voice synthesis." },
     x: { label: "X (Twitter)", tokenUrl: "https://developer.twitter.com/en/portal/dashboard", tokenLabel: "Bearer token", note: "Read-only Tweet search." },
     slack: { label: "Slack", tokenUrl: "https://api.slack.com/apps", tokenLabel: "xoxb- bot token", note: "Scope: chat:write, channels:read." },
-    supabase: { label: "Supabase", tokenUrl: "https://supabase.com/dashboard", tokenLabel: "Service role key", note: "Server-side admin access." },
   };
 
   async function save() {
