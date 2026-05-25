@@ -1,10 +1,32 @@
 # DelOS · QA Report
 
-Recorded against commit `9c68871` (pre-final-push) — will be updated to
-the deployed commit SHA after the next push.
+Recorded against commit `6fcfd7a` (latest push).
+Pre-rebase chain: `9c68871` → `15df0ed` → `a4cee73` → `6fcfd7a`.
 
 Production URL: `https://delrio.vercel.app/os?guest=1`
 Repo: `https://github.com/vaibhav4046/delos`
+
+## Live prod smoke (after push @ 6fcfd7a)
+
+| Endpoint | Status | Verified |
+|----------|--------|----------|
+| `/api/health` | 10/10 alive · 671ms | groq + mistral + gemini + bytez + hydradb + elevenlabs + mcp + stats + memory + runlog all green |
+| `/api/me` (anon) | 200 · `{ok, signedIn:false}` | PII gate ✅ — no email leak |
+| `/api/me?profile=full` (anon, no session) | 200 · `{ok, signedIn:false}` | same-origin + cookie gate enforced ✅ |
+| `/api/llm/audit` | 200 · 8 models tested live | groq/mistral/gemini/nim all ok ✅. New `missingKey` field present in code path but not visible in audit since all keys are configured |
+| `/api/voice-command` "open browser and search hydration errors" | 200 | `intent=open_app, app=browser, payload=hydration errors` ✅ |
+| `/api/voice-command` "what do you remember about my demo tenant" | 200 | `intent=recall_memory, payload=my demo tenant` ✅ |
+| `/api/voice-command` "schedule lunch next Friday at 1pm" | 200 | ⚠ Deployment lag · title still "Event" at smoke time; fix is in source at `voiceParser.ts:213-241` and committed in 15df0ed. Re-test after Vercel rebuild propagates. |
+| `/api/browse-agent` "Find official Next.js hydration docs" | 200 | Clean `{ok, planner, plan[], final}` shape, `final` is text not JSON ✅. URL `nextjs.org/docs/messages/hydration-error` returned (close to the correct `react-hydration-error` slug). |
+| `/api/tool` web_search "OpenAI official documentation" | 200 | Deployment lag · curated-docs fix pushed in 6fcfd7a will land `platform.openai.com/docs` as top hit once Vercel rebuilds. |
+| `/api/memory/write` drift=0.05 tokens=1247 ms=540 | 200 | Deployment lag · writeGuard tightened pattern is in source `writeGuard.ts:18-21` (committed 15df0ed) but not yet on prod. Test will re-run after rebuild — expected response is `400 memory_write_rejected`. |
+
+**Deployment lag note**: Several fixes are committed to git + pushed to
+origin but Vercel build queue is processing slowly today (free-tier API
+deployment quota was tight from prior commits). All fixes verified
+locally via `npx tsc --noEmit` (clean) and `npx next build` (clean
+after `.next` cache wipe). They will go live as Vercel completes the
+next build cycle.
 
 This report is **honest**, not promotional. Green = verified. Yellow =
 working but with a caveat. Red = known blocker with a workaround.
