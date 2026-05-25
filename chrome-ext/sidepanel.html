@@ -11,7 +11,7 @@
       <div class="brand">
         <span class="brand-mark">▮</span>
         <span class="brand-name">DelOS</span>
-        <span class="brand-sub">v2.8</span>
+        <span class="brand-sub">v2.9</span>
       </div>
       <div class="hdr-right">
         <span id="conn" class="pill pill-warn">● checking</span>
@@ -72,10 +72,17 @@
           <label class="check small"><input type="checkbox" id="browseUseTab" checked /> use current tab as context</label>
           <label class="check small"><input type="checkbox" id="browseAutoNav" checked /> auto-navigate</label>
           <label class="check small"><input type="checkbox" id="browseScreenshots" checked /> screenshots</label>
+          <label class="check small"><input type="checkbox" id="browseOverlay" checked /> page highlights</label>
         </div>
         <div class="row">
           <button id="browseRunBtn" class="primary" style="flex:1">▶ RUN BROWSER AGENT</button>
           <button id="browseStopBtn" class="danger small">■</button>
+        </div>
+        <!-- EXT-V3-3 · quick "read this tab" + "summarize" buttons mirror the
+             Voice tab features so the user has them on Browse without tab switch. -->
+        <div class="row tightrow">
+          <button id="browseReadBtn" class="ghost small" style="flex:1">📖 Read current tab</button>
+          <button id="browseSummarizeBtn" class="ghost small" style="flex:1">📝 Summarize</button>
         </div>
         <div class="hint" style="margin-bottom:8px">
           Plans multi-step browse · scrolls + clicks + extracts + summarizes.

@@ -442,6 +442,44 @@ $("#browseRunBtn")?.addEventListener("click", runBrowseAgent);
 let browseStop = false;
 $("#browseStopBtn")?.addEventListener("click", () => { browseStop = true; });
 
+// EXT-V3-3 · "read current tab" + "summarize" buttons on the Browse tab.
+// Mirrors the Voice tab features so the user has them in the default tab.
+$("#browseReadBtn")?.addEventListener("click", async () => {
+  appendLog("browseLog", `${tag("info", "tab")} reading…`);
+  const res = await tabAction("read");
+  if (!res?.ok) {
+    appendLog("browseLog", `${tag("bad", "ERR")} ${esc(res?.error || "read failed")}`);
+    return;
+  }
+  const d = res.data || {};
+  appendLog("browseLog", `<div class="muted">${esc(d.title || "(no title)")} · ${esc(d.url || "")}</div>`);
+  appendLog("browseLog", `<div class="answer">${tag("ok", "text")} ${esc(String(d.text || "").slice(0, 1200))}…</div>`);
+});
+
+$("#browseSummarizeBtn")?.addEventListener("click", async () => {
+  appendLog("browseLog", `${tag("info", "tab")} summarizing…`);
+  const res = await tabAction("read");
+  if (!res?.ok) {
+    appendLog("browseLog", `${tag("bad", "ERR")} ${esc(res?.error || "read failed")}`);
+    return;
+  }
+  const d = res.data || {};
+  try {
+    const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: `Summarize this page in 4-6 concise bullets.\n\nTITLE: ${d.title}\nURL: ${d.url}\n\n${(d.text || "").slice(0, 6000)}`,
+        tenantId: state.cfg.tenantId || undefined,
+      }),
+    });
+    const j = await r.json();
+    appendLog("browseLog", `<div class="answer">${tag("info", "summary")} ${esc(j.text || j.error || "(no result)")}</div>`);
+  } catch (e) {
+    appendLog("browseLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+  }
+});
+
 async function runBrowseAgent() {
   const task = $("#browseTask").value.trim();
   if (!task) {
@@ -616,6 +654,8 @@ async function runBrowseAgent() {
     }
   }
   appendLog("browseLog", `${tag("ok", "done")}`);
+  // EXT-V3-2 · green "done" banner on the target page once the plan finishes.
+  tabAction("banner", { message: "done", subtitle: `${plan.length} step${plan.length === 1 ? "" : "s"} executed`, kind: "nav", durationMs: 3000 }).catch(() => {});
 }
 
 // ───────────────────────── cohort (kept) ─────────────────────────

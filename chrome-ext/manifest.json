@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "DelOS — Agents Under Pressure",
   "short_name": "DelOS",
-  "version": "2.8.0",
-  "description": "Autonomous browse agent with live screenshots + mission follow-ups · multi-step task runner against the current tab. Voice + cohort built-in.",
+  "version": "2.9.0",
+  "description": "Autonomous browse agent with in-page visual overlay (Perplexity-style highlights + banner), live screenshots, mission follow-ups, cohort racing.",
   "author": "DelOS",
   "minimum_chrome_version": "114",
   "action": {
