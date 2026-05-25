@@ -1,11 +1,15 @@
-// DelOS side panel v2.2 — autonomous voice tab agent.
+// DelOS side panel v2.8 — autonomous browser + voice agent.
+//
+// EXT-V2-1 · TTS (speechSynthesis) removed everywhere · agent replies now
+// render only in the log panel · keeps the side panel quiet and stops
+// awkward speaker-on demos.
 //
 // Voice flow (when "autonomous" is checked):
 //   1. Web Speech API → final transcript.
 //   2. POST /api/voice-command → { intent, app, payload, reply }.
 //   3. Map intent → tab action via background.js RPC, or fall back to
 //      /api/quick-agent for free-text answers.
-//   4. TTS the reply, then (if "loop" is checked) reopen the mic.
+//   4. Reply renders in #voiceLog (no TTS).
 //
 // Intents we handle natively against the active tab (no /api/run trip):
 //   read_tab / summarize_tab / click / fill / scroll / open_url /
@@ -219,6 +223,9 @@ function renderEvent(ev) {
 
 // ───────────────────────── mission run (kept) ────────────────────
 const runStats = { pin: 0, pout: 0, calls: 0, llmMs: 0 };
+// EXT-V2-2 · accumulate mission Q/A pairs so follow-ups have prior context.
+// Reset at the start of every fresh /run. Latest answer drives "ask follow-up".
+let missionThread = [];
 
 $("#runBtn").addEventListener("click", run);
 $("#stopBtn").addEventListener("click", () => state.runCtrl?.abort());
@@ -243,6 +250,9 @@ async function run() {
   setStats([0, 0, 0, 0, "$0"]);
   $("#log").innerHTML = "";
   $("#steerRow").classList.remove("hidden");
+  // EXT-V2-2 · reset thread on a fresh mission run; latest goal becomes turn 1.
+  missionThread = [{ role: "user", text: $("#goal").value.trim() }];
+  $("#followupRow")?.classList.add("hidden");
 
   const chaos = $$("input[data-chaos]").filter((c) => c.checked).map((c) => c.dataset.chaos);
   const useMcp = $("#useMcp").checked;
@@ -296,6 +306,22 @@ async function run() {
             runStats.llmMs += ev.ms;
             setStats([runStats.pin, runStats.pout, runStats.calls, runStats.llmMs, "·"]);
           }
+          // EXT-V2-3 · capture a screenshot after tool calls that touch the
+          // current tab (navigate / click / fill / scroll). The mission's
+          // /api/run streams tool_result events with `name` set to the tool.
+          if (
+            $("#missionScreenshots")?.checked &&
+            ev.t === "tool_result" &&
+            ev.ok &&
+            /tab|browse|navigate|click|fill|scroll/i.test(String(ev.name || ""))
+          ) {
+            // Fire-and-forget so we don't block stream parsing.
+            captureAndLog("log", ev.name).catch(() => {});
+          }
+          // EXT-V2-2 · capture the final answer text so follow-ups have it.
+          if (ev.t === "answer" && ev.text) {
+            missionThread.push({ role: "agent", text: String(ev.text) });
+          }
         } catch {}
       }
     }
@@ -303,6 +329,60 @@ async function run() {
     if (e.name !== "AbortError") appendLog("log", `${tag("bad", "ERR")} ${esc(e.message)}`);
   } finally {
     $("#steerRow").classList.add("hidden");
+    // EXT-V2-2 · reveal the follow-up row once the run yielded at least one
+    // agent answer. Checkbox lets the user opt out.
+    if ($("#missionFollowups")?.checked && missionThread.some((m) => m.role === "agent")) {
+      $("#followupRow")?.classList.remove("hidden");
+      $("#followupInput")?.focus();
+    }
+  }
+}
+
+// EXT-V2-2 · follow-up handler · chains a prior-answer-aware /quick-agent call.
+// Renders inline in the Mission log so the conversation stays in one place.
+$("#followupBtn")?.addEventListener("click", askFollowup);
+$("#followupInput")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    askFollowup();
+  }
+});
+
+async function askFollowup() {
+  const q = $("#followupInput")?.value.trim();
+  if (!q) return;
+  const lastAnswer = [...missionThread].reverse().find((m) => m.role === "agent")?.text || "";
+  const origGoal = missionThread.find((m) => m.role === "user")?.text || "";
+  appendLog("log", `<b>YOU</b> ${esc(q)}`);
+  $("#followupInput").value = "";
+  missionThread.push({ role: "user", text: q });
+  const prompt = [
+    `Original mission: ${origGoal}`,
+    lastAnswer ? `\nAgent's previous answer:\n${lastAnswer}` : "",
+    `\nFollow-up question:\n${q}`,
+    `\nAnswer concisely, building on the prior context.`,
+  ].join("");
+  try {
+    const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: prompt,
+        models: state.cfg.modelOverrides,
+        tenantId: state.cfg.tenantId || undefined,
+      }),
+    });
+    if (!r.ok) {
+      const err = r.status === 429 ? "rate-limited · retry in ~30s" : `HTTP ${r.status}`;
+      appendLog("log", `${tag("bad", "agent")} ${esc(err)}`);
+      return;
+    }
+    const j = await r.json();
+    const reply = j.text || (j.error ? `err: ${j.error}` : "(no answer)");
+    appendLog("log", `<div class="answer">${tag("info", "follow-up")} ${esc(reply)}</div>`);
+    missionThread.push({ role: "agent", text: reply });
+  } catch (e) {
+    appendLog("log", `${tag("bad", "agent")} ${esc(e.message)}`);
   }
 }
 
@@ -485,9 +565,18 @@ async function runBrowseAgent() {
         if ($("#browseSpeak")?.checked) speakText(result);
         continue;
       }
+      // EXT-V2-4 · belt-and-braces · if server returned navigate with no URL
+      // (legacy build), fall back to a DDG search using the original task so
+      // we always land somewhere instead of erroring "could not resolve URL".
+      const navUrl =
+        step.args.url ||
+        step.args.query ||
+        (step.action === "navigate"
+          ? "https://duckduckgo.com/?q=" + encodeURIComponent(task)
+          : "");
       // Map action → tabAction
       const map = {
-        navigate: ["navigate", { url: step.args.url }],
+        navigate: ["navigate", { url: navUrl }],
         scroll: ["scroll", { direction: step.args.direction || "down", amount: step.args.amount || 800 }],
         click: ["click", { needle: step.args.needle }],
         fill: ["fill", { field: step.args.field, value: step.args.value }],
@@ -500,6 +589,15 @@ async function runBrowseAgent() {
         appendLog("browseLog", `${tag("ok", "✓")} ${esc(JSON.stringify(result.data || {}).slice(0, 160))}`);
       } else {
         appendLog("browseLog", `${tag("bad", "✗")} ${esc(result?.error || "failed")}`);
+      }
+      // EXT-V2-3 · live screenshot after every tab-mutating step so the user
+      // can see what the agent did. Skipped on `read` / `links` (no UI change)
+      // and gated by the `#browseScreenshots` checkbox.
+      const mutating = ["navigate", "click", "fill", "scroll"];
+      if ($("#browseScreenshots")?.checked && mutating.includes(act)) {
+        // Wait a beat for nav/SPA route changes to paint before capturing.
+        await new Promise((r) => setTimeout(r, act === "navigate" ? 1500 : 400));
+        await captureAndLog("browseLog", `${label} · ${step.action}`);
       }
       await new Promise((r) => setTimeout(r, 600));
     } catch (e) {
@@ -587,24 +685,42 @@ function tabAction(action, args = {}) {
   });
 }
 
+// EXT-V2-3 · render a screenshot dataURL inline in the given log panel.
+// Captures the active tab via background `screenshot` action. Caps height
+// to keep the side panel scrollable. Tagged with the step label so the
+// user can scan the trace at a glance.
+async function captureAndLog(targetId, label = "") {
+  try {
+    const shot = await tabAction("screenshot");
+    if (!shot?.ok || !shot.data?.dataUrl) return;
+    const safeLabel = esc(label);
+    appendLog(
+      targetId,
+      `<div class="screenshot"><span class="muted small">📸 ${safeLabel}</span><br>` +
+        `<img src="${shot.data.dataUrl}" alt="screenshot ${safeLabel}" ` +
+        `style="max-width:100%;max-height:200px;border:1px solid var(--accent,#fbc531);margin-top:4px" /></div>`,
+    );
+  } catch {
+    /* screenshot failures should not derail the run */
+  }
+}
+
 // ───────────────────────── voice agent (autonomous) ──────────────
 function getSttCtor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition;
 }
 
-function speakText(text) {
-  if (!window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(String(text).slice(0, 600));
-  u.rate = 1.0;
-  u.pitch = 1.0;
-  window.speechSynthesis.speak(u);
-}
+// EXT-V2-1 · speakText is now a no-op. TTS removed per UX request — the side
+// panel should never speak. Replies still render in the log. Kept the function
+// signature so legacy call sites compile without churn.
+function speakText(_text) { /* TTS removed */ }
 
 // EXT-FIX-3 · toggleSttIntoGoal removed alongside the Mission #micBtn handler.
 
 $("#voiceBtn").addEventListener("click", voiceTurn);
-$("#stopSpeakBtn").addEventListener("click", () => window.speechSynthesis?.cancel());
+// EXT-V2-1 · #stopSpeakBtn removed from DOM · listener wrapped in optional
+// chain for safety in case stray builds still ship the button.
+$("#stopSpeakBtn")?.addEventListener("click", () => window.speechSynthesis?.cancel());
 
 // EXT-1 · trigger Chrome mic-permission prompt for side panel origin. Without
 // this, SpeechRecognition errors with "not-allowed" because Chrome blocks mic

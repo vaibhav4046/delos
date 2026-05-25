@@ -53,6 +53,46 @@ const Req = z.object({
   tenantId: z.string().max(120).optional().nullable(),
 });
 
+// EXT-V2-4 · resolve bare site names + search terms into real URLs so the
+// extension's navigate step can land somewhere useful even when the planner
+// returns sloppy values. Keeps DuckDuckGo as universal fallback.
+const KNOWN_SITES: Record<string, string> = {
+  github: "https://github.com",
+  google: "https://www.google.com",
+  youtube: "https://www.youtube.com",
+  twitter: "https://twitter.com",
+  x: "https://twitter.com",
+  reddit: "https://www.reddit.com",
+  chatgpt: "https://chat.openai.com",
+  claude: "https://claude.ai",
+  notion: "https://www.notion.so",
+  gmail: "https://mail.google.com",
+  drive: "https://drive.google.com",
+  calendar: "https://calendar.google.com",
+  hackernews: "https://news.ycombinator.com",
+  hn: "https://news.ycombinator.com",
+  airbnb: "https://www.airbnb.com",
+  airasia: "https://www.airasia.com",
+  amazon: "https://www.amazon.com",
+  wikipedia: "https://www.wikipedia.org",
+  linkedin: "https://www.linkedin.com",
+  stackoverflow: "https://stackoverflow.com",
+};
+
+function normalizeNavUrl(input: unknown): string | undefined {
+  if (typeof input !== "string") return undefined;
+  let s = input.trim();
+  if (!s) return undefined;
+  // Strip prefix verbs the LLM tends to leak ("open github" → "github")
+  s = s.replace(/^(open|go to|navigate to|visit|launch)\s+/i, "");
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^[\w-]+\.[\w.-]+/.test(s)) return "https://" + s.replace(/^\/+/, "");
+  const key = s.toLowerCase().replace(/\s+/g, "");
+  if (KNOWN_SITES[key]) return KNOWN_SITES[key];
+  // DuckDuckGo lite so we always have a real URL · `?q=` is fine for SERP.
+  return "https://duckduckgo.com/?q=" + encodeURIComponent(s);
+}
+
 const SYSTEM = `You are DelOS Browser Agent · a Perplexity-style planner that
 breaks a user's task into 1-6 concrete actions executable by a Chrome
 extension against the user's active tab.
@@ -246,8 +286,20 @@ export async function POST(req: NextRequest) {
       memorySynced: true,
     });
   }
-  await persistRun(verdict.data.final ?? "", verdict.data.plan.length);
-  return Response.json({ ok: true, planner, ...verdict.data, memorySynced: true });
+  // EXT-V2-4 · post-process plan · normalize every navigate step's URL so the
+  // extension never sees a bare "github" or "open airbnb" and dead-ends.
+  const normalizedPlan = verdict.data.plan.map((step) => {
+    if (step.action === "navigate") {
+      const rawUrl = (step.args as Record<string, unknown>)?.url ?? (step.args as Record<string, unknown>)?.query;
+      const fixed = normalizeNavUrl(rawUrl);
+      if (fixed) {
+        return { ...step, args: { ...(step.args as object), url: fixed } };
+      }
+    }
+    return step;
+  });
+  await persistRun(verdict.data.final ?? "", normalizedPlan.length);
+  return Response.json({ ok: true, planner, ...verdict.data, plan: normalizedPlan, memorySynced: true });
 }
 
 export async function GET() {

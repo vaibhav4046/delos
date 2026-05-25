@@ -263,6 +263,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             await chrome.scripting.executeScript({ target: { tabId: t.id }, func: () => history.forward() });
             sendResponse({ ok: true });
             break;
+          // EXT-V2-3 · capture visible region of the active tab as a data: URL.
+          // Mission + Browse use this to show live UI updates after each
+          // navigate/click/fill so the user sees what the agent did. Tab must
+          // be focused; `captureVisibleTab` requires the windowId not the tabId.
+          case "screenshot": {
+            try {
+              const dataUrl = await chrome.tabs.captureVisibleTab(t.windowId, {
+                format: "jpeg",
+                quality: 60,
+              });
+              sendResponse({ ok: true, data: { dataUrl } });
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e?.message || e) });
+            }
+            break;
+          }
           default:
             sendResponse({ ok: false, error: `unknown action: ${action}` });
         }
