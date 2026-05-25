@@ -137,7 +137,13 @@ export async function POST(req: NextRequest) {
   // contradicts the top-level intent and looks like a regression to API
   // inspectors. Unknown chunks cannot execute anyway, so dropping them
   // is the right semantics in both compound and non-compound cases.
-  const executions = rawExecutions.filter((e) => e.status !== "rejected" && e.kind !== "unknown");
+  // P0 round 9 · for non-compound results, also collapse executions[] to
+  // a single representative entry so the array matches the top-level
+  // intent. Compound multi-step chains keep the full parsed list.
+  let executions = rawExecutions.filter((e) => e.status !== "rejected" && e.kind !== "unknown");
+  if (!compound && executions.length > 1) {
+    executions = executions.slice(0, 1);
+  }
 
   // ─── Fast path · deterministic regex parser ──────────────────────────────
   // Covers ~90% of voice intents (open / build / cohort / math / greetings /
