@@ -28,9 +28,20 @@ export async function POST(req: NextRequest) {
   // autonomous flow land cleanly without signing in to a real Google
   // account. Real Gmail auth path still works · just opts in via session.
   // 2026-05-25 brutal-QA W5 · "biggest single lift to make demo bullet-proof".
-  if (source !== "session") {
-    const demoMode = process.env.GMAIL_DEMO_MODE !== "0"; // default ON
-    if (demoMode) {
+  // Demo simulator · was gated on `source !== "session"`, but guest
+  // sessions issued via `?guest=1` set a signed cookie so source IS
+  // "session" → the demo branch never fired and the live endpoint
+  // returned `no_gmail_credential`. Catch-all now: try the real path,
+  // and if NO Gmail credential is configured for this tenant, fall
+  // back to the demo simulator. Real OAuth users still get real drafts.
+  const demoMode = process.env.GMAIL_DEMO_MODE !== "0"; // default ON
+  try {
+    const draft = await gmailCreateDraft(tenantId, parsed.data);
+    return Response.json({ ok: true, draftId: draft.draftId, threadId: draft.threadId, openUrl: `https://mail.google.com/mail/u/0/#drafts` });
+  } catch (e) {
+    const msg = (e as Error).message;
+    const isMissingCred = /no_gmail_credential|unauthenticated|missing[_ ]token/i.test(msg);
+    if (isMissingCred && demoMode) {
       return Response.json({
         ok: true,
         demo: true,
@@ -45,12 +56,6 @@ export async function POST(req: NextRequest) {
         message: `✓ draft simulated · "${parsed.data.subject}" → ${parsed.data.to} · sign in to Gmail to save real drafts.`,
       });
     }
-    return Response.json({ ok: false, error: "unauthenticated", hint: "sign in via Google OAuth first" }, { status: 401 });
-  }
-  try {
-    const draft = await gmailCreateDraft(tenantId, parsed.data);
-    return Response.json({ ok: true, draftId: draft.draftId, threadId: draft.threadId, openUrl: `https://mail.google.com/mail/u/0/#drafts` });
-  } catch (e) {
-    return Response.json({ ok: false, error: (e as Error).message }, { status: 503 });
+    return Response.json({ ok: false, error: msg }, { status: isMissingCred ? 401 : 503 });
   }
 }

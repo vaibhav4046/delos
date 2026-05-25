@@ -24,9 +24,17 @@ export async function POST(req: NextRequest) {
   const { tenantId, source } = await resolveTenant(req);
   // Demo simulator · same shape as gmail-draft. Default ON so guest
   // judges see a happy-path "page created" response without OAuth.
-  if (source !== "session") {
-    const demoMode = process.env.NOTION_DEMO_MODE !== "0";
-    if (demoMode) {
+  // Same demo-fallback shape as gmail/draft · was gated on `source !==
+  // "session"` but guest cookies set source="session" so the demo branch
+  // never fired. Catch missing-credential errors and fall back to demo.
+  const demoMode = process.env.NOTION_DEMO_MODE !== "0";
+  try {
+    const page = await notionCreatePage(tenantId, parsed.data);
+    return Response.json({ ok: true, pageId: page.pageId, url: page.url });
+  } catch (e) {
+    const msg = (e as Error).message;
+    const isMissingCred = /no_notion_credential|unauthenticated|missing[_ ]token/i.test(msg);
+    if (isMissingCred && demoMode) {
       const slug = parsed.data.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
       return Response.json({
         ok: true,
@@ -37,12 +45,6 @@ export async function POST(req: NextRequest) {
         message: `✓ page simulated · "${parsed.data.title}" · connect Notion in Settings to save real pages.`,
       });
     }
-    return Response.json({ ok: false, error: "unauthenticated", hint: "sign in first" }, { status: 401 });
-  }
-  try {
-    const page = await notionCreatePage(tenantId, parsed.data);
-    return Response.json({ ok: true, pageId: page.pageId, url: page.url });
-  } catch (e) {
-    return Response.json({ ok: false, error: (e as Error).message }, { status: 503 });
+    return Response.json({ ok: false, error: msg }, { status: isMissingCred ? 401 : 503 });
   }
 }

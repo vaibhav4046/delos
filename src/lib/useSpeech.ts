@@ -404,7 +404,7 @@ export function useWhisperSTT() {
         try {
           const blob = new Blob(chunksRef.current, { type: mime || "audio/webm" });
           streamRef.current?.getTracks().forEach((t) => t.stop());
-          try { audioCtxRef.current?.close(); } catch {}
+          try { if (audioCtxRef.current && audioCtxRef.current.state !== "closed") audioCtxRef.current.close(); } catch {}
           if (vadTimerRef.current) clearTimeout(vadTimerRef.current);
           if (blob.size < 500) {
             setState("idle");
@@ -460,7 +460,7 @@ export function useWhisperSTT() {
         if (vadTimerRef.current) clearTimeout(vadTimerRef.current);
         recRef.current?.stop();
         streamRef.current?.getTracks().forEach((t) => t.stop());
-        audioCtxRef.current?.close();
+        if (audioCtxRef.current && audioCtxRef.current.state !== "closed") audioCtxRef.current.close();
       } catch {}
     },
     [],
@@ -658,7 +658,12 @@ export async function interpretCommand(transcript: string): Promise<VoiceAction 
     }
   }
   if (lastErr) {
-    console.warn("[voice] interpretCommand failed after retries:", lastErr);
+    // Suppress noise for our own intentional aborts (the 6.5s timeout
+    // we set above). Real network/server failures still log.
+    const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    if (!/AbortError|aborted without reason/i.test(msg)) {
+      console.warn("[voice] interpretCommand failed after retries:", lastErr);
+    }
   }
   // Friendly fallback so TTS still says something.
   return { intent: "answer", reply: "I lost the network connection. Please try again." };

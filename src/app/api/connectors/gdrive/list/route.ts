@@ -32,7 +32,23 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return zodErr(parsed.error);
 
   const token = process.env.GOOGLE_DRIVE_TOKEN;
+  // Demo simulator · symmetric with gmail/notion. Default ON so judge
+  // demos see a happy-path list without needing a real Drive token.
+  // Set GDRIVE_DEMO_MODE=0 to disable.
+  const demoMode = process.env.GDRIVE_DEMO_MODE !== "0";
   if (!token) {
+    if (demoMode) {
+      const q = parsed.data.q?.toLowerCase() || "";
+      const seed = [
+        { id: "demo-1", name: "DelOS Hackathon Demo Recap.gdoc", type: "application/vnd.google-apps.document", modifiedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(), url: "https://drive.google.com/file/d/demo-1/view", owner: "you" },
+        { id: "demo-2", name: "Investor CRM · Pipeline.gsheet", type: "application/vnd.google-apps.spreadsheet", modifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), url: "https://drive.google.com/file/d/demo-2/view", owner: "you" },
+        { id: "demo-3", name: "Brand voice guidelines.pdf", type: "application/pdf", modifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), url: "https://drive.google.com/file/d/demo-3/view", owner: "you" },
+        { id: "demo-4", name: "Clinical-trial protocol v3.docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", modifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), url: "https://drive.google.com/file/d/demo-4/view", owner: "you" },
+        { id: "demo-5", name: "Q3 strategy memo.gdoc", type: "application/vnd.google-apps.document", modifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(), url: "https://drive.google.com/file/d/demo-5/view", owner: "you" },
+      ];
+      const filtered = q ? seed.filter((f) => f.name.toLowerCase().includes(q)) : seed;
+      return Response.json({ ok: true, demo: true, count: filtered.length, files: filtered, message: "✓ simulated · connect Google Drive in Settings to list real files." });
+    }
     return Response.json(
       {
         ok: false,
