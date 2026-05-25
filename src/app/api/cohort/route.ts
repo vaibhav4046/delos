@@ -241,8 +241,11 @@ Output JSON:
 { "winnerIndex": <int>, "rationale": "<one sentence including a latency comment if relevant>", "scores": [{ "index": 0, "score": 8 }, ...], "merged": "<final answer>" }`;
 
         try {
+          // Judge always uses non-NIM model. NIM is racer-only because
+          // generateJson is wired to the standard provider cascade.
+          const safeJudge = (judgeKey.startsWith("nim:") ? "mistral:mistral-large-latest" : judgeKey) as ModelKey;
           const verdict = await generateJson({
-            model: resolveModel(judgeKey),
+            model: resolveModel(safeJudge),
             schema: verdictSchema,
             prompt: judgePrompt,
             temperature: 0.1,
