@@ -591,7 +591,7 @@ Output JSON: { "path":"${f.path}","content":"…escaped source…","language":"$
           // generic builder picks it up if the prompt is vague.
           const fallback =
             buildDomainPlaybook(userPrompt, stackHint) ??
-            buildDomainPlaybook(userPrompt + " generic dashboard", stackHint);
+            buildDomainPlaybook(userPrompt + " generic dashboard", stackHint, { allowGenericFallback: true });
           if (fallback) {
             send({ t: "fallback_engaged", reason, at: Date.now() });
             for (let i = 0; i < fallback.project.files.length; i++) {

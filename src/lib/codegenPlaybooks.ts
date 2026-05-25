@@ -124,11 +124,28 @@ function scoreDomain(prompt: string, spec: DomainSpec): number {
   return score;
 }
 
+// Known clone keywords. When any of these appears in the prompt we
+// REFUSE to fall through to a deterministic generic-dashboard playbook
+// because the generic playbook always emits the same Kanban + Client
+// Portal + Invoice Pipeline files regardless of the actual brand. The
+// LLM path produces a much closer Spotify / Notion / Slack / Stripe
+// shape. Domain-specific playbooks (investor-crm, regulatory-fintech,
+// clinical-trial, legal-contracts, ai-tutor, ops-incident) are still
+// allowed through.
+const CLONE_KEYWORDS = /\b(spotify|notion|slack|linear|stripe|figma|amazon|airbnb|tinder|discord|netflix|youtube|gmail|google\s+drive|reddit|twitter|x\.com|whatsapp|telegram|snapchat|tiktok|uber|lyft|doordash|bookmyshow|instagram|github\s+repo|github\s+dashboard|github\s+page|claude|chatgpt|perplexity|cursor|bolt|v0|loveable)\b/i;
+
 export function detectDomain(prompt: string): DomainSpec | null {
   const ranked = DOMAIN_SPECS.map((spec) => ({ spec, score: scoreDomain(prompt, spec) }));
   ranked.sort((a, b) => b.score - a.score);
   const top = ranked[0];
-  return top.score >= MIN_SCORE ? top.spec : null;
+  if (!top || top.score < MIN_SCORE) return null;
+  // Force-skip generic-dashboard for clone prompts. Domain cockpits
+  // (investor-crm, regulatory-fintech, etc) still take precedence
+  // when they actually match.
+  if (top.spec.key === "generic-dashboard" && CLONE_KEYWORDS.test(prompt)) {
+    return null;
+  }
+  return top.spec;
 }
 
 function slugify(prompt: string, fallback: string): string {
@@ -756,8 +773,22 @@ function buildGenericDashboard(prompt: string, stackHint: string): CodegenProjec
 
 // ─────────────────────────────── DISPATCHER ───────────────────────────────
 
-export function buildDomainPlaybook(prompt: string, stackHint: string): { project: CodegenProjectShape; domain: DomainSpec } | null {
-  const spec = detectDomain(prompt);
+// `allowGenericFallback` opt-in flag · callers that need a guaranteed
+// non-null result (the catch path in /api/codegen-app-stream) bypass
+// the clone-keyword guard so the user always gets *something*.
+export function buildDomainPlaybook(
+  prompt: string,
+  stackHint: string,
+  opts?: { allowGenericFallback?: boolean },
+): { project: CodegenProjectShape; domain: DomainSpec } | null {
+  let spec = detectDomain(prompt);
+  if (!spec && opts?.allowGenericFallback) {
+    // Force-pick the highest-scoring domain regardless of clone-keyword
+    // veto. Last-line guarantee against an empty response.
+    const ranked = DOMAIN_SPECS.map((s) => ({ s, sc: scoreDomain(prompt, s) }));
+    ranked.sort((a, b) => b.sc - a.sc);
+    spec = ranked[0]?.s ?? DOMAIN_SPECS.find((s) => s.key === "generic-dashboard") ?? null;
+  }
   if (!spec) return null;
   const project = (() => {
     switch (spec.key) {

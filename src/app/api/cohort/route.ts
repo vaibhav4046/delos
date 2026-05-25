@@ -38,7 +38,9 @@ const bodySchema = z.object({
   // Lowered from 3 → 1 char · users sending "HI" got 422; server pads short
   // greetings into a richer prompt below.
   goal: z.string().min(1).max(800),
-  members: z.array(modelKey).min(2).max(5).default(() => [...DEFAULT_MEMBERS]),
+  // Cap raised to 7 so the UI can race every model in MODEL_CATALOG
+  // (current catalog count). Was 5 which silently 400d the full roster.
+  members: z.array(modelKey).min(2).max(7).default(() => [...DEFAULT_MEMBERS]),
   judge: modelKey.optional(),
 });
 
