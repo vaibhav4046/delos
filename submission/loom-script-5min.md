@@ -4,6 +4,9 @@ Speak short lines. Pause between cuts. Don't read the timestamps out loud.
 Backup typed commands are below each spoken voice command in case the mic
 is finicky on demo day.
 
+**One-line pitch** — *"DelOS is a browser-OS that runs autonomous agents.
+Voice. Memory. Model arena. Codegen. Honest demo. One link. No login."*
+
 ---
 
 ## 0:00 — Hook (10s)
@@ -18,13 +21,17 @@ Open `https://delrio.vercel.app/os?guest=1` in fullscreen.
 
 ## 0:10 — OS overview (30s)
 
-> "Pixel-art shell. Real apps in real windows. Dock at the bottom,
-> live counters at the top — agents, requests, tokens, cost."
+> "Pixel-art shell. Real apps in real windows. Dock at the bottom — slim,
+> calm hover lift. Live counters at the top — agents, requests, tokens,
+> cost."
 
 Hover the dock. Open Launchpad (⌘Space) → close it. Point at counter strip:
 
-> "These tick up as agents run. Skeleton dots until the first stats
-> response — no fake zeros at first paint."
+> "Counters render dotted skeletons on first paint until the first stats
+> response — never four sad zeros. They tick up as agents run."
+
+Click `▶ JUDGE DEMO` in the top bar to optionally drive the whole tour
+hands-free, OR continue manually below.
 
 ---
 
@@ -74,10 +81,12 @@ Backup (typed): use the textbox fallback in Voice Agent.
 
 Open Arena. Click ▶ START RACE on the default prompt.
 
-> "Five models from three providers race the same prompt. Judge model
-> scores them on coverage and length. Disagreement score on the side.
-> Winner gets persisted to memory — search 'last arena winner' and it
-> comes back."
+> "Five models from three providers race the same prompt. Each row is
+> pinned to its own provider — if Mistral fails the row says Mistral
+> failed, not 'Bytez not in catalog'. Judge model scores them on
+> coverage and length. Disagreement score on the side. Winner gets
+> persisted to memory with an ARENA source tag — search 'last arena
+> winner' and it comes back."
 
 ---
 
