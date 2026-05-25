@@ -215,70 +215,185 @@ export function stopSpeaking() {
 export type ListenState = "idle" | "listening" | "recording" | "transcribing" | "denied" | "error";
 
 // Browser STT (Web Speech API)
+// V10-1/V10-2 · hardened browser STT.
+//   • continuous: true by default so far-field, slow, multi-sentence speech
+//     doesn't auto-close the mic mid-thought (was: continuous:false → mic
+//     died after every pause, transcript got chopped).
+//   • maxAlternatives: 3 + pick highest-confidence to recover accent slips.
+//   • auto-restart on benign errors (no-speech, audio-capture, network) so
+//     a single moment of silence at 2m away doesn't end the session.
+//   • transcript accumulates across restarts; only stop() / abort() resets it.
+//   • exposes audio-level meter (0-1) so the UI can show a live mic-hot
+//     indicator and the user knows it's still listening from across the room.
 export function useBrowserSTT() {
   const [state, setState] = useState<ListenState>("idle");
   const [transcript, setTranscript] = useState("");
   const [interim, setInterim] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [audioLevel, setAudioLevel] = useState(0);
   const recRef = useRef<SR | null>(null);
+  const wantRunningRef = useRef(false);
+  const restartCountRef = useRef(0);
+  const optsRef = useRef<{ continuous: boolean; lang: string }>({ continuous: true, lang: "en-US" });
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const meterStreamRef = useRef<MediaStream | null>(null);
+  const meterRafRef = useRef<number | null>(null);
 
-  const start = useCallback((opts?: { continuous?: boolean; lang?: string }) => {
-    if (typeof window === "undefined") return;
+  const stopMeter = useCallback(() => {
+    if (meterRafRef.current) cancelAnimationFrame(meterRafRef.current);
+    meterRafRef.current = null;
+    meterStreamRef.current?.getTracks().forEach((t) => t.stop());
+    meterStreamRef.current = null;
+    try { if (audioCtxRef.current && audioCtxRef.current.state !== "closed") audioCtxRef.current.close(); } catch {}
+    audioCtxRef.current = null;
+    setAudioLevel(0);
+  }, []);
+
+  // Side audio meter · runs alongside SpeechRecognition. SR doesn't expose
+  // amplitude, so we open a parallel mic stream with far-field constraints
+  // and sample it via AnalyserNode. Stopped when STT stops.
+  const startMeter = useCallback(async () => {
+    if (typeof window === "undefined" || !navigator?.mediaDevices?.getUserMedia) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          // Far-field friendly · no aggressive gating that drops distant voice.
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
+      meterStreamRef.current = stream;
+      const Ctor: typeof AudioContext = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext) as typeof AudioContext;
+      const ctx = new Ctor();
+      audioCtxRef.current = ctx;
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        if (!audioCtxRef.current) return;
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const mean = sum / data.length;
+        // Map 0-50 (typical ambient + voice band) to 0-1 with light compression.
+        setAudioLevel(Math.min(1, mean / 50));
+        meterRafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {
+      /* meter is optional · STT itself still works without it */
+    }
+  }, []);
+
+  const buildRec = useCallback(() => {
     const W = window as unknown as { SpeechRecognition?: { new (): SR }; webkitSpeechRecognition?: { new (): SR } };
     const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
-    if (!Ctor) {
-      setState("error");
-      setError("SpeechRecognition not supported in this browser");
-      return;
-    }
+    if (!Ctor) return null;
     const rec = new Ctor();
-    rec.lang = opts?.lang ?? "en-US";
-    rec.continuous = opts?.continuous ?? false;
+    rec.lang = optsRef.current.lang;
+    rec.continuous = optsRef.current.continuous;
     rec.interimResults = true;
-    rec.maxAlternatives = 1;
+    rec.maxAlternatives = 3;
     rec.onresult = (e: SpeechRecognitionEvent) => {
       let final = "";
       let i = "";
       for (let k = e.resultIndex; k < e.results.length; k++) {
         const r = e.results[k];
-        if (r.isFinal) final += r[0].transcript;
-        else i += r[0].transcript;
+        // V10-2 · pick the highest-confidence alternative · cheap accent recovery.
+        let best = r[0];
+        for (let alt = 1; alt < r.length; alt++) {
+          if ((r[alt]?.confidence ?? 0) > (best.confidence ?? 0)) best = r[alt];
+        }
+        if (r.isFinal) final += best.transcript;
+        else i += best.transcript;
       }
       if (final) setTranscript((prev) => (prev ? prev + " " : "") + final.trim());
       setInterim(i);
     };
     rec.onerror = (e: { error?: string }) => {
-      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      const err = e.error ?? "unknown";
+      if (err === "not-allowed" || err === "service-not-allowed") {
+        wantRunningRef.current = false;
         setState("denied");
         setError("Microphone permission denied");
-      } else if (e.error === "no-speech") {
-        // benign
+        stopMeter();
+      } else if (err === "no-speech" || err === "audio-capture" || err === "network" || err === "aborted") {
+        // V10-1 · benign · onend will fire and trigger auto-restart below.
       } else {
+        wantRunningRef.current = false;
         setState("error");
-        setError(String(e.error ?? "unknown"));
+        setError(String(err));
+        stopMeter();
       }
     };
-    rec.onend = () => setState((s) => (s === "listening" ? "idle" : s));
-    recRef.current = rec;
+    rec.onend = () => {
+      // V10-1 · auto-restart while the user still wants us listening. SR can
+      // self-terminate after ~60s on Chrome even with continuous:true; this
+      // loop keeps the session alive until stop() is explicitly called.
+      if (wantRunningRef.current && restartCountRef.current < 30) {
+        restartCountRef.current += 1;
+        try {
+          const next = buildRec();
+          if (next) {
+            recRef.current = next;
+            next.start();
+            setState("listening");
+            return;
+          }
+        } catch {}
+      }
+      setState((s) => (s === "listening" ? "idle" : s));
+      stopMeter();
+    };
+    return rec;
+  }, [stopMeter]);
+
+  const start = useCallback((opts?: { continuous?: boolean; lang?: string }) => {
+    if (typeof window === "undefined") return;
+    optsRef.current = {
+      continuous: opts?.continuous !== false,  // default ON (far-field, multi-sentence)
+      lang: opts?.lang ?? "en-US",
+    };
+    wantRunningRef.current = true;
+    restartCountRef.current = 0;
     setError(null);
     setInterim("");
     setTranscript("");
+    const rec = buildRec();
+    if (!rec) {
+      setState("error");
+      setError("SpeechRecognition not supported in this browser");
+      return;
+    }
+    recRef.current = rec;
     try {
       rec.start();
       setState("listening");
+      void startMeter();
     } catch (e) {
       setState("error");
       setError(e instanceof Error ? e.message : "start failed");
     }
-  }, []);
+  }, [buildRec, startMeter]);
 
   const stop = useCallback(() => {
+    wantRunningRef.current = false;
     try { recRef.current?.stop(); } catch {}
     setState("idle");
-  }, []);
+    stopMeter();
+  }, [stopMeter]);
 
-  useEffect(() => () => { try { recRef.current?.abort(); } catch {} }, []);
-  return { state, transcript, interim, error, start, stop, setTranscript };
+  useEffect(() => () => {
+    wantRunningRef.current = false;
+    try { recRef.current?.abort(); } catch {}
+    stopMeter();
+  }, [stopMeter]);
+
+  return { state, transcript, interim, error, audioLevel, start, stop, setTranscript };
 }
 
 // Whisper STT (MediaRecorder → /api/stt). Tuned for far-field capture:

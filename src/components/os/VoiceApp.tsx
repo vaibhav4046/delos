@@ -713,6 +713,27 @@ export function VoiceApp() {
               aria-hidden
             />
           )}
+          {/* V10-2 · live audio-level ring · expands with mic input so the user
+              sees the mic is hot and their voice is being captured from
+              wherever they're standing. Falls back gracefully to 0 when meter
+              isn't supported (Safari quirks etc.). */}
+          {recording && "audioLevel" in stt && (
+            <span
+              className="absolute"
+              style={{
+                top: -8 - (stt as { audioLevel?: number }).audioLevel! * 12,
+                left: -8 - (stt as { audioLevel?: number }).audioLevel! * 12,
+                right: -8 - (stt as { audioLevel?: number }).audioLevel! * 12,
+                bottom: -8 - (stt as { audioLevel?: number }).audioLevel! * 12,
+                borderRadius: "50%",
+                border: `2px solid var(--success)`,
+                opacity: 0.25 + (stt as { audioLevel?: number }).audioLevel! * 0.6,
+                pointerEvents: "none",
+                transition: "all 80ms linear",
+              }}
+              aria-hidden
+            />
+          )}
         </button>
         <div className="text-[10px] font-mono text-center" style={{ color: "var(--muted)" }}>
           {recording
