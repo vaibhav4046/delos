@@ -205,6 +205,59 @@ User screenshots flagged three more after the first push:
    padding/gap tightened. Dock is ~40% shorter and hover lift is calm
    (-10→-3px).
 
+## Round-3 fixes (commits `d4fb71b` → `35bd672` → `399a7e0`)
+
+Full Chrome E2E + curl smoke against the live alias revealed:
+
+1. **Gmail/Notion demo simulator was unreachable for guest judges.** The
+   `?guest=1` cookie sets `source: "session"` in resolveTenant, so the
+   old `if (source !== "session")` demo branch never fired. Refactored
+   to try-real-first, demo-fallback-on-missing-cred. Broadened the
+   missing-cred regex to also catch `token exchange failed`,
+   `invalid_grant`, `expired`, `401/403` so stale-OAuth tenants also
+   degrade to demo cleanly.
+   - `gmail/draft/route.ts:31-60`
+   - `notion/create-page/route.ts:25-44`
+
+2. **GDrive demo simulator added.** Returns 5 plausible files (DelOS
+   recap, Investor CRM pipeline, brand guidelines, clinical trial
+   protocol, Q3 memo) with `demo:true` when GOOGLE_DRIVE_TOKEN absent.
+   - `gdrive/list/route.ts:34-58`
+
+3. **Cold-lambda memory recall safety net.** /api/memory was returning
+   empty hits+local for fresh tenants on Lambda instances that didn't
+   have localFallback populated. New code does one broad Hydra sweep
+   ("run research user") when both layers are empty, so the dashboard
+   never renders blank after auto-seed. `memory/route.ts:62-78`.
+
+4. **Console-noise cleanup.** `InvalidStateError: Cannot close a closed
+   AudioContext` on Voice Agent unmount, `AbortError: signal is aborted
+   without reason` from interpretCommand timeouts. Both guarded.
+
+## Live prod smoke after round-3 push (commit `35bd672`)
+
+```
+$ /api/health                    → 10/10 alive
+$ /api/connectors/gmail/draft    → {ok:true, demo:true, draftId, openUrl, preview, message}
+$ /api/connectors/notion/...     → {ok:true, demo:true, pageId, url, preview, message}
+$ /api/connectors/github/list    → {ok:true, count:15, repos:[…vaibhav4046/delos…]}
+$ /api/voice-command "schedule lunch next Friday at 1pm"
+                                 → title:"lunch", when:"next Friday at 1pm"
+$ /api/voice-command "remind me to call Andy in 30 minutes"
+                                 → text:"call Andy", minutes:30, dueAt
+$ /api/voice-command "open browser and search hydration errors"
+                                 → open_app browser payload:"hydration errors"
+$ /api/voice-command "what do you remember about my demo tenant"
+                                 → recall_memory payload:"my demo tenant"
+$ /api/memory/write drift=tokens=ms=
+                                 → 400 memory_write_rejected · run-metric-noise
+$ /api/memory?q=graph            → seeded research entries
+$ /api/weather?city=zzzzzzz      → 404 city_not_found
+$ /api/me anon                   → {ok, signedIn:false} (PII gate)
+$ /api/tool web_search "OpenAI official documentation"
+                                 → platform.openai.com/docs top
+```
+
 ## Known residual risks
 
 1. **Local Turbopack build flakes on OneDrive paths.** Vercel CI runs
