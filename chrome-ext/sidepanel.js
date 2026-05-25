@@ -411,7 +411,26 @@ async function runMission(isContinuation = false, continuationContext = "") {
         // EXT-V6 · synthesize when the planner left a placeholder. Feed all
         // collected extract/summarize/read content into quick-agent and ask
         // for a thorough direct answer with concrete details.
-        const isPlaceholder = !text || /synthesis pending|i'?ll (open|search|navigate|browse|find)/i.test(text);
+        // EXT-V8 · expanded placeholder detection. Catches the planner's
+        // common hedge phrases that look like an answer but actually contain
+        // no real information from the page. Forces a synthesis pass over
+        // the collected extract content instead.
+        const placeholderPatterns = [
+          /synthesis pending/i,
+          /i'?ll (open|search|navigate|browse|find)/i,
+          /simulated answer/i,
+          /replace with actual/i,
+          /as of my last (update|training|knowledge)/i,
+          /i (don'?t|do not) have (access|real-?time|live)/i,
+          /\[?placeholder\]?/i,
+          /here is (?:the|a) plan/i,
+          /following the strict/i,
+          /^to (find|search|answer|figure)/i,
+          /please (replace|fill|review|note)/i,
+          /below is (a|the) plan/i,
+          /i cannot directly/i,
+        ];
+        const isPlaceholder = !text || text.length < 40 || placeholderPatterns.some((p) => p.test(text));
         if (isPlaceholder && collectedContext.length > 0) {
           appendLog("missionLog", `${tag("muted", "synth")} composing direct answer from ${collectedContext.length} extract${collectedContext.length === 1 ? "" : "s"}`);
           try {

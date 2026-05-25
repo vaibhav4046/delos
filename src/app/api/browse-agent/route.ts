@@ -333,7 +333,10 @@ export async function POST(req: NextRequest) {
   // If the planner returned a shallow plan (just 1-2 steps without an answer),
   // auto-expand into navigate -> scroll -> extract -> answer so the user
   // always gets a direct answer instead of just "opened amazon".
-  const isResearchTask = /\b(find|search|research|best|cheapest|top|compare|review|recommend|under\s+\$?\d|under\s+£\d|which|what.*(should|are|is the)|list|show me)\b/i.test(task);
+  // EXT-V8 · broader trigger · catches news/latest/current/now/today/explain/
+  // tell me about/who is/what is in addition to the V6 set so time-sensitive
+  // and informational queries also force a real navigate + extract pass.
+  const isResearchTask = /\b(find|search|research|best|cheapest|top|compare|review|recommend|under\s+\$?\d|under\s+£\d|under\s+€\d|which|what.*(should|are|is the)|list|show me|latest|news|current|today|now|right now|recently|summarize|tldr|explain|tell me about|who is|what is|how (do|to|does)|definition)\b/i.test(task);
   const hasAnswer = normalizedPlan.some((s) => s.action === "answer");
   const hasExtract = normalizedPlan.some((s) => s.action === "extract" || s.action === "summarize");
   const hasNavigate = normalizedPlan.some((s) => s.action === "navigate");
