@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DelOS · Agents Under Pressure</title>
+  <meta name="description" content="A browser operating system for AI agents. Voice, memory, browser control, cohort racing. Hackathon deck." />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <style>
+    *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #07070B;
+      --surface: #0F0F18;
+      --surface-2: #1A1A26;
+      --fg: #FFFFFF;
+      --muted: rgba(255,255,255,0.55);
+      --accent: #FFD60A;
+      --accent-shadow: #B89500;
+      --cyan: #5DE6FF;
+      --success: #6AB04C;
+      --danger: #C0392B;
+      --pixel: 'Pixelify Sans','Press Start 2P',ui-sans-serif,system-ui,sans-serif;
+      --sans: 'Inter',ui-sans-serif,system-ui,sans-serif;
+      --mono: 'JetBrains Mono','SF Mono',Menlo,monospace;
+    }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--sans);
+      overflow: hidden;
+    }
+    @import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    .deck {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 6vh 8vw;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      opacity: 0;
+      transform: translateX(40px) scale(0.97);
+      transition: opacity 380ms cubic-bezier(0.2,0.9,0.25,1),
+                  transform 380ms cubic-bezier(0.2,0.9,0.25,1);
+      pointer-events: none;
+    }
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      pointer-events: auto;
+    }
+    .slide.prev {
+      transform: translateX(-40px) scale(0.97);
+    }
+    .eyebrow {
+      font-family: var(--pixel);
+      font-size: 14px;
+      letter-spacing: 0.22em;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-family: var(--pixel);
+      font-size: clamp(48px, 8vw, 96px);
+      letter-spacing: 0.04em;
+      line-height: 1.05;
+      margin-bottom: 24px;
+    }
+    h2 {
+      font-family: var(--pixel);
+      font-size: clamp(32px, 5vw, 56px);
+      letter-spacing: 0.04em;
+      margin-bottom: 28px;
+    }
+    h3 {
+      font-family: var(--pixel);
+      font-size: 22px;
+      letter-spacing: 0.06em;
+      margin-bottom: 12px;
+      color: var(--accent);
+    }
+    p, li { font-size: clamp(16px, 1.4vw, 22px); line-height: 1.55; max-width: 1100px; }
+    p + p, p + ul, p + ol { margin-top: 16px; }
+    ul, ol { padding-left: 28px; }
+    li { margin-bottom: 6px; }
+    .row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .card {
+      flex: 1 1 280px;
+      padding: 20px 22px;
+      background: var(--surface);
+      border: 2px solid var(--surface-2);
+      border-left: 4px solid var(--accent);
+      box-shadow: 4px 4px 0 0 rgba(0,0,0,0.25);
+    }
+    .card.cyan { border-left-color: var(--cyan); }
+    .card.success { border-left-color: var(--success); }
+    .card.danger { border-left-color: var(--danger); }
+    .card h3 { color: inherit; margin-bottom: 8px; font-size: 16px; }
+    .card .v {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      margin-right: 6px;
+    }
+    .pill.muted { border-color: var(--surface-2); color: var(--muted); }
+    .pill.ok { border-color: var(--success); color: var(--success); }
+    .pill.cyan { border-color: var(--cyan); color: var(--cyan); }
+    .pill.danger { border-color: var(--danger); color: var(--danger); }
+    code, .mono {
+      font-family: var(--mono);
+      background: var(--surface);
+      padding: 2px 6px;
+      border: 1px solid var(--surface-2);
+      font-size: 0.9em;
+    }
+    a { color: var(--cyan); text-decoration: none; border-bottom: 1px dotted var(--cyan); }
+    a:hover { color: var(--accent); border-color: var(--accent); }
+    .footer {
+      position: absolute;
+      bottom: 24px;
+      left: 8vw;
+      right: 8vw;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+    }
+    .progress {
+      position: fixed;
+      top: 0; left: 0;
+      height: 3px;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+      transition: width 300ms ease;
+      z-index: 9;
+    }
+    .nav-hint {
+      position: fixed;
+      bottom: 14px;
+      right: 24px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      z-index: 9;
+    }
+    .logo-wrap {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .logo-wrap img {
+      width: 72px;
+      height: 72px;
+      box-shadow: 4px 4px 0 0 var(--accent-shadow);
+      image-rendering: pixelated;
+    }
+    .meta-block {
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      margin-top: 24px;
+    }
+    .meta-block .k { color: var(--accent); margin-right: 8px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+      margin-top: 24px;
+    }
+    .grid .stat {
+      padding: 18px;
+      background: var(--surface);
+      border: 2px solid var(--surface-2);
+    }
+    .stat .v {
+      font-family: var(--pixel);
+      font-size: 40px;
+      color: var(--accent);
+    }
+    .stat .k {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 36px;
+      align-items: start;
+    }
+    @media (max-width: 880px) { .two-col { grid-template-columns: 1fr; } }
+    .link-row {
+      margin-top: 20px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .link-row a {
+      display: inline-block;
+      padding: 10px 16px;
+      background: var(--accent);
+      color: #000;
+      border: 2px solid #000;
+      box-shadow: 3px 3px 0 0 var(--accent-shadow);
+      font-family: var(--pixel);
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      border-bottom: 2px solid #000;
+      transition: transform 120ms ease;
+    }
+    .link-row a:hover { transform: translate(-1px,-1px); }
+    .link-row a.ghost {
+      background: transparent;
+      color: var(--fg);
+      border-color: var(--surface-2);
+      box-shadow: none;
+    }
+    .keyline {
+      border-top: 1px solid var(--surface-2);
+      margin: 24px 0;
+    }
+    .quote {
+      border-left: 3px solid var(--accent);
+      padding-left: 16px;
+      font-style: italic;
+      color: var(--muted);
+      max-width: 900px;
+    }
+    .blink {
+      animation: blink 1.2s steps(1) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+  </style>
+</head>
+<body>
+  <div class="progress" id="progress" style="width: 0%"></div>
+  <div class="deck" id="deck">
+
+    <!-- 1. Title -->
+    <section class="slide active">
+      <div class="logo-wrap">
+        <img src="/icon.svg" alt="DelOS" />
+        <div>
+          <div class="eyebrow">Agents Under Pressure · HydraDB hackathon</div>
+          <h1 style="margin: 0">DelOS</h1>
+        </div>
+      </div>
+      <p style="font-size: 24px; color: var(--muted); max-width: 900px">
+        A browser operating system for AI agents. Voice, memory, browser control, and five model cohort racing. One Hydra graph plus vector memory across a website and a Chrome extension.
+      </p>
+      <div class="meta-block">
+        <div><span class="k">Live:</span> delrio.vercel.app</div>
+        <div><span class="k">OS:</span> delrio.vercel.app/os?guest=1</div>
+        <div><span class="k">Ext:</span> github.com/vaibhav4046/delos · /chrome-ext · v3.1</div>
+        <div><span class="k">Solo:</span> Vaibhav Lalwani</div>
+      </div>
+      <div class="link-row">
+        <a href="https://delrio.vercel.app/os?guest=1" target="_blank">Open the OS</a>
+        <a href="https://delrio.vercel.app/os?guest=1&demo=judge" target="_blank">60s judge demo</a>
+        <a href="https://github.com/vaibhav4046/delos" target="_blank" class="ghost">GitHub</a>
+      </div>
+    </section>
+
+    <!-- 2. Problem -->
+    <section class="slide">
+      <div class="eyebrow">The problem</div>
+      <h2>Most AI agents look great in demos. Reality kicks in.</h2>
+      <div class="grid">
+        <div class="stat"><div class="v">Tools</div><div class="k">FAIL</div></div>
+        <div class="stat"><div class="v">Docs</div><div class="k">ARE MESSY</div></div>
+        <div class="stat"><div class="v">Context</div><div class="k">GETS HUGE</div></div>
+        <div class="stat"><div class="v">Goals</div><div class="k">CHANGE MID RUN</div></div>
+        <div class="stat"><div class="v">Users</div><div class="k">INTERRUPT</div></div>
+        <div class="stat"><div class="v">Clock</div><div class="k">RUNS OUT</div></div>
+      </div>
+      <p style="margin-top: 28px; color: var(--muted)">
+        Most AI tools today live in separate tabs and separate memories. You cannot draft an email in one place and ask a model in another to remember it. There is no surface where a voice command actually builds a working app while the same agent recalls last week's research.
+      </p>
+    </section>
+
+    <!-- 3. What is DelOS -->
+    <section class="slide">
+      <div class="eyebrow">The build</div>
+      <h2>Two surfaces. One memory. Real work.</h2>
+      <div class="two-col">
+        <div class="card cyan">
+          <h3>Website · delrio.vercel.app/os</h3>
+          <div class="v">
+            Twenty four real apps in a window manager. Voice agent, memory browser, code app builder, browser, arena, calendar, schedule, notification center.
+          </div>
+          <ul style="margin-top: 12px; padding-left: 20px; color: var(--muted); font-size: 14px">
+            <li>JUDGE DEMO pill plays a 60s narrated walkthrough</li>
+            <li>VibeCode streams a working five page app into DelCode</li>
+            <li>Arena races five models, judge picks winner</li>
+            <li>Voice agent with audio level ring, far field tuned</li>
+          </ul>
+        </div>
+        <div class="card success">
+          <h3>Chrome extension · /chrome-ext v3.1</h3>
+          <div class="v">
+            Three tabs. Mission runs complex browser tasks. Cohort races five models. Memory mirrors the website by tenant id.
+          </div>
+          <ul style="margin-top: 12px; padding-left: 20px; color: var(--muted); font-size: 14px">
+            <li>Perplexity style in page overlay with colored highlights</li>
+            <li>Live screenshots embedded after every step</li>
+            <li>Chain re plan up to three rounds for deep research</li>
+            <li>Endless conversation with browser action chaining</li>
+          </ul>
+        </div>
+      </div>
+      <p style="margin-top: 24px">
+        Same tenant id flows through both. Save a memory on the website, see it in the extension Memory tab within a poll cycle. Run a Mission in the extension, see it on the website.
+      </p>
+    </section>
+
+    <!-- 4. Killer feature · In page overlay -->
+    <section class="slide">
+      <div class="eyebrow">Killer feature</div>
+      <h2>The extension actually acts on the live page.</h2>
+      <p>
+        When the agent runs a multi step task, the extension injects an overlay into the active page. A floating banner narrates the steps. A colored outline pulses around the exact element being clicked or filled.
+      </p>
+      <div class="row" style="margin-top: 24px">
+        <span class="pill" style="border-color: #3a86ff; color: #3a86ff">● click · blue</span>
+        <span class="pill" style="border-color: #fb8500; color: #fb8500">● fill · orange</span>
+        <span class="pill danger">● destructive · red</span>
+        <span class="pill ok">● navigate · green</span>
+      </div>
+      <p style="margin-top: 24px; color: var(--muted)">
+        This is what Perplexity Comet and Claude in Chrome do. We do the same with the standard Chrome scripting API, no content scripts running on every page. The overlay only mounts when a Mission runs and persists across page navigations through tabs.onUpdated.
+      </p>
+    </section>
+
+    <!-- 5. Killer feature · Chain re plan -->
+    <section class="slide">
+      <div class="eyebrow">Killer feature</div>
+      <h2>Deep research the user actually wants.</h2>
+      <p>
+        Type a complex task. The planner produces navigate, scroll, extract, and answer steps. When the first plan ends without a real answer, chain re plan kicks in. Up to three rounds until the goal is hit.
+      </p>
+      <div class="card cyan" style="margin-top: 24px">
+        <h3 style="color: var(--cyan)">Live test · "find best earbuds under 50 pounds"</h3>
+        <div class="v">
+          <span class="pill cyan">1</span> navigate · google.com/search?q=best+wireless+earbuds+under+50+pounds<br>
+          <span class="pill cyan">2</span> scroll · down 1500<br>
+          <span class="pill cyan">3</span> extract · top 3 wireless earbuds with names, prices, features<br>
+          <span class="pill cyan">4</span> answer · Anker Soundcore Liberty 2 Pro · £39.99 · 20h battery, Aukey · £29.99 · IPX7, Edifier TWS1 Pro · £44.99 · noise cancellation
+        </div>
+      </div>
+      <p style="margin-top: 16px; color: var(--muted)">
+        Server enforces a final answer step for every research task. Client synthesizes from collected extracts when the planner leaves a placeholder. Never just "opened amazon".
+      </p>
+    </section>
+
+    <!-- 6. Killer feature · Memory sync -->
+    <section class="slide">
+      <div class="eyebrow">Killer feature</div>
+      <h2>Memory updates across both surfaces. Live.</h2>
+      <div class="two-col">
+        <div>
+          <p>
+            HydraDB holds graph plus vector. Twelve seed memories auto write to any fresh tenant so the demo never starts empty.
+          </p>
+          <p>
+            Every Mission run, every Cohort verdict, every Voice store, every code build, every calendar event writes a typed memory with a source badge.
+          </p>
+          <p>
+            Same tenant id on the website and the extension. A run from one shows up in the other within thirty seconds. The Memory tab auto refreshes.
+          </p>
+        </div>
+        <div class="card success">
+          <h3>Source badges (typed enum)</h3>
+          <div class="v">
+            <span class="pill ok">voice-memory</span>
+            <span class="pill ok">codegen</span>
+            <span class="pill ok">arena</span>
+            <span class="pill ok">browser-search</span><br><br>
+            <span class="pill ok">calendar</span>
+            <span class="pill ok">schedule</span>
+            <span class="pill ok">user-fact</span>
+            <span class="pill ok">assistant</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Voice -->
+    <section class="slide">
+      <div class="eyebrow">Killer feature</div>
+      <h2>Voice that survives distance and silence.</h2>
+      <p>
+        Hardened against the usual Chrome SpeechRecognition failure modes.
+      </p>
+      <div class="grid" style="margin-top: 24px">
+        <div class="card"><h3>Continuous on</h3><div class="v">Was off by default. Mic died after every pause. Now stays open for long, slow, multi sentence speech.</div></div>
+        <div class="card"><h3>3 confidence alts</h3><div class="v">maxAlternatives bumped from 1 to 3. Picks the highest confidence alt. Free accent recovery.</div></div>
+        <div class="card"><h3>Auto restart</h3><div class="v">no-speech, audio-capture, network, aborted all benign. Auto restart up to 30 times across a session. Transcript accumulates.</div></div>
+        <div class="card"><h3>Live audio ring</h3><div class="v">Parallel mic stream feeds an AnalyserNode at 512 fftSize. Ring around the mic expands with voice. User sees mic is hot from across the room.</div></div>
+      </div>
+    </section>
+
+    <!-- 8. Architecture -->
+    <section class="slide">
+      <div class="eyebrow">Under the hood</div>
+      <h2>Stack and architecture.</h2>
+      <div class="two-col">
+        <div>
+          <h3>Frontend</h3>
+          <p style="font-family: var(--mono); font-size: 14px; color: var(--muted)">
+            Next.js 16 with Turbopack<br>
+            React 19 · TypeScript end to end<br>
+            Tailwind v4 · Framer Motion<br>
+            Lucide icons · Pixel art tokens<br>
+            Zod v4 for input schemas<br>
+            JSZip for code export
+          </p>
+        </div>
+        <div>
+          <h3>Backend</h3>
+          <p style="font-family: var(--mono); font-size: 14px; color: var(--muted)">
+            40+ API routes (App Router)<br>
+            HydraDB graph + vector via @hydradb/sdk<br>
+            Vercel AI SDK v6<br>
+            Six provider cascade<br>
+            Whisper Large v3 STT<br>
+            ElevenLabs Turbo v2.5 TTS<br>
+            Cockatiel retry + circuit breakers
+          </p>
+        </div>
+      </div>
+      <div class="keyline"></div>
+      <h3>Six LLM providers · cascade falls through on rate limit</h3>
+      <p style="font-family: var(--mono); font-size: 14px">
+        <span class="pill">Groq</span>
+        <span class="pill">Mistral</span>
+        <span class="pill">Google Gemini</span>
+        <span class="pill">NVIDIA NIM Nemotron</span>
+        <span class="pill">Cerebras</span>
+        <span class="pill">Bytez</span>
+      </p>
+    </section>
+
+    <!-- 9. Tracks claimed -->
+    <section class="slide">
+      <div class="eyebrow">The brief</div>
+      <h2>All four tracks covered.</h2>
+      <div class="grid">
+        <div class="card"><h3>Memory</h3><div class="v">Hydra graph plus vector under one tenant. Twelve seed entries. Recall fallback. Write guard. Cross surface sync between website and extension.</div></div>
+        <div class="card cyan"><h3>Tools</h3><div class="v">Real Chrome extension that clicks and fills the page. Five model arena with judge. MCP connectors. Streamed SSE codegen. Gmail, Notion, GitHub, Drive integrations.</div></div>
+        <div class="card success"><h3>Recovery</h3><div class="v">Six provider cascade. Deterministic domain cockpits when LLMs exhaust quota. Friendly UX for rate limits. Auto restart on STT silence. Graceful skip on chrome:// pages.</div></div>
+        <div class="card danger"><h3>Adaptation</h3><div class="v">Chain re plan up to three rounds for complex tasks. Endless conversation that re engages browser actions on follow ups. Voice mic auto restarts up to thirty times. Mid run goal drift detection.</div></div>
+      </div>
+    </section>
+
+    <!-- 10. How a judge verifies -->
+    <section class="slide">
+      <div class="eyebrow">Two minute verify path</div>
+      <h2>Open it. Watch it work.</h2>
+      <ol style="margin-top: 16px">
+        <li>Open <a href="https://delrio.vercel.app/os?guest=1" target="_blank">delrio.vercel.app/os?guest=1</a></li>
+        <li>Press the <strong>JUDGE DEMO</strong> pill in the top bar. Watch sixty seconds of narrated agent action.</li>
+        <li>Open the <strong>Memory</strong> app in the dock. Every step from the demo is already saved with a typed source badge.</li>
+        <li>Install <code>/chrome-ext</code> (Developer mode, Load unpacked). Click the D icon.</li>
+        <li>Mission tab: type <em>"open hacker news and summarize the top five"</em>. Press RUN AGENT.</li>
+        <li>Watch the in page overlay narrate steps on the actual Hacker News tab. Summary lands in the panel.</li>
+        <li>Back to the website Memory app. The mission run from the extension is at the top with a <span class="pill ok">browser-search</span> badge.</li>
+      </ol>
+    </section>
+
+    <!-- 11. Roadmap -->
+    <section class="slide">
+      <div class="eyebrow">What is next</div>
+      <h2>Roadmap.</h2>
+      <ul>
+        <li>Real OAuth flows for Gmail, Notion, GitHub, Drive end to end</li>
+        <li>Notion clone, Slack clone, Spotify clone in the codegen playbook set</li>
+        <li>Compound voice chunker so four leg commands hold all intents</li>
+        <li>Public Loom recording at five minutes</li>
+        <li>HydraDB managed deployment as a one click template</li>
+        <li>Extension marketplace listing with the same code path</li>
+      </ul>
+    </section>
+
+    <!-- 12. CTA / Contact -->
+    <section class="slide">
+      <div class="logo-wrap">
+        <img src="/icon.svg" alt="DelOS" />
+        <div>
+          <div class="eyebrow">Thanks for watching</div>
+          <h1 style="margin: 0; font-size: clamp(40px, 6vw, 72px)">DelOS</h1>
+        </div>
+      </div>
+      <div class="link-row" style="margin-top: 24px">
+        <a href="https://delrio.vercel.app/os?guest=1" target="_blank">Open the OS</a>
+        <a href="https://delrio.vercel.app/os?guest=1&demo=judge" target="_blank">Judge demo</a>
+        <a href="https://github.com/vaibhav4046/delos" target="_blank" class="ghost">Repo</a>
+      </div>
+      <div class="meta-block">
+        <div><span class="k">Contact:</span> mondayc852 at gmail dot com</div>
+        <div><span class="k">GitHub:</span> github.com/vaibhav4046</div>
+        <div><span class="k">Stack:</span> Next 16 · React 19 · Hydra · 6 LLM providers · Whisper · ElevenLabs</div>
+        <div><span class="k">Tracks:</span> Memory · Tools · Recovery · Adaptation</div>
+      </div>
+      <p style="margin-top: 32px; font-family: var(--mono); font-size: 12px; color: var(--muted)">
+        Built solo by Vaibhav Lalwani for Agents Under Pressure · HydraDB hackathon · May 2026.
+      </p>
+    </section>
+
+  </div>
+
+  <div class="nav-hint">← → arrow keys · spacebar · esc to fullscreen</div>
+
+  <script>
+    const slides = document.querySelectorAll('.slide');
+    const progress = document.getElementById('progress');
+    let i = 0;
+
+    function show(n) {
+      slides.forEach((s, idx) => {
+        s.classList.remove('active', 'prev');
+        if (idx < n) s.classList.add('prev');
+        if (idx === n) s.classList.add('active');
+      });
+      const pct = ((n + 1) / slides.length) * 100;
+      progress.style.width = pct + '%';
+      // hash for share-deeplink
+      try { history.replaceState(null, '', '#' + (n + 1)); } catch {}
+    }
+
+    function next() { if (i < slides.length - 1) { i++; show(i); } }
+    function prev() { if (i > 0) { i--; show(i); } }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+        e.preventDefault(); next();
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault(); prev();
+      } else if (e.key === 'Home') {
+        i = 0; show(i);
+      } else if (e.key === 'End') {
+        i = slides.length - 1; show(i);
+      } else if (e.key === 'f' || e.key === 'F') {
+        document.documentElement.requestFullscreen?.();
+      } else if (e.key === 'Escape') {
+        document.exitFullscreen?.();
+      }
+    });
+
+    // click anywhere advances
+    document.addEventListener('click', (e) => {
+      if (e.target.tagName === 'A') return; // don't hijack links
+      next();
+    });
+
+    // deep link via hash
+    const startFromHash = parseInt(location.hash.replace('#', ''), 10);
+    if (!isNaN(startFromHash) && startFromHash > 0 && startFromHash <= slides.length) {
+      i = startFromHash - 1;
+    }
+    show(i);
+
+    // Print fallback · show all slides linearly on Ctrl+P
+    window.addEventListener('beforeprint', () => {
+      slides.forEach((s) => {
+        s.style.position = 'relative';
+        s.style.opacity = '1';
+        s.style.transform = 'none';
+        s.style.pageBreakAfter = 'always';
+        s.style.height = '100vh';
+      });
+    });
+    window.addEventListener('afterprint', () => {
+      slides.forEach((s) => {
+        s.style.position = '';
+        s.style.opacity = '';
+        s.style.transform = '';
+        s.style.pageBreakAfter = '';
+        s.style.height = '';
+      });
+      show(i);
+    });
+  </script>
+</body>
+</html>
