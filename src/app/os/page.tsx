@@ -4,6 +4,7 @@ import Link from "next/link";
 import * as Icons from "lucide-react";
 import { Boot } from "@/components/os/Boot";
 import { runJudgeDemo, type JudgeRunController } from "@/lib/demo/judgeScript";
+import { JudgeDemoOverlay } from "@/components/os/JudgeDemoOverlay";
 import * as BrandIcons from "@/components/BrandIcons";
 import { Window, type WindowChild, type SnapKind } from "@/components/os/Window";
 import { ToastStack, type ToastItem } from "@/components/os/Toast";
@@ -559,13 +560,42 @@ export default function OSPage() {
     // Hand off to the declarative state machine in lib/demo/judgeScript.
     // Steps live there so they can be unit-tested independent of the
     // OS shell and replayed in /demo without lifting page.tsx state.
+    // The overlay component listens on `delos-judge-card` events to
+    // render its narration card with timer + progress.
     judgeDemoCtl.current?.cancel();
     judgeDemoCtl.current = runJudgeDemo({
       spawn: (app) => spawnSystemApp(app),
       emit: (intent) => emitIntent(intent),
       toast: (text, tone) => pushToast(text, tone ?? "ok"),
+      card: (c) => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("delos-judge-card", { detail: c }));
+        }
+      },
     });
   }
+  useEffect(() => {
+    function onCancel() {
+      judgeDemoCtl.current?.cancel();
+      judgeDemoCtl.current = null;
+    }
+    window.addEventListener("delos-judge-cancel", onCancel);
+    return () => window.removeEventListener("delos-judge-cancel", onCancel);
+  }, []);
+
+  // Landing page Demo button deep-links to /os?guest=1&demo=judge. On
+  // mount we auto-fire runDemoTour so a judge clicking the public demo
+  // sees the same scripted 60 second narrated walkthrough that the top
+  // bar JUDGE DEMO pill runs. Small delay lets boot + windows mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("demo") === "judge") {
+      const t = window.setTimeout(() => runDemoTour(), 600);
+      return () => window.clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function spawnSpecWindow(spec: AppSpec) {
     setWindows((prev) => {
@@ -1263,6 +1293,7 @@ export default function OSPage() {
           <ShortcutsSticky />
 
           <ToastStack items={toasts} onDismiss={(id) => setToasts((p) => p.filter((x) => x.id !== id))} />
+          <JudgeDemoOverlay onCancel={() => { judgeDemoCtl.current?.cancel(); judgeDemoCtl.current = null; }} />
 
           <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
           {portalOpen && <OnboardingPortal onClose={() => setPortalOpen(false)} />}
