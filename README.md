@@ -42,16 +42,26 @@ Same Hydra tenant id flows through both. A run from the extension shows up in th
 
 ## Screenshots
 
-> Capture instructions are in [`docs/screenshots/CAPTURE.md`](docs/screenshots/CAPTURE.md). The dynamic Open Graph image at `https://delrio.vercel.app/opengraph-image` is regenerated on every deploy and works as the canonical preview.
+Captured live from https://delrio.vercel.app via Playwright at 1440x900 @2x DPI.
+Regenerate with `node scripts/capture-screenshots.mjs`.
 
-| Surface | Preview |
-|---|---|
-| OS desktop on first boot | ![OS preview](https://delrio.vercel.app/opengraph-image) |
-| Chrome extension Mission tab | `docs/screenshots/ext-mission.png` |
-| In page overlay (Perplexity style highlight) | `docs/screenshots/ext-overlay.png` |
-| Memory app showing cross device sync | `docs/screenshots/memory-sync.png` |
-| Five model cohort race | `docs/screenshots/cohort.png` |
-| Code app builder streaming files | `docs/screenshots/vibecode.png` |
+### OS desktop on first boot
+![OS desktop](docs/screenshots/os-desktop.png)
+
+### Judge demo running with narration card
+![Judge demo](docs/screenshots/os-judge-demo.png)
+
+### Memory Browser with seed entries plus typed source badges
+![Memory app](docs/screenshots/memory-app.png)
+
+### VibeCode + DelCode streaming a code app
+![VibeCode](docs/screenshots/vibecode.png)
+
+### Five model arena race
+![Arena](docs/screenshots/arena.png)
+
+### Landing page
+![Landing](docs/screenshots/landing.png)
 
 ## Quick start
 
