@@ -45,7 +45,7 @@ const state = {
   voiceLoop: false,
   voiceBusy: false,
   voiceAuto: true,
-  activeTab: "voice",
+  activeTab: "browse",
   runBase: Date.now(),
 };
 
@@ -77,12 +77,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
       changed = true;
     }
   }
+  // EXT-FIX-3 · `#syncedFrom` footer was removed · just refresh derived UI.
   if (changed) {
     renderSettings();
     refreshConn();
-    if (changes.tenantId || changes.mcpServers) {
-      $("#syncedFrom").textContent = `synced · ${new Date().toLocaleTimeString()}`;
-    }
   }
 });
 
@@ -226,7 +224,7 @@ $("#runBtn").addEventListener("click", run);
 $("#stopBtn").addEventListener("click", () => state.runCtrl?.abort());
 $("#steerBtn").addEventListener("click", sendSteer);
 $("#grabTab").addEventListener("click", grabTabContext);
-$("#micBtn").addEventListener("click", () => toggleSttIntoGoal());
+// EXT-FIX-3 · #micBtn removed from Mission tab UX · Voice tab handles speech.
 
 async function grabTabContext() {
   const res = await tabAction("read");
@@ -374,28 +372,48 @@ async function runBrowseAgent() {
   browseStop = false;
   appendLog("browseLog", `${tag("info", "task")} ${esc(task)}`);
 
-  // Gather current tab context if checkbox checked
+  // Gather current tab context if checkbox checked.
+  // EXT-FIX-2 · truncate fields to server schema limits BEFORE serializing so
+  // long selections / page text never overflow Zod max() and 400 the request.
   let tabContext = null;
   if ($("#browseUseTab")?.checked) {
     const r = await tabAction("read");
-    if (r?.ok) {
-      tabContext = { url: r.data.url, title: r.data.title, text: r.data.text, selection: r.data.selection };
-      appendLog("browseLog", `${tag("muted", "ctx")} ${esc(r.data.title || r.data.url)}`);
+    if (r?.ok && r.data) {
+      tabContext = {
+        url: String(r.data.url || "").slice(0, 380),
+        title: String(r.data.title || "").slice(0, 380),
+        text: String(r.data.text || "").slice(0, 7500),
+        selection: String(r.data.selection || "").slice(0, 1900),
+      };
+      appendLog("browseLog", `${tag("muted", "ctx")} ${esc(r.data.title || r.data.url || "(tab)")}`);
+    } else if (r && !r.ok) {
+      // Read failed (chrome:// or extension page) — skip context, proceed.
+      appendLog("browseLog", `${tag("muted", "ctx")} skipped (${esc(r.error || "no tab")})`);
     }
   }
 
-  // Get plan from /api/browse-agent
+  // Get plan from /api/browse-agent. Only include tabContext when non-null
+  // so Zod .optional() never sees `null` (older server builds reject it).
   appendLog("browseLog", `${tag("info", "plan")} requesting…`);
   let plan;
   try {
+    const payload = { task: String(task).slice(0, 1900), tenantId: state.cfg.tenantId || undefined };
+    if (tabContext) payload.tabContext = tabContext;
     const r = await fetch(`${state.cfg.endpoint}/api/browse-agent`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task, tabContext, tenantId: state.cfg.tenantId }),
+      body: JSON.stringify(payload),
     });
     const j = await r.json();
     if (!r.ok || !j.plan) {
-      appendLog("browseLog", `${tag("bad", "ERR")} ${esc(j.error || "no plan")}`);
+      // EXT-FIX-2 · surface the schema detail when planner endpoint 400s so the
+      // user knows whether it was rate-limit / payload-size / blocked / 5xx.
+      const reason = r.status === 429
+        ? "rate-limited · retry in ~30s"
+        : j.detail
+          ? `${j.error || "error"} · ${String(j.detail).slice(0, 200)}`
+          : (j.error || `HTTP ${r.status}`);
+      appendLog("browseLog", `${tag("bad", "ERR")} ${esc(reason)}`);
       return;
     }
     plan = j.plan;
@@ -580,33 +598,7 @@ function speakText(text) {
   window.speechSynthesis.speak(u);
 }
 
-function toggleSttIntoGoal() {
-  const Ctor = getSttCtor();
-  if (!Ctor) {
-    appendLog("log", `${tag("bad", "voice")} SpeechRecognition unsupported`);
-    return;
-  }
-  if (state.miniRec) {
-    state.miniRec.stop();
-    state.miniRec = null;
-    return;
-  }
-  const rec = new Ctor();
-  rec.lang = "en-US";
-  rec.interimResults = true;
-  rec.continuous = false;
-  rec.onresult = (e) => {
-    let final = "";
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) final += e.results[i][0].transcript;
-    }
-    if (final) $("#goal").value = ($("#goal").value + " " + final).trim();
-  };
-  rec.onend = () => { state.miniRec = null; };
-  rec.onerror = () => { state.miniRec = null; };
-  rec.start();
-  state.miniRec = rec;
-}
+// EXT-FIX-3 · toggleSttIntoGoal removed alongside the Mission #micBtn handler.
 
 $("#voiceBtn").addEventListener("click", voiceTurn);
 $("#stopSpeakBtn").addEventListener("click", () => window.speechSynthesis?.cancel());
@@ -901,41 +893,8 @@ async function handleAsk(transcript) {
   }
 }
 
-// ───────────────────────── memory (kept) ─────────────────────────
-$("#memBtn").addEventListener("click", recallMem);
-
-async function recallMem() {
-  const q = $("#memQuery").value.trim() || "recent agent runs";
-  $("#memLog").innerHTML = "";
-  appendLog("memLog", `${tag("muted", "…")} querying`);
-  try {
-    // QA fix · pass tenant so demo_/anon_ tenants auto-seed correctly
-    const t = state.cfg.tenantId;
-    const tParam = t ? `&tenant=${encodeURIComponent(t)}` : "";
-    const url = `${state.cfg.endpoint}/api/memory?q=${encodeURIComponent(q)}&topK=12${tParam}`;
-    const r = await fetch(url);
-    if (!r.ok) {
-      appendLog("memLog", `${tag("bad", "ERR")} HTTP ${r.status}`);
-      return;
-    }
-    const j = await r.json();
-    $("#memLog").innerHTML = "";
-    if ((j.hits?.length ?? 0) === 0 && (j.local?.length ?? 0) === 0) {
-      appendLog("memLog", `<span class="empty">no matches for "${esc(q)}"</span>`);
-      appendLog("memLog", `${tag("muted", "tip")} set Tenant ID to <code>demo_test</code> in Settings to auto-seed`);
-      return;
-    }
-    for (const h of j.hits || []) {
-      appendLog("memLog", `${tag("info", "hit")} ${tag("muted", "s=" + (h.score?.toFixed(2) ?? "?"))} ${esc(h.text)}`);
-    }
-    for (const m of j.local || []) {
-      const tags = (m.tags || []).map((t) => tag("muted", t)).join("");
-      appendLog("memLog", `${tag("warn", "local")} ${tags} ${esc(m.text)}`);
-    }
-  } catch (e) {
-    appendLog("memLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
-  }
-}
+// EXT-FIX-3 · Memory tab + recallMem() removed · the OS app's MemoryDashboard
+// is the canonical view. The /api/memory endpoint remains for the dashboard.
 
 // ───────────────────────── boot ─────────────────────────────────
 (async function init() {
@@ -956,7 +915,10 @@ async function recallMem() {
   $("#log").innerHTML = '<div class="empty">terminal ready <span class="cursor"></span></div>';
   $("#cohortResults").innerHTML = '<div class="empty">no cohort run yet</div>';
   $("#voiceLog").innerHTML = '<div class="empty">tap the mic, say "summarize this page"</div>';
-  $("#memLog").innerHTML = '<div class="empty">search saved runs</div>';
+  $("#browseLog").innerHTML = '<div class="empty">give the agent a browse task above</div>';
   setVoiceStatus("idle", "READY", "autonomous mode");
+  // EXT-FIX-3 · Browse is now the default tab · ensure correct active state
+  // even if pendingGoal didn't redirect us to Mission.
+  if (state.activeTab !== "mission") state.activeTab = "browse";
   setInterval(refreshConn, 15000);
 })();

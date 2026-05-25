@@ -11,7 +11,7 @@
       <div class="brand">
         <span class="brand-mark">▮</span>
         <span class="brand-name">DelOS</span>
-        <span class="brand-sub">v2.2</span>
+        <span class="brand-sub">v2.7</span>
       </div>
       <div class="hdr-right">
         <span id="conn" class="pill pill-warn">● checking</span>
@@ -19,17 +19,19 @@
       </div>
     </header>
 
+    <!-- EXT-FIX-3 · stripped to focus on the headline browse-agent feature.
+         Removed Memory tab (cross-device sync was confusing) and made Browse
+         the default. Voice + Mission + Cohort stay for completeness. -->
     <nav class="tabs">
-      <button data-tab="voice" class="tab on">Voice</button>
-      <button data-tab="browse" class="tab">Browse</button>
+      <button data-tab="browse" class="tab on">Browse</button>
+      <button data-tab="voice" class="tab">Voice</button>
       <button data-tab="mission" class="tab">Mission</button>
       <button data-tab="cohort" class="tab">Cohort</button>
-      <button data-tab="memory" class="tab">Memory</button>
     </nav>
 
     <main class="panels">
-      <!-- VOICE — autonomous tab agent (now the headline) -->
-      <section data-panel="voice" class="panel on">
+      <!-- VOICE — autonomous tab agent -->
+      <section data-panel="voice" class="panel">
         <div id="voiceStatus" class="voice-status idle">
           <span class="dot"></span>
           <span class="label" id="voiceStatusLabel">READY</span>
@@ -60,8 +62,8 @@
         <div id="voiceLog" class="log"></div>
       </section>
 
-      <!-- BROWSE — Perplexity-style autonomous browser agent -->
-      <section data-panel="browse" class="panel">
+      <!-- BROWSE — Perplexity-style autonomous browser agent (default tab) -->
+      <section data-panel="browse" class="panel on">
         <div class="row">
           <textarea id="browseTask" rows="3" placeholder="Give the agent a complex task — e.g. 'find me the cheapest flight from SF to NYC next Friday', 'summarize the top 5 HN front page items', 'fill this form with my resume info', 'complete my assignment on this page'…"></textarea>
         </div>
@@ -86,9 +88,10 @@
         <div class="row">
           <textarea id="goal" rows="2" placeholder="give the agent a mission…"></textarea>
         </div>
+        <!-- EXT-FIX-3 · dropped 🎤 Voice mic icon from Mission tab per UX feedback.
+             Voice tab already handles speech-to-mission flow. -->
         <div class="row tightrow">
           <button id="grabTab" class="ghost small">⤓ Use current tab</button>
-          <button id="micBtn" class="ghost small">🎤 Voice</button>
           <label class="check small"><input type="checkbox" id="useMcp" checked /> MCP</label>
         </div>
         <div class="row chaos">
@@ -128,14 +131,9 @@
         <div id="cohortResults" class="log"></div>
       </section>
 
-      <!-- MEMORY -->
-      <section data-panel="memory" class="panel">
-        <div class="row">
-          <input id="memQuery" placeholder="recall…" />
-          <button id="memBtn" class="primary small">RECALL</button>
-        </div>
-        <div id="memLog" class="log"></div>
-      </section>
+      <!-- EXT-FIX-3 · Memory tab removed · cross-device memory now lives in
+           the main delrio.vercel.app/os app where the dashboard already shows
+           it. Kept the API endpoint untouched for the OS-side dashboard. -->
     </main>
 
     <!-- SETTINGS MODAL -->
@@ -167,10 +165,8 @@
       </div>
     </div>
 
-    <footer class="ftr">
-      <span id="syncedFrom" class="muted small">not synced yet · open delrio.vercel.app/os once</span>
-    </footer>
-
+    <!-- EXT-FIX-3 · footer sync line removed · was noisy + only relevant
+         once per install. Tenant ID still settable via the settings modal. -->
     <script src="sidepanel.js" type="module"></script>
   </body>
 </html>

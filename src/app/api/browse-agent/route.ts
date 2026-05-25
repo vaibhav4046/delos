@@ -31,18 +31,23 @@ const PlanResp = z.object({
   final: z.string().max(2000).optional(),
 });
 
+// EXT-FIX-1 · be lenient with extension payloads · extension sends `null`
+// when "use current tab" is unchecked or tab read fails. Zod `.optional()`
+// rejects null, so accept it explicitly. Also `transform`-truncate oversized
+// fields rather than reject the whole request — long selections / page text
+// are common and should not 400 the browse plan.
+const TabCtx = z.object({
+  url: z.string().optional().transform((v) => (v ?? "").slice(0, 400)),
+  title: z.string().optional().transform((v) => (v ?? "").slice(0, 400)),
+  text: z.string().optional().transform((v) => (v ?? "").slice(0, 8000)),
+  selection: z.string().optional().transform((v) => (v ?? "").slice(0, 2000)),
+});
+
 const Req = z.object({
-  task: z.string().min(3).max(2000).optional(),
-  input: z.string().min(3).max(2000).optional(),
-  tabContext: z
-    .object({
-      url: z.string().max(400).optional(),
-      title: z.string().max(400).optional(),
-      text: z.string().max(8000).optional(),
-      selection: z.string().max(2000).optional(),
-    })
-    .optional(),
-  tenantId: z.string().max(120).optional(),
+  task: z.string().min(1).max(2000).optional(),
+  input: z.string().min(1).max(2000).optional(),
+  tabContext: TabCtx.nullable().optional(),
+  tenantId: z.string().max(120).optional().nullable(),
 });
 
 const SYSTEM = `You are DelOS Browser Agent · a Perplexity-style planner that
@@ -142,7 +147,8 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "blocked_for_security", pattern: inj.pattern }, { status: 400 });
   }
 
-  const ctx = parsed.data.tabContext;
+  // EXT-FIX-1 · ctx may be null if extension sent `tabContext: null`. Treat as missing.
+  const ctx = parsed.data.tabContext ?? undefined;
   const userMsg = [
     `TASK:\n${task}`,
     ctx?.url ? `CURRENT_TAB:\n  url: ${ctx.url}\n  title: ${ctx.title ?? ""}` : "",
