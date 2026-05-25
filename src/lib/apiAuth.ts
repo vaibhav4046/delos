@@ -41,6 +41,11 @@ export type ResolvedTenant = {
 // Real user tenants never carry these prefixes (session-derived tenants
 // use `t_<hash>`), so this can't be used to hop into another user's data.
 const TEST_TENANT_RE = /^(qa|demo|test|judge|hack|hackathon)_[a-z0-9_-]{1,80}$/i;
+// R12 · single canonical guest tenant for in-OS Memory Browser. Matching
+// here lets the dashboard send `?tenantId=delrio_demo` (or its body field)
+// without us treating it as BOLA. Auto-seed writes land here so a fresh
+// `/os?guest=1` Memory Browser opens with the 12 seed entries.
+const GUEST_TENANT = "delrio_demo";
 
 /**
  * Resolve the calling tenant server-side. Caller MUST NOT pass tenantId in
@@ -64,9 +69,16 @@ export async function resolveTenant(req: NextRequest, opts?: { bodyTenantId?: st
   // ?tenant= query. Only accepted when it matches the reserved prefix —
   // never honored for arbitrary strings (which would be the BOLA vector).
   const headerTenant = req.headers.get("x-tenant") || req.headers.get("X-Tenant");
-  const queryTenant = req.nextUrl?.searchParams?.get("tenant") || undefined;
+  // R12 · accept BOTH `?tenant=` (legacy) and `?tenantId=` (MemoryDashboard
+  // + most clients use this). Was: only `?tenant=` which silently dropped
+  // every dashboard request into anon-IP scope and made auto-seed land in
+  // a different tenant than the recall query.
+  const queryTenant =
+    req.nextUrl?.searchParams?.get("tenant") ||
+    req.nextUrl?.searchParams?.get("tenantId") ||
+    undefined;
   const candidate = opts?.bodyTenantId || headerTenant || queryTenant || "";
-  if (candidate && TEST_TENANT_RE.test(candidate)) {
+  if (candidate && (TEST_TENANT_RE.test(candidate) || candidate === GUEST_TENANT)) {
     return { tenantId: candidate, source: "session" };
   }
   const ip = clientIp(req) || "unknown";

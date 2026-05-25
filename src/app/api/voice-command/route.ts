@@ -298,13 +298,40 @@ export async function POST(req: NextRequest) {
           : Array.isArray(responseChain) && responseChain.length >= 2
             ? responseChain
             : undefined;
+      // R12 · non-compound results MUST have executions[0].kind === top-level
+      // intent. Was: chunker over-split ("schedule lunch next Friday at 1pm"
+      // → chunks ["schedule lunch", "next Friday at 1pm"]) so executions[0]
+      // sometimes came back as `run_mission` or `build_app` while top-level
+      // was `create_event`. Synthesize a single execution from the full-text
+      // local result so the contract holds.
+      const finalExecutions = (() => {
+        if (trueCompound) return executions;
+        const tier: "read" | "reversible" | "external" | "destructive" =
+          DESTRUCTIVE.has(local.intent)
+            ? "destructive"
+            : EXTERNAL.has(local.intent)
+              ? "external"
+              : ["recall_memory", "read_email", "open_gdrive", "open_app"].includes(local.intent)
+                ? "read"
+                : "reversible";
+        const needsApproval = tier === "destructive" || tier === "external";
+        return [
+          {
+            intent: intents[0] ?? { text: transcript, label: transcript },
+            kind: local.intent,
+            tier,
+            status: needsApproval ? ("awaiting_approval" as const) : ("fulfilled" as const),
+            resolved: local,
+          },
+        ];
+      })();
       return Response.json({
         ...local,
         intent: topIntent,
         reply,
         source: "local",
         intents,
-        executions,
+        executions: finalExecutions,
         // VP-1 · honest compound flag · true only when chain has ≥2 actions
         compound: trueCompound,
         ...(effectiveChain ? { chain: effectiveChain } : {}),

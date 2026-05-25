@@ -133,6 +133,32 @@ ok("memory-seed-honors-tenant", async () => {
   assert.ok(r.s === 200 || r.s === 429, `expected 200/429, got ${r.s}: ${r.b.slice(0, 200)}`);
 });
 
+ok("voice-execution-aligns-top-level", async () => {
+  // R12 · top-level intent and executions[0].kind must agree for
+  // non-compound prompts. Was: chunker over-split calendar prompts so
+  // executions[0] came back as run_mission or build_app while top-level
+  // was create_event. API inspectors saw contradictory shape.
+  const cases = [
+    { input: "schedule lunch next Friday at 1pm", expected: "create_event" },
+    { input: "create calendar event lunch next Friday at 1pm", expected: "create_event" },
+    { input: "remind me at 3pm to call Andy", expected: "set_reminder" },
+    { input: "remember that my demo tenant is gastronomy one", expected: "store_memory" },
+  ];
+  for (const c of cases) {
+    const r = await POST("/api/voice-command", { input: c.input, tenantId: tenant });
+    const b = j(r.b);
+    const e = Array.isArray(b.executions) ? b.executions : [];
+    assert.equal(b.intent, c.expected, `top-level intent mismatch for "${c.input}" · got ${b.intent}`);
+    if (b.compound === false && e.length > 0) {
+      assert.equal(
+        e[0].kind,
+        c.expected,
+        `executions[0].kind drift for "${c.input}" · top=${b.intent} exec=${e[0].kind}`,
+      );
+    }
+  }
+});
+
 ok("connector-honesty-gmail-notion", async () => {
   // R11b · guest/unauthenticated connector calls must flag demo:true so
   // judges + API inspectors see the simulation honestly. Was returning a

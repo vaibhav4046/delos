@@ -75,12 +75,15 @@ export async function POST(req: NextRequest) {
   // pinned facts got drowned in seed text (2026-05-25 brutal-QA P0:
   // "Memory not trustworthy — recall returned seeded demo memories,
   // not my facts"). Only demo/QA/judge/hack/test scopes accept seeds.
-  if (!/^(demo|qa|test|judge|hack)_/i.test(tenantId)) {
+  // R12 · also accept the canonical guest tenant `delrio_demo` so the
+  // in-OS Memory Browser's auto-seed POST is honored. Was: refused with
+  // 403, which is why the dashboard landed empty for fresh judge clicks.
+  if (!/^(demo|qa|test|judge|hack)_/i.test(tenantId) && tenantId !== "delrio_demo") {
     return Response.json(
       {
         ok: false,
         error:
-          "Seed endpoint refuses to write into a user tenant. Pass tenantId starting with demo_/qa_/test_/judge_/hack_ to scope the seeds.",
+          "Seed endpoint refuses to write into a user tenant. Pass tenantId starting with demo_/qa_/test_/judge_/hack_ (or delrio_demo) to scope the seeds.",
         tenantId,
       },
       { status: 403 },
