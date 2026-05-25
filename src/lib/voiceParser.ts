@@ -158,7 +158,12 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
       // minutes" / "call Andy hour" etc in 2026-05-25 QA.
       const cleanText = rest
         .replace(
-          /\b(?:in|at|on|by|tonight|tomorrow|today|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d+\s*(?:minutes|minute|hours|hour|days|day|weeks|week|mins|min))\b/gi,
+          // Order matters · the `\d+\s*(minutes|hours|...)` branch MUST
+          // come BEFORE the bare-digit am/pm branch, otherwise "30" gets
+          // consumed first and "minutes" is left as residue ("call Andy
+          // minutes" was the QA bug). Bare-digit branch also requires
+          // am/pm now so it can't strip part of "30 minutes".
+          /\b(?:in|at|on|by|tonight|tomorrow|today|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d+\s*(?:minutes|minute|hours|hour|days|day|weeks|week|mins|min)|\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/gi,
           "",
         )
         // Strip dangling "to" left over from "remind me at 3pm to call Andy"
