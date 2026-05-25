@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "DelOS — Agents Under Pressure",
   "short_name": "DelOS",
-  "version": "2.2.0",
-  "description": "Autonomous voice agent for any tab — summarize, click, fill, scroll, navigate hands-free. Plus full DelOS mission / cohort / memory companion.",
+  "version": "2.3.0",
+  "description": "Autonomous voice + browser agent. Perplexity-style task runner: analyze tab, plan multi-step browse, click/fill/scroll/extract, with cohort racing + memory.",
   "author": "DelOS",
   "minimum_chrome_version": "114",
   "action": {

@@ -14,16 +14,17 @@
 // Everything else still falls through to /api/quick-agent so the agent
 // can answer general questions ("what time is it in Tokyo").
 
+// MODELS list trimmed to 7 verified-connected providers · 2026-05-25 audit.
+// Dropped: gemini-2.5-pro (latency), llama-4-scout (redundant w/ maverick),
+// mistral-small (NIM Nemotron replaces). Added NIM Nemotron + Llama-3.3-70b.
 const MODELS = [
   "groq:openai/gpt-oss-120b",
   "groq:openai/gpt-oss-20b",
-  "groq:meta-llama/llama-4-scout-17b-16e-instruct",
   "groq:meta-llama/llama-4-maverick-17b-128e-instruct",
   "groq:moonshotai/kimi-k2-instruct-0905",
   "mistral:mistral-large-latest",
-  "mistral:mistral-small-latest",
   "google:gemini-2.5-flash",
-  "google:gemini-2.5-pro",
+  "nim:nvidia/llama-3.3-nemotron-super-49b-v1",
 ];
 
 const DEFAULTS = {
@@ -312,6 +313,151 @@ function rewriteUrl(u) {
   return u;
 }
 
+// ───────────────────────── analyze tab (X1) ──────────────────────
+$("#analyzeTabBtn")?.addEventListener("click", () => analyzeTab(false));
+$("#summarizeTabBtn")?.addEventListener("click", () => analyzeTab(true));
+
+async function analyzeTab(summarize) {
+  appendLog("voiceLog", `${tag("info", "tab")} ${summarize ? "summarizing" : "analyzing"}…`);
+  const tabRes = await tabAction("read");
+  if (!tabRes?.ok) {
+    appendLog("voiceLog", `${tag("bad", "ERR")} ${esc(tabRes?.error || "read failed")}`);
+    return;
+  }
+  const data = tabRes.data;
+  appendLog("voiceLog", `<div class="muted">${esc(data.title || "(no title)")} · ${esc(data.url)}</div>`);
+  const prompt = summarize
+    ? `Summarize this web page in 4-6 concise bullets. Be specific, no filler.\n\nTITLE: ${data.title}\nURL: ${data.url}\n\nPAGE TEXT:\n${(data.text || "").slice(0, 6000)}`
+    : `Analyze this web page. Identify the main topic, key claims, source quality, and any action items.\n\nTITLE: ${data.title}\nURL: ${data.url}\n\nPAGE TEXT:\n${(data.text || "").slice(0, 6000)}`;
+  try {
+    const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: prompt, tenantId: state.cfg.tenantId }),
+    });
+    const j = await r.json();
+    appendLog("voiceLog", `<div class="answer">${tag("info", summarize ? "summary" : "analysis")} ${esc(j.text || j.error || "(no result)")}</div>`);
+    if ($("#voiceSpeak")?.checked && j.text) speakText(j.text);
+  } catch (e) {
+    appendLog("voiceLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+  }
+}
+
+// ───────────────────────── browse agent (X2) ─────────────────────
+$("#browseRunBtn")?.addEventListener("click", runBrowseAgent);
+let browseStop = false;
+$("#browseStopBtn")?.addEventListener("click", () => { browseStop = true; });
+
+async function runBrowseAgent() {
+  const task = $("#browseTask").value.trim();
+  if (!task) {
+    appendLog("browseLog", `${tag("bad", "ERR")} task required`);
+    return;
+  }
+  $("#browseLog").innerHTML = "";
+  browseStop = false;
+  appendLog("browseLog", `${tag("info", "task")} ${esc(task)}`);
+
+  // Gather current tab context if checkbox checked
+  let tabContext = null;
+  if ($("#browseUseTab")?.checked) {
+    const r = await tabAction("read");
+    if (r?.ok) {
+      tabContext = { url: r.data.url, title: r.data.title, text: r.data.text, selection: r.data.selection };
+      appendLog("browseLog", `${tag("muted", "ctx")} ${esc(r.data.title || r.data.url)}`);
+    }
+  }
+
+  // Get plan from /api/browse-agent
+  appendLog("browseLog", `${tag("info", "plan")} requesting…`);
+  let plan;
+  try {
+    const r = await fetch(`${state.cfg.endpoint}/api/browse-agent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task, tabContext, tenantId: state.cfg.tenantId }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.plan) {
+      appendLog("browseLog", `${tag("bad", "ERR")} ${esc(j.error || "no plan")}`);
+      return;
+    }
+    plan = j.plan;
+    appendLog("browseLog", `${tag("ok", "plan")} ${plan.length} steps · ${esc(j.planner || "")}`);
+    if (j.final) appendLog("browseLog", `<div class="muted">${esc(j.final)}</div>`);
+  } catch (e) {
+    appendLog("browseLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+    return;
+  }
+
+  // Execute each step against active tab
+  for (let i = 0; i < plan.length; i++) {
+    if (browseStop) {
+      appendLog("browseLog", `${tag("warn", "stopped")} by user`);
+      break;
+    }
+    const step = plan[i];
+    const label = `${i + 1}/${plan.length}`;
+    appendLog("browseLog", `${tag(step.tier === "destructive" ? "bad" : step.tier === "external" ? "warn" : "info", label)} ${esc(step.action)} ${esc(JSON.stringify(step.args).slice(0, 120))}`);
+
+    // Gate destructive + external
+    if (step.tier === "destructive" || step.tier === "external") {
+      const ok = confirm(`Approve ${step.tier} step ${label}:\n${step.action} ${JSON.stringify(step.args)}`);
+      if (!ok) {
+        appendLog("browseLog", `${tag("warn", "skip")} user denied`);
+        continue;
+      }
+    }
+
+    try {
+      let result;
+      if (step.action === "answer") {
+        appendLog("browseLog", `<div class="answer">${tag("info", "answer")} ${esc(step.args.text || "")}</div>`);
+        if ($("#browseSpeak")?.checked && step.args.text) speakText(step.args.text);
+        continue;
+      }
+      if (step.action === "summarize" || step.action === "extract") {
+        const tabRes = await tabAction("read");
+        if (!tabRes?.ok) throw new Error(tabRes?.error || "read failed");
+        const q = step.args.query || task;
+        const summarizePrompt = step.action === "summarize"
+          ? `Summarize this page in 4-6 concise bullets.\n\nURL: ${tabRes.data.url}\nTITLE: ${tabRes.data.title}\n\n${(tabRes.data.text || "").slice(0, 5000)}`
+          : `Extract from this page only what's relevant to: ${q}\n\nURL: ${tabRes.data.url}\nTITLE: ${tabRes.data.title}\n\n${(tabRes.data.text || "").slice(0, 5000)}`;
+        const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: summarizePrompt, tenantId: state.cfg.tenantId }),
+        });
+        const j = await r.json();
+        result = j.text || j.error || "(no result)";
+        appendLog("browseLog", `<div class="answer">${tag("ok", step.action)} ${esc(result)}</div>`);
+        if ($("#browseSpeak")?.checked) speakText(result);
+        continue;
+      }
+      // Map action → tabAction
+      const map = {
+        navigate: ["navigate", { url: step.args.url }],
+        scroll: ["scroll", { direction: step.args.direction || "down", amount: step.args.amount || 800 }],
+        click: ["click", { needle: step.args.needle }],
+        fill: ["fill", { field: step.args.field, value: step.args.value }],
+        read: ["read", {}],
+        links: ["links", { limit: step.args.limit || 20 }],
+      };
+      const [act, args] = map[step.action] || [step.action, step.args];
+      result = await tabAction(act, args);
+      if (result?.ok) {
+        appendLog("browseLog", `${tag("ok", "✓")} ${esc(JSON.stringify(result.data || {}).slice(0, 160))}`);
+      } else {
+        appendLog("browseLog", `${tag("bad", "✗")} ${esc(result?.error || "failed")}`);
+      }
+      await new Promise((r) => setTimeout(r, 600));
+    } catch (e) {
+      appendLog("browseLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+    }
+  }
+  appendLog("browseLog", `${tag("ok", "done")}`);
+}
+
 // ───────────────────────── cohort (kept) ─────────────────────────
 $("#cohortBtn").addEventListener("click", runCohort);
 
@@ -319,8 +465,10 @@ async function runCohort() {
   $("#cohortResults").innerHTML = "";
   const preset = $("#cohortPreset").value;
   let members;
+  let godMode = false;
   if (preset === "3groq") members = ["groq:openai/gpt-oss-120b", "groq:openai/gpt-oss-20b", "groq:meta-llama/llama-4-maverick-17b-128e-instruct"];
-  else if (preset === "fast") members = ["groq:openai/gpt-oss-20b", "mistral:mistral-small-latest", "google:gemini-2.5-flash"];
+  else if (preset === "fast") members = ["groq:openai/gpt-oss-20b", "mistral:mistral-large-latest", "google:gemini-2.5-flash"];
+  else if (preset === "godmode") { godMode = true; members = ["mistral:mistral-large-latest", "google:gemini-2.5-flash", "groq:openai/gpt-oss-20b"]; }
   else members = ["groq:openai/gpt-oss-120b", "google:gemini-2.5-flash", "mistral:mistral-large-latest"];
 
   const goal = $("#cohortGoal").value.trim();
@@ -328,9 +476,10 @@ async function runCohort() {
     appendLog("cohortResults", `${tag("bad", "ERR")} goal required`);
     return;
   }
-  appendLog("cohortResults", `${tag("info", "cohort")} ${members.length} members`);
+  appendLog("cohortResults", `${tag("info", "cohort")} ${godMode ? "GOD MODE · 5 models + NIM verifier" : members.length + " members"}`);
   try {
-    const res = await fetch(`${state.cfg.endpoint}/api/cohort`, {
+    const url = `${state.cfg.endpoint}/api/cohort${godMode ? "?godMode=1" : ""}`;
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ goal, members }),
@@ -355,6 +504,10 @@ async function runCohort() {
             if (ev.status === "spawn") appendLog("cohortResults", `${tag("warn", "spawn")} [${ev.index}] ${esc(label)}`);
             else if (ev.status === "done") appendLog("cohortResults", `${tag("ok", `[${ev.index}]`)} ${esc(label)} ${tag("muted", ev.ms + "ms")} <div class="muted">${esc(ev.text)}</div>`);
             else if (ev.status === "fail") appendLog("cohortResults", `${tag("bad", `[${ev.index}]`)} ${esc(label)} err: ${esc(ev.error)}`);
+          } else if (ev.t === "cohort_disagreement") {
+            const pct = Math.round((ev.score || 0) * 100);
+            const tone = pct > 30 ? "warn" : "ok";
+            appendLog("cohortResults", `${tag(tone, "disagreement")} ${pct}% ${pct > 30 ? "· cite required" : "· consensus"}`);
           } else if (ev.t === "cohort_verdict") {
             const scores = (ev.scores || []).map((s) => `[${s.index}]${s.score}`).join(" ");
             appendLog("cohortResults", `<div class="answer">${tag("info", "JUDGE")} winner [${ev.winnerIndex}] · ${esc(scores)}<br>${tag("info", "merged")}<br>${esc(ev.merged)}</div>`);

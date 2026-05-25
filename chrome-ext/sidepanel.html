@@ -21,6 +21,7 @@
 
     <nav class="tabs">
       <button data-tab="voice" class="tab on">Voice</button>
+      <button data-tab="browse" class="tab">Browse</button>
       <button data-tab="mission" class="tab">Mission</button>
       <button data-tab="cohort" class="tab">Cohort</button>
       <button data-tab="memory" class="tab">Memory</button>
@@ -45,6 +46,11 @@
           <button id="stopSpeakBtn" class="ghost small">🔇 mute</button>
         </div>
 
+        <div class="row tightrow">
+          <button id="analyzeTabBtn" class="ghost small" style="flex:1">🔎 Analyze current tab</button>
+          <button id="summarizeTabBtn" class="ghost small" style="flex:1">📝 Summarize</button>
+        </div>
+
         <div class="hint" style="margin-bottom:8px">
           Say <code>summarize this page</code> · <code>open github</code> · <code>click sign in</code> ·
           <code>fill email with foo@bar</code> · <code>scroll down</code> · <code>read this</code>.
@@ -52,6 +58,27 @@
         </div>
 
         <div id="voiceLog" class="log"></div>
+      </section>
+
+      <!-- BROWSE — Perplexity-style autonomous browser agent -->
+      <section data-panel="browse" class="panel">
+        <div class="row">
+          <textarea id="browseTask" rows="3" placeholder="Give the agent a complex task — e.g. 'find me the cheapest flight from SF to NYC next Friday', 'summarize the top 5 HN front page items', 'fill this form with my resume info', 'complete my assignment on this page'…"></textarea>
+        </div>
+        <div class="row tightrow">
+          <label class="check small"><input type="checkbox" id="browseUseTab" checked /> use current tab as context</label>
+          <label class="check small"><input type="checkbox" id="browseAutoNav" checked /> auto-navigate</label>
+          <label class="check small"><input type="checkbox" id="browseSpeak" /> speak progress</label>
+        </div>
+        <div class="row">
+          <button id="browseRunBtn" class="primary" style="flex:1">▶ RUN BROWSER AGENT</button>
+          <button id="browseStopBtn" class="danger small">■</button>
+        </div>
+        <div class="hint" style="margin-bottom:8px">
+          Plans multi-step browse · scrolls + clicks + extracts + summarizes.
+          Each step shows in the trace below with approval on destructive actions.
+        </div>
+        <div id="browseLog" class="log"></div>
       </section>
 
       <!-- MISSION -->
@@ -92,6 +119,7 @@
             <option value="3groq">3× Groq</option>
             <option value="mixed" selected>Mixed (Groq + Gemini + Mistral)</option>
             <option value="fast">Fast (small models)</option>
+            <option value="godmode">★ GOD MODE (5 models + NIM verifier)</option>
           </select>
         </div>
         <div class="row">
