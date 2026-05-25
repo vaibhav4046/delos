@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>DelOS · Agents Under Pressure presentation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0a0815;
+      --surface: #14112a;
+      --surface2: #1f1b3a;
+      --fg: #f3efe1;
+      --muted: #8a83b3;
+      --accent: #ffd300;
+      --accent2: #ff6ec7;
+      --success: #6ad778;
+      --danger: #ff3a8a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: "Inter", ui-sans-serif, system-ui, sans-serif; }
+    body { overflow: hidden; }
+    .deck { width: 100vw; height: 100vh; position: relative; }
+    .slide { width: 100vw; height: 100vh; padding: 64px 80px; display: none; flex-direction: column; gap: 24px; }
+    .slide.active { display: flex; }
+    h1 { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 64px; margin: 0; letter-spacing: -1px; line-height: 1; }
+    h2 { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 40px; margin: 0; letter-spacing: -0.5px; }
+    p { font-size: 20px; line-height: 1.55; margin: 0; color: var(--fg); }
+    .muted { color: var(--muted); font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase; }
+    .pill { display: inline-block; padding: 6px 14px; background: var(--accent); color: #1a1300; font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.18em; font-weight: 700; }
+    .grid { display: grid; gap: 18px; }
+    .grid-2 { grid-template-columns: 1fr 1fr; }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .card { background: var(--surface); border: 2px solid var(--surface2); padding: 22px; border-radius: 4px; }
+    .card .label { font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.18em; color: var(--accent); margin-bottom: 10px; text-transform: uppercase; }
+    .card h3 { margin: 0 0 8px 0; font-size: 22px; font-family: "JetBrains Mono", monospace; }
+    .card p { font-size: 15px; line-height: 1.5; color: var(--fg); }
+    .footer { position: absolute; left: 80px; right: 80px; bottom: 32px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 13px; }
+    .nav { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 1000; }
+    .nav button { background: var(--surface); color: var(--fg); border: 2px solid var(--accent); padding: 6px 14px; font-family: "JetBrains Mono", monospace; cursor: pointer; }
+    .hero-accent { color: var(--accent); }
+    .hero-accent2 { color: var(--accent2); }
+    .iframe-frame { flex: 1; border: 2px solid var(--accent); background: #000; border-radius: 4px; overflow: hidden; }
+    .iframe-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+    ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+    ul li { display: flex; gap: 12px; font-size: 17px; line-height: 1.45; }
+    ul li::before { content: "▸"; color: var(--accent); }
+    code { font-family: "JetBrains Mono", monospace; background: var(--surface2); padding: 2px 6px; border-radius: 2px; font-size: 14px; }
+    .url-row { display: flex; align-items: center; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 16px; }
+    .url-row .key { color: var(--accent); }
+    .url-row .val { color: var(--fg); }
+    .timeline { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 20px; }
+    .timeline .step { background: var(--surface); border-left: 3px solid var(--accent); padding: 14px; }
+    .timeline .step .n { font-family: "JetBrains Mono", monospace; color: var(--accent); font-size: 11px; letter-spacing: 0.2em; }
+    .timeline .step .t { font-size: 15px; font-weight: 600; margin-top: 4px; }
+    .timeline .step .e { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.35; }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <!-- Slide 1 · Title -->
+    <section class="slide active" data-slide="1">
+      <span class="pill">Agents Under Pressure · HydraDB Hackathon · May 2026</span>
+      <h1>Del<span class="hero-accent">OS</span><span class="hero-accent2">.</span></h1>
+      <p style="font-size: 28px; line-height: 1.4; max-width: 900px;">
+        A browser operating system for AI agents. Voice in, real apps out.
+        Memory that carries context across every action.
+      </p>
+      <div style="display: flex; gap: 24px; margin-top: 24px;">
+        <div class="url-row"><span class="key">live</span> <span class="val">delrio.vercel.app</span></div>
+        <div class="url-row"><span class="key">repo</span> <span class="val">github.com/vaibhav4046/delos</span></div>
+      </div>
+      <div class="footer"><span>Solo build · Vaibhav Lalwani</span><span>1 / 10</span></div>
+    </section>
+
+    <!-- Slide 2 · Problem -->
+    <section class="slide" data-slide="2">
+      <span class="pill">The Problem</span>
+      <h2>AI tools live in separate tabs and separate memories.</h2>
+      <ul style="max-width: 920px; margin-top: 24px;">
+        <li>ChatGPT, Claude, Perplexity each hold their own context. You cannot ask one what the other remembered.</li>
+        <li>Most agent demos are scripted videos, not live software you can break.</li>
+        <li>Voice assistants book meetings and read weather. They cannot actually build an app.</li>
+        <li>Judges scroll past landing pages. They want to use the thing.</li>
+      </ul>
+      <div class="footer"><span>delrio.vercel.app</span><span>2 / 10</span></div>
+    </section>
+
+    <!-- Slide 3 · Solution -->
+    <section class="slide" data-slide="3">
+      <span class="pill">The Solution</span>
+      <h2>One tab. Five pillars. Real software.</h2>
+      <div class="grid grid-3" style="margin-top: 24px;">
+        <div class="card"><div class="label">Voice</div><h3>Twenty plus intents</h3><p>Build, draft, schedule, recall, race. The agent parses speech, opens the right app, fires the right tool.</p></div>
+        <div class="card"><div class="label">Memory</div><h3>HydraDB graph + vector</h3><p>Every voice store, arena verdict, codegen run, calendar event writes a typed memory. Recall sees them all.</p></div>
+        <div class="card"><div class="label">Arena</div><h3>Five models, one judge</h3><p>Cross vendor race with rubric scoring. Winner persists with an arena tag.</p></div>
+        <div class="card"><div class="label">Codegen</div><h3>VibeCode + DelCode</h3><p>Domain cockpits stream into a live IDE. Six deterministic playbooks plus an LLM fallback path.</p></div>
+        <div class="card"><div class="label">MCP</div><h3>Gmail, Notion, GitHub, GDrive</h3><p>Del Assistant runs autonomous actions. Demo previews in guest mode, real APIs when authorized.</p></div>
+        <div class="card"><div class="label">Shell</div><h3>Browser OS</h3><p>Slim dock, twenty four apps, real window manager. Pixel art, calm hover.</p></div>
+      </div>
+      <div class="footer"><span>delrio.vercel.app/os?guest=1</span><span>3 / 10</span></div>
+    </section>
+
+    <!-- Slide 4 · Live workflow -->
+    <section class="slide" data-slide="4">
+      <span class="pill">Live Workflow</span>
+      <h2>Sixty seconds, five pillars, one tab.</h2>
+      <p>Press the JUDGE DEMO pill in the top bar. A narration card explains every step. Press Escape to cancel.</p>
+      <div class="timeline">
+        <div class="step"><div class="n">01 · 0 to 12s</div><div class="t">Gmail</div><div class="e">Del Assistant drafts an email. Real Gmail when signed in. Demo preview otherwise.</div></div>
+        <div class="step"><div class="n">02 · 12 to 23s</div><div class="t">Notion</div><div class="e">Same chat creates a Notion page titled DelOS Hackathon Demo Recap.</div></div>
+        <div class="step"><div class="n">03 · 23 to 34s</div><div class="t">GitHub</div><div class="e">The assistant lists your live GitHub repositories from the public API.</div></div>
+        <div class="step"><div class="n">04 · 34 to 46s</div><div class="t">VibeCode</div><div class="e">Investor CRM cockpit builds. Files land into DelCode on the right.</div></div>
+        <div class="step"><div class="n">05 · 46 to 60s</div><div class="t">Memory</div><div class="e">Memory Browser opens with recall prefilled. Every step is saved with a source badge.</div></div>
+      </div>
+      <div class="footer"><span>delrio.vercel.app/os?guest=1&amp;demo=judge</span><span>4 / 10</span></div>
+    </section>
+
+    <!-- Slide 5 · Architecture -->
+    <section class="slide" data-slide="5">
+      <span class="pill">Architecture</span>
+      <h2>A small operating layer.</h2>
+      <pre style="font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.5; color: var(--fg); background: var(--surface); padding: 24px; border: 2px solid var(--surface2); white-space: pre-wrap;">
+Browser (Next 16 Turbopack · React 19)
++---------------------------------------------------+
+| Pixel OS shell · Framer Motion window manager     |
+|   Voice Agent · Whisper Large v3 STT              |
+|   VibeCode · split view DelCode preview           |
+|   Arena · SSE streamed cohort race                |
+|   Memory Browser · source tag filtering           |
+|   Del Assistant · MCP autonomous patterns         |
++---------------------------------------------------+
+                       |
+Next API routes (40 plus endpoints)
++---------------------------------------------------+
+|   /api/voice-command · shared parser              |
+|   /api/cohort · SSE arena race + memory write     |
+|   /api/codegen-app-stream · per file SSE          |
+|   /api/memory · HydraDB plus local fallback       |
+|   /api/connectors/{gmail,notion,github,gdrive}    |
++---------------------------------------------------+
+                       |
+HydraDB graph + vector  ·  Multi provider LLM cascade
+(Cerebras > Groq > Mistral > Gemini > NIM > Bytez)
+      </pre>
+      <div class="footer"><span>solo build, weekend</span><span>5 / 10</span></div>
+    </section>
+
+    <!-- Slide 6 · Model strategy -->
+    <section class="slide" data-slide="6">
+      <span class="pill">Model Strategy</span>
+      <h2>Cascade, fall back, never stall.</h2>
+      <div class="grid grid-2" style="margin-top: 24px;">
+        <div class="card"><div class="label">Hot path</div><h3>Mistral Small</h3><p>Cheap and fast for the planner, executor, and critic loop.</p></div>
+        <div class="card"><div class="label">Cohort</div><h3>Groq + Mistral + Gemini</h3><p>Cross vendor variance lets the arena show real disagreement.</p></div>
+        <div class="card"><div class="label">Codegen</div><h3>Cerebras and Groq race</h3><p>First token wins for tight per file deadlines.</p></div>
+        <div class="card"><div class="label">Fallback</div><h3>Deterministic playbooks</h3><p>If every provider misses, six domain playbooks finish the build.</p></div>
+      </div>
+      <p style="margin-top: 16px; color: var(--muted);">Quota tripped? Engage the playbook. Cred expired? Demo preview. Wrong winner in the arena? Rubric rescore.</p>
+      <div class="footer"><span>/api/llm/audit</span><span>6 / 10</span></div>
+    </section>
+
+    <!-- Slide 7 · HydraDB -->
+    <section class="slide" data-slide="7">
+      <span class="pill">HydraDB Differentiator</span>
+      <h2>Memory you can see, with sources.</h2>
+      <p>Every meaningful action writes a typed memory. Recall combines graph traversal with vector similarity.</p>
+      <div class="grid grid-2" style="margin-top: 24px;">
+        <div class="card"><div class="label">voice memory</div><h3>User fact storage</h3><p>"remember that my demo tenant is gastronomy one"</p></div>
+        <div class="card"><div class="label">arena</div><h3>Verdict persistence</h3><p>"Winner: Mistral Large at 1.2s · disagreement 0.18"</p></div>
+        <div class="card"><div class="label">codegen</div><h3>Project recall</h3><p>"Investor CRM (12 files) · domain matched"</p></div>
+        <div class="card"><div class="label">calendar</div><h3>Event memory</h3><p>"Lunch on 2026 06 05 with Andy"</p></div>
+      </div>
+      <p style="margin-top: 16px;">Memory Browser shows badges so you see why every entry exists. The writeGuard blocks noisy metric lines from polluting recall.</p>
+      <div class="footer"><span>delrio.vercel.app/memory</span><span>7 / 10</span></div>
+    </section>
+
+    <!-- Slide 8 · Demo proof -->
+    <section class="slide" data-slide="8">
+      <span class="pill">Live Smoke (curl)</span>
+      <h2>Eleven endpoints, all green.</h2>
+      <pre style="font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.6; color: var(--fg); background: var(--surface); padding: 22px; border: 2px solid var(--surface2);">
+$ /api/health                    10/10 alive
+$ /api/me anon                   no PII leak
+$ /api/llm/audit                 7 models green
+$ voice "schedule lunch next Friday at 1pm"
+                                 title:"lunch"
+$ voice "remind me to call Andy in 30 minutes"
+                                 text:"call Andy"
+$ voice "open browser and search hydration errors"
+                                 payload:"hydration errors"
+$ /api/memory/write drift= tokens= ms=
+                                 400 rejected
+$ /api/memory?q=graph            seeded entries
+$ /api/weather?city=zzzzzz       404 not found
+$ /api/tool web_search "openai docs"
+                                 platform.openai.com top
+$ /api/connectors/gmail/draft    demo preview returned
+      </pre>
+      <p style="margin-top: 8px; color: var(--muted);">Honest disclosures live in submission/qa-report.md.</p>
+      <div class="footer"><span>submission/qa-report.md</span><span>8 / 10</span></div>
+    </section>
+
+    <!-- Slide 9 · Market -->
+    <section class="slide" data-slide="9">
+      <span class="pill">Use Cases</span>
+      <h2>The cockpits already shipped.</h2>
+      <div class="grid grid-3" style="margin-top: 24px;">
+        <div class="card"><div class="label">Fintech</div><h3>Regulatory AML</h3><p>Alert queue, SAR draft, KYC review, sanctions hit.</p></div>
+        <div class="card"><div class="label">Health</div><h3>Clinical Trial</h3><p>Protocol versions, IRB amendments, adverse events.</p></div>
+        <div class="card"><div class="label">GTM</div><h3>Investor CRM</h3><p>Warm intro graph, pipeline kanban, follow up dock.</p></div>
+        <div class="card"><div class="label">Legal</div><h3>Redline Bench</h3><p>Clause inventory, risk flags, counter draft, sign off.</p></div>
+        <div class="card"><div class="label">SRE</div><h3>Ops Incident</h3><p>Sev pills, runbook checklist, status page draft.</p></div>
+        <div class="card"><div class="label">Edu</div><h3>AI Tutor</h3><p>Spaced repetition, rubric scoring, weakness heatmap.</p></div>
+      </div>
+      <div class="footer"><span>each cockpit ships as a domain playbook</span><span>9 / 10</span></div>
+    </section>
+
+    <!-- Slide 10 · Closing -->
+    <section class="slide" data-slide="10">
+      <span class="pill">Closing</span>
+      <h2>Real software, not a video.</h2>
+      <p style="font-size: 22px; line-height: 1.55; max-width: 900px;">
+        DelOS exists today. Open the URL, press the JUDGE DEMO pill, watch
+        five pillars run in sixty seconds. No login. No card. Guest mode is
+        the demo.
+      </p>
+      <ul style="margin-top: 24px; max-width: 800px;">
+        <li>Live: <code>delrio.vercel.app</code></li>
+        <li>Demo: <code>delrio.vercel.app/os?guest=1&amp;demo=judge</code></li>
+        <li>Repo: <code>github.com/vaibhav4046/delos</code></li>
+        <li>Submission docs: <code>/submission</code> folder</li>
+      </ul>
+      <p style="margin-top: 32px; color: var(--muted);">Thanks for reading. Open the tab.</p>
+      <div class="footer"><span>solo build · Vaibhav Lalwani</span><span>10 / 10</span></div>
+    </section>
+  </div>
+
+  <div class="nav">
+    <button id="prev" type="button">prev</button>
+    <button id="next" type="button">next</button>
+  </div>
+
+  <script>
+    const slides = document.querySelectorAll(".slide");
+    let idx = 0;
+    function show(i) {
+      idx = (i + slides.length) % slides.length;
+      slides.forEach((el, j) => el.classList.toggle("active", j === idx));
+    }
+    document.getElementById("prev").addEventListener("click", () => show(idx - 1));
+    document.getElementById("next").addEventListener("click", () => show(idx + 1));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" || e.key === " ") show(idx + 1);
+      if (e.key === "ArrowLeft") show(idx - 1);
+    });
+  </script>
+</body>
+</html>

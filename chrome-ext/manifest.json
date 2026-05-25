@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "DelOS — Agents Under Pressure",
   "short_name": "DelOS",
-  "version": "3.0.0",
-  "description": "Autonomous browser agent · Perplexity/Claude-style in-page overlay, live screenshots, complex multi-step task chaining, follow-up Q&A, cohort racing, cross-device Hydra memory.",
+  "version": "3.1.0",
+  "description": "Unified Mission agent · browser tasks + endless conversation + chain re-plan + Perplexity-style in-page overlay + cohort racing + cross-device Hydra memory. 3 tabs · Mission, Cohort, Memory.",
   "author": "DelOS",
   "minimum_chrome_version": "114",
   "icons": {

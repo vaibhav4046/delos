@@ -10,11 +10,9 @@
   <body>
     <header class="hdr">
       <div class="brand">
-        <!-- EXT-V4-1 · D logo · same asset as the OS favicon (pixel-D, navy
-             on yellow). Source: chrome-ext/icon.svg, mirrors public/icon.svg. -->
         <img src="icon.svg" alt="DelOS" class="brand-logo" width="22" height="22" />
         <span class="brand-name">DelOS</span>
-        <span class="brand-sub">v3.0</span>
+        <span class="brand-sub">v3.1</span>
       </div>
       <div class="hdr-right">
         <span id="conn" class="pill pill-warn" title="connection state · click to recheck">● checking</span>
@@ -22,88 +20,56 @@
       </div>
     </header>
 
-    <!-- EXT-V4-2 · Voice tab REMOVED entirely. Browse covers all action paths.
-         EXT-V4-3 · Memory tab restored · synced cross-device via /api/memory. -->
+    <!-- EXT-V5-1 · 3 tabs only · Mission = unified agent · Cohort + Memory. -->
     <nav class="tabs">
-      <button data-tab="browse" class="tab on">Browse</button>
-      <button data-tab="mission" class="tab">Mission</button>
+      <button data-tab="mission" class="tab on">Mission</button>
       <button data-tab="cohort" class="tab">Cohort</button>
       <button data-tab="memory" class="tab">Memory</button>
     </nav>
 
     <main class="panels">
-      <!-- BROWSE — Perplexity/Claude-style autonomous browser agent (default) -->
-      <section data-panel="browse" class="panel on">
+      <!-- MISSION · unified agent · browser tasks + conversation + chain replan -->
+      <section data-panel="mission" class="panel on">
         <div class="row">
-          <textarea id="browseTask" rows="3" placeholder="Give the agent any complex task — e.g. &quot;research the best 3 budget gaming laptops 2025&quot;, &quot;summarize the top 5 HN front-page items&quot;, &quot;find airbnb under $150 in SF this weekend&quot;, &quot;complete my assignment on this page&quot;…"></textarea>
+          <textarea id="missionTask" rows="3" placeholder="Tell the agent anything — &quot;research top 3 wireless earbuds 2025 and rank&quot;, &quot;summarize this article&quot;, &quot;find airbnb under $150 in SF&quot;, &quot;open hacker news and read top 5&quot;, &quot;fill this form&quot;…"></textarea>
         </div>
         <div class="row tightrow">
-          <label class="check small"><input type="checkbox" id="browseUseTab" checked /> use current tab as context</label>
-          <label class="check small"><input type="checkbox" id="browseAutoNav" checked /> auto-navigate</label>
-          <label class="check small"><input type="checkbox" id="browseScreenshots" checked /> screenshots</label>
-          <label class="check small"><input type="checkbox" id="browseOverlay" checked /> page highlights</label>
-          <label class="check small"><input type="checkbox" id="browseChain" checked /> chain re-plan</label>
+          <label class="check small"><input type="checkbox" id="missionUseTab" checked /> use current tab</label>
+          <label class="check small"><input type="checkbox" id="missionScreenshots" checked /> screenshots</label>
+          <label class="check small"><input type="checkbox" id="missionOverlay" checked /> page highlights</label>
+          <label class="check small"><input type="checkbox" id="missionChain" checked /> chain re-plan</label>
         </div>
         <div class="row">
-          <button id="browseRunBtn" class="primary" style="flex:1">▶ RUN BROWSER AGENT</button>
-          <button id="browseStopBtn" class="danger small">■</button>
+          <button id="missionRunBtn" class="primary" style="flex:1">▶ RUN AGENT</button>
+          <button id="missionStopBtn" class="danger small">■</button>
         </div>
         <div class="row tightrow">
-          <button id="browseReadBtn" class="ghost small" style="flex:1">📖 Read current tab</button>
-          <button id="browseSummarizeBtn" class="ghost small" style="flex:1">📝 Summarize</button>
-          <button id="browseSaveMemBtn" class="ghost small" style="flex:1">★ Save to memory</button>
+          <button id="missionReadBtn" class="ghost small" style="flex:1">📖 Read tab</button>
+          <button id="missionSummarizeBtn" class="ghost small" style="flex:1">📝 Summarize</button>
+          <button id="missionSaveMemBtn" class="ghost small" style="flex:1">★ Save</button>
         </div>
         <div class="hint" style="margin-bottom:8px">
-          Plans multi-step browse · scrolls + clicks + extracts + summarizes.
-          Each step pulses a colored highlight on the target element.
-          Destructive actions need approval.
+          Agent plans + navigates + clicks + extracts + summarizes.
+          Conversation continues below · ask follow-ups indefinitely.
+          Auto-saves runs to Memory (cross-device synced).
         </div>
-        <div id="browseLog" class="log"></div>
-      </section>
-
-      <!-- MISSION -->
-      <section data-panel="mission" class="panel">
-        <div class="row">
-          <textarea id="goal" rows="2" placeholder="give the agent a mission…"></textarea>
-        </div>
-        <div class="row tightrow">
-          <button id="grabTab" class="ghost small">⤓ Use current tab</button>
-          <label class="check small"><input type="checkbox" id="useMcp" checked /> MCP</label>
-        </div>
-        <div class="row chaos">
-          <label><input type="checkbox" data-chaos="tool_flake" /> flake</label>
-          <label><input type="checkbox" data-chaos="tool_outage" /> outage</label>
-          <label><input type="checkbox" data-chaos="context_flood" /> flood</label>
-        </div>
-        <div class="row">
-          <button id="runBtn" class="primary">▶ RUN</button>
-          <button id="stopBtn" class="danger">■ STOP</button>
-        </div>
-        <div id="steerRow" class="row hidden">
-          <input id="steerInput" placeholder="steer running agent…" />
-          <button id="steerBtn" class="warn small">★ STEER</button>
-        </div>
-        <div class="row tightrow">
-          <label class="check small"><input type="checkbox" id="missionScreenshots" checked /> live screenshots</label>
-          <label class="check small"><input type="checkbox" id="missionFollowups" checked /> follow-ups</label>
-        </div>
-        <div class="stats" id="stats"></div>
-        <div id="log" class="log"></div>
-        <div id="followupRow" class="row hidden" style="margin-top:8px">
-          <input id="followupInput" placeholder="ask follow-up — e.g. 'what about pricing?' / 'go deeper'…" style="flex:1" />
-          <button id="followupBtn" class="primary small">★ ASK</button>
+        <div id="missionLog" class="log"></div>
+        <!-- Endless conversation row · always visible · enter sends -->
+        <div id="convoRow" class="row" style="margin-top:8px">
+          <input id="convoInput" placeholder="continue conversation · ask follow-up…" style="flex:1" />
+          <button id="convoBtn" class="primary small">★ ASK</button>
         </div>
       </section>
 
       <!-- COHORT -->
       <section data-panel="cohort" class="panel">
         <div class="row">
-          <textarea id="cohortGoal" rows="2" placeholder="ask all models at once…"></textarea>
+          <textarea id="cohortGoal" rows="2" placeholder="ask all models at once — they race, judge picks winner…"></textarea>
         </div>
         <div class="row tightrow">
           <span class="muted small">members:</span>
           <select id="cohortPreset" class="small">
-            <option value="3groq">3× Groq</option>
+            <option value="3groq">3× Groq (fastest)</option>
             <option value="mixed" selected>Mixed (Groq + Gemini + Mistral)</option>
             <option value="fast">Fast (small models)</option>
             <option value="godmode">★ GOD MODE (5 models + NIM verifier)</option>
@@ -112,10 +78,14 @@
         <div class="row">
           <button id="cohortBtn" class="primary">▶ RUN COHORT</button>
         </div>
+        <div class="hint" style="margin-bottom:6px">
+          Multiple LLMs answer in parallel · disagreement scored · judge picks
+          best + merges. Results auto-save to Memory.
+        </div>
         <div id="cohortResults" class="log"></div>
       </section>
 
-      <!-- MEMORY · EXT-V4-3 · interactive + synced -->
+      <!-- MEMORY · interactive + cross-device synced -->
       <section data-panel="memory" class="panel">
         <div class="row">
           <input id="memQuery" placeholder="search memory…" style="flex:1" />
@@ -128,7 +98,7 @@
         </div>
         <div class="hint" style="margin-bottom:6px">
           Synced cross-device via Hydra · same tenant as <code>delrio.vercel.app/os</code>.
-          Tasks from Browse + Mission auto-save here. Click any entry to copy.
+          Mission + Cohort runs auto-save here · click any row to copy · ✕ to delete.
         </div>
         <div id="memLog" class="log"></div>
       </section>
@@ -158,7 +128,7 @@
           <label>Critic model
             <select id="cfgCritic"></select>
           </label>
-          <div class="hint">MCP servers + shared settings auto-sync from <code>delrio.vercel.app</code> when you open the OS app there.</div>
+          <div class="hint">MCP servers + shared settings auto-sync from <code>delrio.vercel.app</code>.</div>
           <button id="cfgSave" class="primary">SAVE</button>
         </div>
       </div>

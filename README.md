@@ -1,11 +1,64 @@
-# DelOS — agents that flow under pressure
+# DelOS
 
-Built for **Agents Under Pressure** (HydraDB 48h hackathon, May 2026).
+Browser operating system for AI agents. Built for the Agents Under
+Pressure HydraDB hackathon, May 2026.
 
-**Live:** https://delrio.vercel.app
-**Demo video:** see `outputs/LOOM_SCRIPT.md` for the 4–5 min walkthrough
-**Hackathon submission:** see `outputs/HACKATHON_FORM.md`
-**Deploy your own:** see `outputs/DEPLOY.md`
+**Live URL:** https://delrio.vercel.app
+**Open the OS:** https://delrio.vercel.app/os?guest=1
+**Sixty second judge demo:** https://delrio.vercel.app/os?guest=1&demo=judge
+**Repository:** https://github.com/vaibhav4046/delos
+**Five minute Loom script:** [`submission/loom-script-5min.md`](submission/loom-script-5min.md)
+**Pitch deck:** [`submission/pitch-deck.md`](submission/pitch-deck.md)
+**QA report:** [`submission/qa-report.md`](submission/qa-report.md)
+**Demo checklist:** [`submission/demo-checklist.md`](submission/demo-checklist.md)
+**Hackathon form draft:** [`submission/aivalley-form-draft.md`](submission/aivalley-form-draft.md)
+**Win path status:** [`submission/WIN_PATH_STATUS.md`](submission/WIN_PATH_STATUS.md)
+
+## What runs in one tab
+
+| Pillar | Where | What you see |
+|---|---|---|
+| Memory | Memory Browser, Memory Dashboard | Cross action recall with typed source badges. Voice memory, codegen, arena, calendar, schedule all write to the same store. |
+| Voice | Voice Agent, Del Assistant | Whisper for speech to text. Twenty plus parsed intents. Build apps, draft Gmail, create Notion pages, set reminders, schedule actions, recall memory, open browser, race models. |
+| Codegen | VibeCode and DelCode | Domain cockpits for Investor CRM, Regulatory AML, Clinical Trial, Legal Redline, Ops Incident, AI Tutor. SSE per file streaming into a real IDE pane. Export zip or single file HTML. |
+| Arena | Arena page | Five models from three providers race a prompt. Judge model scores them. Winner persists to memory with an arena tag. |
+| MCP | Del Assistant | Gmail draft, Notion create page, GitHub list repos, GDrive list files. Demo mode returns simulated previews when no OAuth is configured. |
+
+## How the judge demo works
+
+Press the JUDGE DEMO pill in the top bar of the OS or click the Demo
+link on the homepage. A narration card appears above the dock. It
+shows the step number, a short eyebrow label, a one sentence
+explanation of what just fired, and a live countdown. The whole script
+fits in sixty seconds. Press Escape to cancel any time.
+
+Five steps:
+
+1. **Gmail.** Del Assistant writes a real Gmail draft. Demo preview when
+   no Google account is connected.
+2. **Notion.** Same chat creates a Notion page titled DelOS Hackathon
+   Demo Recap.
+3. **GitHub.** The assistant lists my actual GitHub repositories via
+   the public GitHub API.
+4. **VibeCode.** The Investor CRM cockpit builds live. Files land into
+   DelCode on the right.
+5. **Memory.** Memory Browser opens with the recall already prefilled.
+   Every previous step is visible with its source badge.
+
+## Architecture in plain words
+
+The browser holds a Next sixteen app with React nineteen. The shell is
+a Framer Motion window manager wrapping pixel art panels. Forty plus
+API routes power the OS. HydraDB stores graph plus vector memory. A
+multi provider LLM cascade (Cerebras, Groq, Mistral, Gemini, NIM,
+Bytez) keeps responses moving when any one quota trips.
+
+## Tech stack
+
+Next sixteen with Turbopack. React nineteen. TypeScript. Tailwind v4.
+Framer Motion. Lucide icons. Zod. HydraDB SDK. Vercel AI SDK v6.
+JSZip for project export. ElevenLabs and Whisper for voice. Cockatiel
+for retries.
 
 Multi-agent orchestration that survives real-world chaos — and a browser-OS where agents *build the apps live*. Four pillars, retro-arcade UI, one job: keep agents moving when tools fail, goals shift, context floods, and the user interrupts.
 
