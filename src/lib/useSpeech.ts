@@ -505,6 +505,8 @@ export type VoiceAction = {
     | "create_event"
     | "parse_pdf"
     | "open_gdrive"
+    | "store_memory"
+    | "clear_memory"
     | "compound"
     | "unknown";
   app?: string;

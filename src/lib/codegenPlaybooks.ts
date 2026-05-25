@@ -42,6 +42,11 @@ type DomainSpec = {
   label: string;
   triggers: RegExp;
   requiredTerms: string[];
+  // F03 · antiTerms · phrases that should DEMOTE this domain when present
+  // in the prompt. Used by the ranked scorer to break ties when a verbose
+  // prompt mentions multiple domain keywords. e.g. an Investor CRM prompt
+  // that includes "SLA" should not get pulled to legal-contracts.
+  antiTerms?: string[];
 };
 
 // Order matters · investor-crm catches "investor pipeline" before generic
@@ -62,8 +67,9 @@ const DOMAIN_SPECS: DomainSpec[] = [
   {
     key: "legal-contracts",
     label: "Legal Contracts",
-    triggers: /\b(legal|contract|redline|clause|attorney|counsel|obligation|nda|msa|sla|signature|paralegal|fallback\s+ladder|indemnity|governing\s+law|approval\s+chain|contract\s+review)\b/i,
+    triggers: /\b(legal|contract|redline|clause|attorney|counsel|obligation|nda|msa|signature|paralegal|fallback\s+ladder|indemnity|governing\s+law|approval\s+chain|contract\s+review)\b/i,
     requiredTerms: ["clause", "redline", "obligation", "signature", "party", "term", "renewal", "counsel"],
+    antiTerms: ["investor crm", "commitment score", "warm intro", "dilution", "portfolio board", "deal flow"],
   },
   {
     key: "ai-tutor",
@@ -82,6 +88,7 @@ const DOMAIN_SPECS: DomainSpec[] = [
     label: "Investor CRM",
     triggers: /\b(investor|venture|vc|lp|limited\s+partner|capital|fund|warm\s+intro|deal\s+flow|portfolio|commitment|term\s+sheet|dilution|check\s+size|vintage|mandate\s+alignment|cap\s+table)\b/i,
     requiredTerms: ["commitment", "score", "warm intro", "partner", "follow-up", "risk", "diligence", "portfolio"],
+    antiTerms: ["clause library", "redline review", "indemnity", "signature queue", "counsel notes"],
   },
   {
     key: "generic-dashboard",
@@ -91,11 +98,37 @@ const DOMAIN_SPECS: DomainSpec[] = [
   },
 ];
 
-export function detectDomain(prompt: string): DomainSpec | null {
-  for (const spec of DOMAIN_SPECS) {
-    if (spec.triggers.test(prompt)) return spec;
+// F03 · ranked playbook scorer replaces the first-match-wins loop. Each
+// domain gets a score from trigger hits + required-term overlap minus
+// antiTerm penalties. Highest score wins. Below MIN_SCORE → null.
+//
+// Was a P0 misroute: verbose "Investor CRM with ... partner SLA ..." matched
+// the legal-contracts `sla` trigger and got routed to ClauseLibrary/Redline.
+// Now investor terms outweigh the single SLA hit + legal antiTerm demotion
+// keeps it on investor-crm.
+const MIN_SCORE = 1;
+function scoreDomain(prompt: string, spec: DomainSpec): number {
+  const lower = prompt.toLowerCase();
+  let score = 0;
+  // Trigger regex hits weighted heavily
+  const triggerMatches = lower.match(new RegExp(spec.triggers.source, "gi"));
+  if (triggerMatches) score += triggerMatches.length * 4;
+  // Required-term overlap · each hit + 1
+  for (const term of spec.requiredTerms) {
+    if (lower.includes(term.toLowerCase())) score += 1;
   }
-  return null;
+  // antiTerm demotion · each hit -5 (strong signal that the prompt belongs elsewhere)
+  for (const anti of spec.antiTerms ?? []) {
+    if (lower.includes(anti.toLowerCase())) score -= 5;
+  }
+  return score;
+}
+
+export function detectDomain(prompt: string): DomainSpec | null {
+  const ranked = DOMAIN_SPECS.map((spec) => ({ spec, score: scoreDomain(prompt, spec) }));
+  ranked.sort((a, b) => b.score - a.score);
+  const top = ranked[0];
+  return top.score >= MIN_SCORE ? top.spec : null;
 }
 
 function slugify(prompt: string, fallback: string): string {

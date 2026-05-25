@@ -341,6 +341,46 @@ export function VoiceApp() {
         } catch {}
         break;
       }
+      case "store_memory": {
+        // M01 · "remember that ..." → actual memory write
+        try {
+          const r = await fetch("/api/memory/write", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: `User fact · ${payload}`, tags: ["user-fact", "voice"] }),
+          });
+          window.dispatchEvent(new CustomEvent("toast", {
+            detail: { text: r.ok ? `Saved · ${payload.slice(0, 40)}` : "Memory write failed", tone: r.ok ? "ok" : "bad" }
+          }));
+        } catch {
+          window.dispatchEvent(new CustomEvent("toast", { detail: { text: "Memory write failed", tone: "bad" } }));
+        }
+        break;
+      }
+      case "clear_memory": {
+        // F08 · DESTRUCTIVE · require explicit user confirmation via window.confirm.
+        // Voice agent must not bypass the approval gate.
+        const ok = typeof window !== "undefined" && window.confirm(
+          "DESTRUCTIVE · clear ALL memories for this tenant? This cannot be undone.",
+        );
+        if (!ok) {
+          window.dispatchEvent(new CustomEvent("toast", { detail: { text: "Cancelled · memory clear", tone: "info" } }));
+          break;
+        }
+        try {
+          const r = await fetch("/api/memory/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ all: true }),
+          });
+          window.dispatchEvent(new CustomEvent("toast", {
+            detail: { text: r.ok ? "Memory cleared" : "Clear failed", tone: r.ok ? "ok" : "bad" }
+          }));
+        } catch {
+          window.dispatchEvent(new CustomEvent("toast", { detail: { text: "Clear failed", tone: "bad" } }));
+        }
+        break;
+      }
       case "parse_pdf":
       case "draft_email":
       case "read_email":

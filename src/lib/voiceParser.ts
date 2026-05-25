@@ -29,6 +29,8 @@ export type VoiceAction = {
     | "create_event"    // calendar event from free-text "tomorrow at 4pm"
     | "parse_pdf"       // run pdf-parse on a file
     | "open_gdrive"     // list recent gdrive files
+    | "store_memory"    // "remember that ..." → write to memory
+    | "clear_memory"    // "clear my memory" → DESTRUCTIVE, needs approval
     | "compound"
     | "unknown";
   app?: string;
@@ -395,9 +397,35 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
     };
   }
 
-  // ─── 6. Recall memory ───────────────────────────────────────────────────
+  // ─── 6a. Store memory (M01) ─────────────────────────────────────────────
+  // "remember that X is Y", "note that X", "save X to memory" → STORE.
+  // Must run BEFORE recall pattern so "remember that" doesn't get swallowed
+  // as a recall verb. Verified Q5 round 4: was misrouting to recall_memory.
+  const storeMatch = lower.match(
+    /^(?:remember|note|save|jot\s+down|log)\s+(?:that\s+|to\s+)?(.+)$/i,
+  );
+  const looksLikeStore = storeMatch && /^(?:remember\s+that|note\s+that|save\s+that|jot\s+down|log\s+(?:that|the))/i.test(lower);
+  if (storeMatch && looksLikeStore) {
+    const text = storeMatch[1].trim();
+    return {
+      intent: "store_memory",
+      payload: text,
+      reply: `Saved · ${text.slice(0, 40)}${text.length > 40 ? "…" : ""}.`,
+    };
+  }
+
+  // ─── 6b. Clear memory (F08) · DESTRUCTIVE — needs approval ──────────────
+  if (/^(?:clear|wipe|delete|reset|forget)\s+(?:all\s+)?(?:my\s+)?(?:entire\s+)?(?:memor(?:y|ies)|memory\s+banks?)\b/i.test(lower)) {
+    return {
+      intent: "clear_memory",
+      payload: "all",
+      reply: "Confirm: clear entire memory? This is destructive.",
+    };
+  }
+
+  // ─── 6c. Recall memory ──────────────────────────────────────────────────
   const recall = lower.match(
-    /^(?:recall|remember|what\s+(?:was|did|were)|show\s+me\s+my|find\s+my)\s+(.{2,300})$/i,
+    /^(?:recall|what\s+(?:was|did|were|is\s+my)|show\s+me\s+my|find\s+my|look\s+up\s+my|do\s+you\s+remember|search\s+memory\s+for)\s+(.{2,300})$/i,
   );
   if (recall) {
     return {

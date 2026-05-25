@@ -102,11 +102,27 @@ export async function POST(req: NextRequest) {
   // F04 · executions[] — per-chunk parser result so the client knows what
   // each intent resolved to and whether it dispatched. Client-side VoiceApp
   // executor still fires the OS event for each.
+  // F08 · destructive intents (clear_memory, delete_*, wipe_*) marked
+  // awaiting_approval so the client modal can gate them.
+  const DESTRUCTIVE = new Set(["clear_memory", "delete_event", "wipe_drafts", "delete_repo"]);
+  const EXTERNAL = new Set(["send_email", "github_repo", "github_issue", "gdrive_share"]);
   const executions = intents.map((c) => {
     const parsedSub = parseVoiceLocal(c.text);
+    const kind = parsedSub?.intent ?? "unknown";
+    let tier: "read" | "reversible" | "external" | "destructive" = "reversible";
+    if (DESTRUCTIVE.has(kind)) tier = "destructive";
+    else if (EXTERNAL.has(kind)) tier = "external";
+    else if (["recall_memory", "read_email", "open_gdrive", "open_app"].includes(kind)) tier = "read";
+    const needsApproval = tier === "destructive" || tier === "external";
     return {
       intent: c,
-      status: parsedSub ? ("fulfilled" as const) : ("rejected" as const),
+      kind,
+      tier,
+      status: needsApproval
+        ? ("awaiting_approval" as const)
+        : parsedSub
+          ? ("fulfilled" as const)
+          : ("rejected" as const),
       resolved: parsedSub ?? null,
       err: parsedSub ? undefined : "no_local_match",
     };

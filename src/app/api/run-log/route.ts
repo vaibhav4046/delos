@@ -4,11 +4,12 @@ import { getRun, listRuns } from "@/lib/runLog";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  const runId = req.nextUrl.searchParams.get("runId");
+  // F14 · accept both `runId` (canonical) and `id` (regression script convention)
+  const runId = req.nextUrl.searchParams.get("runId") ?? req.nextUrl.searchParams.get("id");
   if (runId) {
     const rec = getRun(runId);
-    if (!rec) return Response.json({ ok: false, error: "not_found" }, { status: 404 });
-    return Response.json({ ok: true, run: rec });
+    if (!rec) return Response.json({ ok: false, error: "not_found", id: runId }, { status: 404 });
+    return Response.json({ ok: true, run: rec, log: rec });
   }
   // List recent
   const limit = Math.max(1, Math.min(200, Number(req.nextUrl.searchParams.get("limit") ?? "50")));

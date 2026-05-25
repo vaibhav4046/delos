@@ -83,6 +83,19 @@ export async function POST(req: NextRequest) {
     let spec = await withModels(overrides, () =>
       buildAppFromPrompt(parsed.data.prompt, previousSpec ? { previousSpec: previousSpec as never } : undefined),
     );
+    // F15 · sanitize spec.name · strip code-fences, HTML tags, cap 80 chars.
+    // Was a P0 leak · "```javascript fetch(...)``` Build a calculator" landed
+    // verbatim as the rendered window title.
+    if (spec && typeof (spec as { name?: string }).name === "string") {
+      const raw = (spec as { name: string }).name;
+      const cleaned = raw
+        .replace(/```[\s\S]*?```/g, " ")
+        .replace(/<[^>]+>/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 80) || "Generated App";
+      (spec as { name: string }).name = cleaned;
+    }
     // F05 · domain playbook coverage check + repair. If the prompt matches a
     // known domain (investor CRM, regulatory, clinical, etc.) ensure the
     // domain's required terms appear as visible labels in the spec. Below

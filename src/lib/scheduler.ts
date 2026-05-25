@@ -169,9 +169,15 @@ export async function defaultDispatcher(
       });
       return { ok: r.ok, note: r.ok ? "cohort dispatched" : `cohort ${r.status}` };
     }
-    case "notify":
+    case "notify": {
+      const r = await fetch(url("/api/notify"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...action.payload, tenantId: action.tenantId }),
+      });
+      return { ok: r.ok, note: r.ok ? "notification queued" : `notify ${r.status}` };
+    }
     default:
-      // Pure notification · the executor route handles emitting the SSE event.
       return { ok: true, note: "queued" };
   }
 }

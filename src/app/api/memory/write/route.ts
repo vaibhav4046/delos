@@ -4,10 +4,30 @@
 // with the matched pattern reason so callers can debug.
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { safeAddMemory, ensureTenant } from "@/lib/hydra";
+import { safeAddMemory, ensureTenant, getLocalFallback } from "@/lib/hydra";
 import { zodErr, resolveTenant } from "@/lib/apiAuth";
 import { sanitizeMemoryText, assertSafeTags, sanitizeTags } from "@/lib/sanitize";
 import { guardMemoryWrite } from "@/lib/memory/writeGuard";
+
+// M05 · cheap cosine over tokenized text for dedup. Returns existing memory
+// id when similarity ≥ 0.95, otherwise null.
+function findDuplicate(tenantId: string, text: string): string | null {
+  const tokenize = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t) => t.length >= 2);
+  const target = new Set(tokenize(text));
+  if (target.size === 0) return null;
+  const existing = getLocalFallback(tenantId);
+  for (const m of existing) {
+    if (m.text === text) return m.id;
+    const other = new Set(tokenize(m.text));
+    let overlap = 0;
+    for (const t of target) if (other.has(t)) overlap++;
+    const union = target.size + other.size - overlap;
+    const jaccard = union > 0 ? overlap / union : 0;
+    if (jaccard >= 0.92) return m.id;
+  }
+  return null;
+}
 
 export const runtime = "nodejs";
 
@@ -39,6 +59,12 @@ export async function POST(req: NextRequest) {
   await ensureTenant(tenantId);
   const safeText = sanitizeMemoryText(text);
   const safeTags = sanitizeTags(tags);
+  // M05 · dedupe · skip the write when an existing memory is ≥92% Jaccard similar.
+  // Returns the existing id so the client knows the write was acknowledged.
+  const dupId = findDuplicate(tenantId, safeText);
+  if (dupId) {
+    return Response.json({ ok: true, tenantId, deduped: true, existingId: dupId });
+  }
   await safeAddMemory({
     tenantId,
     text: safeText,

@@ -24,7 +24,12 @@ const SEED = [
 ];
 
 async function autoSeedIfEmpty(tenantId: string) {
-  if (/^(qa|test|judge|hack|hackathon)_/i.test(tenantId)) return;
+  // M03 · only auto-seed demo_ tenants. Real user tenants must stay clean —
+  // seed pollution was bleeding "tenant=delrio_demo prefers concise answers"
+  // into every recall result. Production users now start with an empty
+  // memory tab; they can run /api/memory/seed { tenantId: 'demo_xxx' }
+  // explicitly when they want the canned dataset.
+  if (!/^demo_/i.test(tenantId)) return;
   if (G.__delrioSeededTenants?.has(tenantId)) return;
   G.__delrioSeededTenants?.add(tenantId);
   if (getLocalFallback(tenantId).length > 0) return;

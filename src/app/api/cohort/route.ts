@@ -5,6 +5,7 @@ import { resolveModel, withModels, type ModelKey } from "@/lib/llm";
 import { runQuickAgent } from "@/lib/agents/quick";
 import { generateJson } from "@/lib/agents/jsonGen";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
+import { isNimEnabled, nimChat, NIM_MODELS } from "@/lib/llm/providers/nim";
 
 import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
@@ -73,7 +74,21 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return zodErr(parsed.error);
   }
-  const { goal, members } = parsed.data;
+  const { goal } = parsed.data;
+  // F16 · godMode adds 2× NIM rows + spawns a verifier pass at temp 0.
+  // Honor ?godMode=1 query param.
+  const url = new URL(req.url);
+  const isGodMode = url.searchParams.get("godMode") === "1" && isNimEnabled();
+  const members: string[] = isGodMode
+    ? [
+        "groq:openai/gpt-oss-120b",
+        "groq:meta-llama/llama-4-maverick-17b-128e-instruct",
+        "mistral:mistral-large-latest",
+        "google:gemini-2.5-pro",
+        `nim:${NIM_MODELS.llama33_70b}`,
+        `nim:${NIM_MODELS.nemotronSuper49b}`,
+      ]
+    : (parsed.data.members as string[]);
   const judgeKey = parsed.data.judge ?? ("mistral:mistral-large-latest" as ModelKey);
 
   const stream = new ReadableStream({
@@ -88,8 +103,29 @@ export async function POST(req: NextRequest) {
         }
 
         const settled = await Promise.allSettled(
-          members.map((m) =>
-            withModels({ executor: m }, async () => {
+          members.map((m) => {
+            // F16 · NIM branch · "nim:nvidia/..." routes to the NIM provider directly.
+            if (m.startsWith("nim:")) {
+              return (async () => {
+                const t0 = Date.now();
+                const model = m.slice(4);
+                const out = await nimChat({
+                  model,
+                  messages: [
+                    {
+                      role: "system",
+                      content:
+                        "You are a focused expert. Answer the question directly with 2-6 sentences. No filler. If you do not know, say so explicitly rather than guessing.",
+                    },
+                    { role: "user", content: goal },
+                  ],
+                  temperature: 0.3,
+                  max_tokens: 500,
+                });
+                return { text: out.text, ms: Date.now() - t0 };
+              })();
+            }
+            return withModels({ executor: m as ModelKey }, async () => {
               const t0 = Date.now();
               const text = await runQuickAgent({
                 prompt: goal,
@@ -97,8 +133,8 @@ export async function POST(req: NextRequest) {
                   "You are a focused expert. Answer the question directly with 2-6 sentences. No filler.",
               });
               return { text, ms: Date.now() - t0 };
-            }),
-          ),
+            });
+          }),
         );
 
         const answers: Array<{ index: number; model: string; text: string; ms: number; ok: boolean; error?: string }> = [];
@@ -114,6 +150,40 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // F18 · cohort_disagreement · bag-of-tokens cosine across answers.
+        // Higher = models disagree more. Helps the UI surface a "needs cite"
+        // hint when the cohort is divided.
+        const tokenize = (s: string) =>
+          s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t) => t.length >= 3);
+        const okTexts = answers.filter((a) => a.ok && a.text).map((a) => a.text);
+        let disagreement = 0;
+        const pairs: Array<{ a: number; b: number; sim: number }> = [];
+        if (okTexts.length >= 2) {
+          const vecs = okTexts.map((t) => {
+            const m = new Map<string, number>();
+            for (const tk of tokenize(t)) m.set(tk, (m.get(tk) ?? 0) + 1);
+            return m;
+          });
+          const cos = (a: Map<string, number>, b: Map<string, number>) => {
+            let dot = 0, na = 0, nb = 0;
+            for (const [k, v] of a) { na += v * v; if (b.has(k)) dot += v * (b.get(k) ?? 0); }
+            for (const [, v] of b) nb += v * v;
+            return dot / Math.max(1e-9, Math.sqrt(na * nb));
+          };
+          let totalSim = 0;
+          let count = 0;
+          for (let i = 0; i < vecs.length; i++) {
+            for (let k = i + 1; k < vecs.length; k++) {
+              const sim = cos(vecs[i], vecs[k]);
+              pairs.push({ a: i, b: k, sim });
+              totalSim += sim;
+              count++;
+            }
+          }
+          const avgSim = count > 0 ? totalSim / count : 1;
+          disagreement = 1 - avgSim;
+        }
+        send({ t: "cohort_disagreement", score: disagreement, pairs, at: Date.now() });
         send({ t: "cohort_judge_start", at: Date.now() });
         // Latency-aware scoring: bake an explicit instruction into the judge
         // prompt so a slow Groq answer doesn't auto-beat a fast Mistral one
