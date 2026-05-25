@@ -66,10 +66,15 @@ export async function GET(req: NextRequest) {
   // sweep query so the dashboard never renders empty after auto-seed.
   const localAll = getLocalFallback(tenantId);
   let local = q.trim() ? recallLocal(q, localAll, topK) : [];
-  if (local.length === 0 && localAll.length > 0) {
+  // P0 · chronological fallback only fires for EMPTY queries (dashboard
+  // "load all") or single-token queries. Was firing for any zero-score
+  // recall, which surfaced unrelated entries for negative-match queries
+  // (e.g. `apple banana XYZ` returned `favorite_color = electric blue`).
+  const qTokenCount = q.trim().split(/\s+/).filter(Boolean).length;
+  if (local.length === 0 && localAll.length > 0 && qTokenCount <= 1) {
     local = localAll.slice(-topK).reverse();
   }
-  if (hits.length === 0 && local.length === 0) {
+  if (hits.length === 0 && local.length === 0 && qTokenCount <= 1) {
     // Sweep Hydra with broad terms to surface SOMETHING for fresh
     // tenants whose lambda doesn't have localFallback populated.
     hits = await safeRecall({ tenantId, query: "run research user", topK });
@@ -94,7 +99,9 @@ export async function POST(req: NextRequest) {
   let hits = await safeRecall({ tenantId, query: q, topK });
   const localAll = getLocalFallback(tenantId);
   let local = q.trim() ? recallLocal(q, localAll, topK) : [];
-  if (local.length === 0 && localAll.length > 0) {
+  // P0 · same guard as GET · only chronological-fallback for empty/single-token queries.
+  const qTokenCountPost = q.trim().split(/\s+/).filter(Boolean).length;
+  if (local.length === 0 && localAll.length > 0 && qTokenCountPost <= 1) {
     local = localAll.slice(-topK).reverse();
   }
   if (hits.length === 0 && local.length === 0) {
