@@ -30,9 +30,18 @@ export function CounterStrip() {
   // paint → React error #418. Start with ZERO on both sides, hydrate in
   // an effect that only runs after mount.
   const [c, setC] = useState<Counters>(ZERO);
+  // Skeleton flag · brand QA P0-08 demands "no-zero first paint". Until
+  // we have either (a) a non-zero localStorage snapshot or (b) the first
+  // /api/stats response, render dotted placeholders (`· · · AG`) so the
+  // first thing judges see is never four sad zeros.
+  const [seeded, setSeeded] = useState<boolean>(false);
 
   useEffect(() => {
-    setC(loadFromStorage());
+    const initial = loadFromStorage();
+    setC(initial);
+    if (initial.agents > 0 || initial.requests > 0 || initial.tokens > 0 || initial.usd > 0) {
+      setSeeded(true);
+    }
     function onInc(e: Event) {
       const d = (e as CustomEvent).detail as Partial<Counters>;
       setC((prev) => {
@@ -45,6 +54,7 @@ export function CounterStrip() {
         try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch {}
         return next;
       });
+      setSeeded(true);
     }
     window.addEventListener("delos-counters", onInc as EventListener);
     return () => window.removeEventListener("delos-counters", onInc as EventListener);
@@ -57,10 +67,19 @@ export function CounterStrip() {
       try {
         const r = await fetch("/api/stats");
         const j = (await r.json()) as { runs_today?: number };
-        if (!alive || typeof j.runs_today !== "number") return;
+        if (!alive) return;
+        // First response always flips skeleton off even if the number is
+        // zero — at that point we know the API succeeded, so the dots
+        // would mislead more than the real value.
+        setSeeded(true);
+        if (typeof j.runs_today !== "number") return;
         // Don't overwrite local — just nudge if zero
         setC((prev) => prev.agents === 0 && j.runs_today! > 0 ? { ...prev, agents: j.runs_today! } : prev);
-      } catch {}
+      } catch {
+        // Even on failure we drop the skeleton after the first attempt so
+        // the strip doesn't dot forever if /api/stats is wedged.
+        if (alive) setSeeded(true);
+      }
     }
     pull();
     // 60s — was 12s, which combined with LiveMetricsLine's 30s tick and
@@ -82,28 +101,41 @@ export function CounterStrip() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch {}
   }
 
+  // Brand QA P0-08 · render dotted skeleton on the very first paint so
+  // judges never see four sad zeros. Real numbers fade in as soon as
+  // events tick or /api/stats answers (success or failure).
+  const skeletonDots = "· · ·";
+  const dim = seeded ? "var(--accent)" : "var(--muted)";
+  const display = {
+    agents: seeded ? num(c.agents) : skeletonDots,
+    requests: seeded ? num(c.requests) : skeletonDots,
+    tokens: seeded ? num(c.tokens) : skeletonDots,
+    usd: seeded ? usd : skeletonDots,
+  };
+
   return (
     <div
       data-counter-strip
+      data-seeded={seeded ? "1" : "0"}
       className="hidden md:inline-flex items-center gap-2 font-mono text-[10px] pill pill-muted relative counter-strip"
-      title="agents · requests · tokens · cost (this session) — double-click to reset"
+      title={seeded ? "agents · requests · tokens · cost (this session) — double-click to reset" : "waiting for first stats response…"}
       onDoubleClick={reset}
-      style={{ fontSize: 10, cursor: "pointer" }}
+      style={{ fontSize: 10, cursor: "pointer", opacity: seeded ? 1 : 0.78 }}
     >
-      <span data-counter-strip-ag key={`ag-${c.agents}`} className={c.agents > 0 ? "counter-pulse" : ""}>
-        <span style={{ color: "var(--accent)" }}>{num(c.agents)}</span> ag
+      <span data-counter-strip-ag key={`ag-${c.agents}-${seeded}`} className={seeded && c.agents > 0 ? "counter-pulse" : ""}>
+        <span style={{ color: dim }}>{display.agents}</span> ag
       </span>
       <span style={{ color: "var(--muted)" }}>·</span>
-      <span data-counter-strip-req key={`req-${c.requests}`} className={c.requests > 0 ? "counter-pulse" : ""}>
-        <span style={{ color: "var(--accent)" }}>{num(c.requests)}</span> req
+      <span data-counter-strip-req key={`req-${c.requests}-${seeded}`} className={seeded && c.requests > 0 ? "counter-pulse" : ""}>
+        <span style={{ color: dim }}>{display.requests}</span> req
       </span>
       <span style={{ color: "var(--muted)" }}>·</span>
-      <span data-counter-strip-tok key={`tok-${c.tokens}`} className={c.tokens > 0 ? "counter-pulse" : ""}>
-        <span style={{ color: "var(--accent)" }}>{num(c.tokens)}</span> tok
+      <span data-counter-strip-tok key={`tok-${c.tokens}-${seeded}`} className={seeded && c.tokens > 0 ? "counter-pulse" : ""}>
+        <span style={{ color: dim }}>{display.tokens}</span> tok
       </span>
       <span style={{ color: "var(--muted)" }}>·</span>
-      <span data-cost-meter data-counter-strip-cost key={`cost-${c.usd}`} className={c.usd > 0 ? "counter-pulse" : ""} style={{ color: pct > 80 ? "var(--warn)" : "var(--success)" }}>
-        {usd}
+      <span data-cost-meter data-counter-strip-cost key={`cost-${c.usd}-${seeded}`} className={seeded && c.usd > 0 ? "counter-pulse" : ""} style={{ color: !seeded ? "var(--muted)" : (pct > 80 ? "var(--warn)" : "var(--success)") }}>
+        {display.usd}
       </span>
       <progress
         data-counter-strip-budget

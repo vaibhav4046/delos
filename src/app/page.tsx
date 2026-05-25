@@ -6,7 +6,9 @@ import { LiveMetricsLine } from "@/components/LiveMetricsLine";
 import { getSiteStats, type SiteStats } from "@/lib/stats";
 
 // Landing reads counts from the same source /api/stats serves so numbers
-// never drift between "48h · 9 LLMs · 23 apps" and the actual app surface.
+// never drift between "48h · 7 LLMs · 23 apps" and the actual app surface.
+// MODEL_CATALOG.length is the canonical LLM count (P0-10 single source of
+// truth) — bump pricing teaser + OG/Twitter cards when adding providers.
 export const revalidate = 60;
 
 const pillars = [
@@ -499,7 +501,7 @@ function Stack() {
 
 function PricingTeaser() {
   const tiers = [
-    { name: "Free", price: "$0", tag: "Hackathon", lines: ["All 4 pillars", "Bundled MCP", "Voice agents", "9 LLMs", "PWA + extensions", "Self-host"] },
+    { name: "Free", price: "$0", tag: "Hackathon", lines: ["All 4 pillars", "Bundled MCP", "Voice agents", "7 LLMs", "PWA + extensions", "Self-host"] },
     { name: "Pro", price: "$19", tag: "per month", featured: true, lines: ["Everything in Free", "Hosted HydraDB", "ElevenLabs key passthrough", "Priority Groq quota", "Email support", "Custom domain"] },
     { name: "Enterprise", price: "Custom", tag: "Contact", lines: ["Everything in Pro", "SSO + audit logs", "Private MCP fleet", "SLA", "On-prem Tauri", "Dedicated success"] },
   ];

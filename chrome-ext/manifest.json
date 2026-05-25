@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "DelOS — Agents Under Pressure",
   "short_name": "DelOS",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Autonomous voice + browser agent. Mic pre-flight permission, Perplexity-style task runner, analyze tab, multi-step browse, cohort racing + memory.",
   "author": "DelOS",
   "minimum_chrome_version": "114",

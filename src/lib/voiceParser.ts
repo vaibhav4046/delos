@@ -284,16 +284,40 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
     const appKey = compoundMatch[2].trim().toLowerCase().replace(/\s+/g, "");
     const app = APP_ALIASES[appKey] ?? appKey;
     const tail = compoundMatch[3].trim();
+    // Short-circuit · "open browser and search X" / "open browser show me X"
+    // is one intent (open browser with search payload), not a compound.
+    // Was a QA-found "browserand" / empty-app glue bug — the tail recursion
+    // produced an empty open_app because PAYLOAD_VERB_RE ate the body.
+    const browserishApps = new Set(["browser", "perplexity", "search"]);
+    if (browserishApps.has(app)) {
+      const browserSearch = tail.match(/^(?:and\s+)?(?:search|find|show\s+me|go\s+to|look\s+up|google)\s+(?:for\s+|me\s+)?(.{2,200})$/i);
+      if (browserSearch) {
+        const q = browserSearch[1].trim().replace(/[.!?]+$/, "");
+        return {
+          intent: "open_app",
+          app: "browser",
+          payload: q,
+          reply: `Searching ${q.length > 32 ? q.slice(0, 32) + "…" : q} in the browser.`,
+        };
+      }
+    }
     const tailAction = parseVoiceLocal(tail);
     if (tailAction) {
-      return {
-        intent: "compound",
-        reply: `Opening ${app}, then ${tailAction.reply.toLowerCase().replace(/\.$/, "")}.`,
-        chain: [
-          { intent: "open_app", app, payload: "" },
-          { intent: tailAction.intent, app: tailAction.app, payload: tailAction.payload },
-        ],
-      };
+      // Reject degenerate tail · empty app or unknown intent. Otherwise the
+      // chain ends up with `{open_app, app:""}` which lands nowhere and
+      // confuses the executor.
+      const tailValid = tailAction.intent !== "unknown" &&
+        !(tailAction.intent === "open_app" && (!tailAction.app || !tailAction.app.length));
+      if (tailValid) {
+        return {
+          intent: "compound",
+          reply: `Opening ${app}, then ${tailAction.reply.toLowerCase().replace(/\.$/, "")}.`,
+          chain: [
+            { intent: "open_app", app, payload: "" },
+            { intent: tailAction.intent, app: tailAction.app, payload: tailAction.payload },
+          ],
+        };
+      }
     }
   }
 

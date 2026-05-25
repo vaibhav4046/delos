@@ -26,11 +26,11 @@ export const DEFAULTS: Record<"planner" | "executor" | "critic", ModelKey> = {
   critic: "mistral:mistral-small-latest",
 };
 
-// All 9 models are callable with the BYOK keys configured in Settings →
-// Provider Keys (or auto-fallback to platform pool when user hasn't set their
-// own). Cohort + Arena now treat per-call failures as soft errors and skip
-// the failing member without aborting the whole race, so flaky daily quotas
-// no longer brick the feature.
+// All catalog models are callable with the BYOK keys configured in
+// Settings → Provider Keys (or auto-fallback to platform pool when
+// user hasn't set their own). Cohort + Arena now treat per-call
+// failures as soft errors and skip the failing member without aborting
+// the whole race, so flaky daily quotas no longer brick the feature.
 // Curated to ONLY the models that are confirmed working on free tier
 // for this account. Paid-only / soft-skip / "not_in_catalog" models
 // were removed to stop dropdown clutter. 2026-05-25 ask · "very long

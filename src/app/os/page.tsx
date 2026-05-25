@@ -550,89 +550,21 @@ export default function OSPage() {
     pushToast(`launched ${tpl.label}`, "info");
   }
 
+  // Active controller for the judge-demo state machine. Held in a ref so
+  // a second click cancels any pending steps from the previous run
+  // before kicking off a fresh sequence. Without this, mashing the
+  // button would stack 30+ setTimeouts and double-fire intents.
+  const judgeDemoCtl = useRef<JudgeRunController | null>(null);
   function runDemoTour() {
-    // Autonomous hackathon demo — one click drives the whole stack:
-    //   1. Open Del Assistant
-    //   2. Fire Gmail draft via MCP autonomous pattern
-    //   3. Fire Notion create-page via MCP autonomous pattern
-    //   4. Fire GitHub list via MCP autonomous pattern
-    //   5. Open VibeCode + build an investor CRM in place
-    //   6. Open Mission Control + recall pinned facts
-    // Each step narrates with a toast so the judge sees what fires when.
-    // Gmail + Notion gracefully degrade to "connect via Settings" if no
-    // OAuth, but the path proves out end-to-end.
-    type Step = { delay: number; toast: string; run: () => void };
-    const steps: Step[] = [
-      {
-        delay: 0,
-        toast: "★ demo 1/6 · DEL ASSISTANT — autonomous brain online",
-        run: () => spawnSystemApp("assistant"),
-      },
-      {
-        delay: 2200,
-        toast: "★ demo 2/6 · GMAIL MCP — drafting an email…",
-        run: () =>
-          emitIntent({
-            kind: "assistant.ask",
-            text: "draft email to judges@delrio.app about hackathon final demo recap",
-          }),
-      },
-      {
-        delay: 7000,
-        toast: "★ demo 3/6 · NOTION MCP — creating a recap page…",
-        run: () =>
-          emitIntent({
-            kind: "assistant.ask",
-            text: "create notion page titled DelOS Hackathon Demo Recap",
-          }),
-      },
-      {
-        delay: 11500,
-        toast: "★ demo 4/6 · GITHUB MCP — listing repositories…",
-        run: () =>
-          emitIntent({
-            kind: "assistant.ask",
-            text: "list my github repos",
-          }),
-      },
-      {
-        delay: 16500,
-        toast: "★ demo 5/6 · VIBECODE — building an investor CRM…",
-        run: () => {
-          spawnSystemApp("builder");
-          setTimeout(
-            () =>
-              emitIntent({
-                kind: "builder.build",
-                prompt:
-                  "investor CRM platform with deal pipeline, portfolio tracking, and follow-up reminders",
-              }),
-            300,
-          );
-        },
-      },
-      {
-        delay: 22000,
-        toast: "★ demo 6/6 · MISSION CONTROL — recalling pinned memory",
-        run: () => {
-          spawnSystemApp("mission");
-          setTimeout(
-            () =>
-              emitIntent({
-                kind: "memory.search",
-                query: "demo recap and investor CRM",
-              }),
-            300,
-          );
-        },
-      },
-    ];
-    for (const s of steps) {
-      setTimeout(() => {
-        s.run();
-        pushToast(s.toast, "ok");
-      }, s.delay);
-    }
+    // Hand off to the declarative state machine in lib/demo/judgeScript.
+    // Steps live there so they can be unit-tested independent of the
+    // OS shell and replayed in /demo without lifting page.tsx state.
+    judgeDemoCtl.current?.cancel();
+    judgeDemoCtl.current = runJudgeDemo({
+      spawn: (app) => spawnSystemApp(app),
+      emit: (intent) => emitIntent(intent),
+      toast: (text, tone) => pushToast(text, tone ?? "ok"),
+    });
   }
 
   function spawnSpecWindow(spec: AppSpec) {
@@ -1220,8 +1152,8 @@ export default function OSPage() {
               <button onClick={gridArrange} className="hidden md:inline-flex pill pill-muted" title="Tile windows (⌘G)" style={{ cursor: "pointer", fontSize: 10 }}>
                 <Icons.Grid3x3 size={10} /> TILE
               </button>
-              <button data-tour="demo-button" onClick={runDemoTour} className="hidden md:inline-flex pill pill-info" title="Run demo tour (⌘ Shift D)" style={{ cursor: "pointer", fontSize: 10 }}>
-                ▶ DEMO
+              <button data-tour="demo-button" onClick={runDemoTour} className="hidden md:inline-flex pill pill-info" title="Run scripted 5-step judge demo (⌘ Shift D)" style={{ cursor: "pointer", fontSize: 10 }}>
+                ▶ JUDGE DEMO
               </button>
               <CounterStrip />
               {/* Command palette opener — was floating top-right, now lives
@@ -1545,7 +1477,7 @@ function WelcomeMat({
           browser-OS · agents build apps · ⌘K palette · drag windows
         </p>
         <div className="mt-5 flex justify-center gap-2 flex-wrap">
-          <button className="btn-pixel success" onClick={onDemo} title="Auto-launch a guided 4-app tour">▶ DEMO TOUR</button>
+          <button className="btn-pixel success" onClick={onDemo} title="Scripted 5-step judge demo · MCP + VibeCode + Memory">▶ JUDGE DEMO</button>
           <button className="btn-pixel" style={{ background: "var(--accent)", color: "var(--on-accent)" }} onClick={() => onLaunch("builder")}>★ BUILD APP</button>
           <button className="btn-pixel ghost" onClick={() => onLaunch("assistant")}>ASSISTANT</button>
           <button className="btn-pixel ghost" onClick={() => onLaunch("voice")}>VOICE</button>

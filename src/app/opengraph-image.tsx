@@ -66,7 +66,7 @@ export default async function Image() {
         >
           <span style={{ display: "flex" }}>Memory · Tools · Recovery · Adaptation</span>
           <span style={{ display: "flex", color: "#6ab04c", fontSize: 22 }}>
-            24 apps · 17 tools · 9 LLMs · 0 hidden mocks · delrio.vercel.app
+            24 apps · 17 tools · 7 LLMs · 0 hidden mocks · delrio.vercel.app
           </span>
         </div>
       </div>

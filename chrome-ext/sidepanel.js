@@ -265,9 +265,16 @@ async function run() {
     const res = await fetch(`${state.cfg.endpoint}/api/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      // QA-2 · use canonical input field, keep goal as legacy mirror
+      body: JSON.stringify({ ...body, input: body.goal }),
       signal: ctrl.signal,
     });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      const friendly = res.status === 429 ? "rate-limited · try in ~30s" : `HTTP ${res.status}${txt ? ` · ${txt.slice(0, 80)}` : ""}`;
+      appendLog("log", `${tag("bad", "ERR")} ${esc(friendly)}`);
+      return;
+    }
     if (!res.body) throw new Error("no stream");
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -399,6 +406,15 @@ async function runBrowseAgent() {
     return;
   }
 
+  // QA-4 · batch approval · ask once at plan start for all external steps,
+  // always confirm each destructive step individually.
+  const externalCount = plan.filter((s) => s.tier === "external").length;
+  let externalApproved = false;
+  if (externalCount > 0) {
+    externalApproved = confirm(`Plan has ${externalCount} external step${externalCount === 1 ? "" : "s"} (form submits / nav). Approve all in one go?`);
+    if (!externalApproved) appendLog("browseLog", `${tag("warn", "external")} ${externalCount} step(s) will be skipped`);
+  }
+
   // Execute each step against active tab
   for (let i = 0; i < plan.length; i++) {
     if (browseStop) {
@@ -409,11 +425,16 @@ async function runBrowseAgent() {
     const label = `${i + 1}/${plan.length}`;
     appendLog("browseLog", `${tag(step.tier === "destructive" ? "bad" : step.tier === "external" ? "warn" : "info", label)} ${esc(step.action)} ${esc(JSON.stringify(step.args).slice(0, 120))}`);
 
-    // Gate destructive + external
-    if (step.tier === "destructive" || step.tier === "external") {
-      const ok = confirm(`Approve ${step.tier} step ${label}:\n${step.action} ${JSON.stringify(step.args)}`);
+    // Gate destructive always · external once per plan
+    if (step.tier === "destructive") {
+      const ok = confirm(`DESTRUCTIVE step ${label}:\n${step.action} ${JSON.stringify(step.args)}\n\nApprove?`);
       if (!ok) {
         appendLog("browseLog", `${tag("warn", "skip")} user denied`);
+        continue;
+      }
+    } else if (step.tier === "external") {
+      if (!externalApproved) {
+        appendLog("browseLog", `${tag("warn", "skip")} external (not approved)`);
         continue;
       }
     }
@@ -491,8 +512,15 @@ async function runCohort() {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ goal, members }),
+      // QA-2 · canonical input + members
+      body: JSON.stringify({ input: goal, goal, members }),
     });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      const friendly = res.status === 429 ? "rate-limited · try in ~30s" : `HTTP ${res.status}${txt ? ` · ${txt.slice(0, 80)}` : ""}`;
+      appendLog("cohortResults", `${tag("bad", "ERR")} ${esc(friendly)}`);
+      return;
+    }
     if (!res.body) throw new Error("no stream");
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -792,7 +820,7 @@ async function handleAutonomous(transcript) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: `Summarize this web page in 3 short bullets.\n\nTitle: ${ctx.title}\nURL: ${ctx.url}\n\n${ctx.text}`,
+          input: `Summarize this web page in 3 short bullets.\n\nTitle: ${ctx.title}\nURL: ${ctx.url}\n\n${ctx.text}`,
           models: state.cfg.modelOverrides,
           tenantId: state.cfg.tenantId || undefined,
         }),
@@ -851,15 +879,26 @@ async function handleAutonomous(transcript) {
 }
 
 async function handleAsk(transcript) {
-  const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: transcript, models: state.cfg.modelOverrides, tenantId: state.cfg.tenantId || undefined }),
-  });
-  const j = await r.json();
-  const reply = j.text || `err: ${j.error || "unknown"}`;
-  appendLog("voiceLog", `<div class="answer">${tag("info", "agent")} ${esc(reply)}</div>`);
-  if ($("#voiceSpeak").checked) speakText(reply);
+  try {
+    const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // QA-2/QA-6 · use canonical input field + surface HTTP errors clearly
+      body: JSON.stringify({ input: transcript, models: state.cfg.modelOverrides, tenantId: state.cfg.tenantId || undefined }),
+    });
+    if (!r.ok) {
+      const err = r.status === 429 ? "rate-limited · try in ~30s" : `HTTP ${r.status}`;
+      appendLog("voiceLog", `${tag("bad", "agent")} ${err}`);
+      if ($("#voiceSpeak").checked) speakText(`Agent error: ${err}`);
+      return;
+    }
+    const j = await r.json();
+    const reply = j.text || (j.error ? `err: ${j.error}` : "ok");
+    appendLog("voiceLog", `<div class="answer">${tag("info", "agent")} ${esc(reply)}</div>`);
+    if ($("#voiceSpeak").checked) speakText(reply);
+  } catch (e) {
+    appendLog("voiceLog", `${tag("bad", "agent")} ${esc(e.message)}`);
+  }
 }
 
 // ───────────────────────── memory (kept) ─────────────────────────
@@ -868,12 +907,22 @@ $("#memBtn").addEventListener("click", recallMem);
 async function recallMem() {
   const q = $("#memQuery").value.trim() || "recent agent runs";
   $("#memLog").innerHTML = "";
+  appendLog("memLog", `${tag("muted", "…")} querying`);
   try {
-    const url = `${state.cfg.endpoint}/api/memory?q=${encodeURIComponent(q)}&topK=12`;
+    // QA fix · pass tenant so demo_/anon_ tenants auto-seed correctly
+    const t = state.cfg.tenantId;
+    const tParam = t ? `&tenant=${encodeURIComponent(t)}` : "";
+    const url = `${state.cfg.endpoint}/api/memory?q=${encodeURIComponent(q)}&topK=12${tParam}`;
     const r = await fetch(url);
+    if (!r.ok) {
+      appendLog("memLog", `${tag("bad", "ERR")} HTTP ${r.status}`);
+      return;
+    }
     const j = await r.json();
-    if (j.hits?.length === 0 && j.local?.length === 0) {
-      appendLog("memLog", `<span class="empty">no matches</span>`);
+    $("#memLog").innerHTML = "";
+    if ((j.hits?.length ?? 0) === 0 && (j.local?.length ?? 0) === 0) {
+      appendLog("memLog", `<span class="empty">no matches for "${esc(q)}"</span>`);
+      appendLog("memLog", `${tag("muted", "tip")} set Tenant ID to <code>demo_test</code> in Settings to auto-seed`);
       return;
     }
     for (const h of j.hits || []) {

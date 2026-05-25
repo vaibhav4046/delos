@@ -7,15 +7,23 @@ import { MODEL_CATALOG, type ModelKey } from "@/lib/llm.catalog";
 type Member = { index: number; model: string; status: "spawn" | "done" | "fail"; text?: string; ms?: number; error?: string };
 type Verdict = { winnerIndex: number; rationale: string; scores: Array<{ index: number; score: number }>; merged: string };
 
-// Battle Royale defaults · five diverse models from three providers so judges
-// see real cross-vendor variance. User can toggle any of the 9 in the catalog.
-const DEFAULT_MEMBERS: ModelKey[] = [
+// Battle Royale defaults · 5 diverse models from 3 providers so judges
+// see real cross-vendor variance. Members are filtered through
+// MODEL_CATALOG so any retirement (e.g. Kimi K2) is auto-pruned and
+// can't desync the visible roster count from the actually-loaded list.
+const DEFAULT_MEMBER_CANDIDATES: ModelKey[] = [
   "groq:openai/gpt-oss-120b",
   "groq:meta-llama/llama-4-scout-17b-16e-instruct",
-  "groq:moonshotai/kimi-k2-instruct-0905",
+  "groq:openai/gpt-oss-20b",
   "mistral:mistral-large-latest",
   "google:gemini-2.5-flash",
 ];
+const DEFAULT_MEMBERS: ModelKey[] = DEFAULT_MEMBER_CANDIDATES.filter((k) =>
+  MODEL_CATALOG.some((m) => m.key === k),
+);
+// Distinct provider count · derived live from the catalog so the
+// "N providers" copy can never drift from the model list. P0-10.
+const PROVIDER_COUNT = new Set(MODEL_CATALOG.map((m) => m.provider)).size;
 
 const PRESETS = [
   "Why do graph DBs beat vector DBs for AI agent memory? Be concise.",
@@ -141,7 +149,7 @@ export default function ArenaPage() {
             <span className="font-pixel">{selected.size}</span> models · 1 goal · <span style={{ color: "var(--accent)" }}>1 judge</span>.
           </h1>
           <p className="text-[color:var(--muted)] text-sm sm:text-base max-w-2xl">
-            Pick any subset of 9 cross-vendor LLMs. They race on the same prompt in parallel.
+            Pick any subset of <span className="font-pixel" style={{ color: "var(--fg)" }}>{MODEL_CATALOG.length}</span> cross-vendor LLMs across <span className="font-pixel" style={{ color: "var(--fg)" }}>{PROVIDER_COUNT}</span> providers. They race on the same prompt in parallel.
             A judge model scores them, picks a winner, and writes a merged answer.
           </p>
         </section>
