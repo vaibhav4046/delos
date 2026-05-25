@@ -916,6 +916,10 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
   // Live mirror of accFiles · drives the inline preview pane during
   // streams. Persists after build done so the split-view stays useful.
   const [streamingFiles, setStreamingFiles] = useState<Array<{ path: string; content: string }>>([]);
+  // Clone-templates accordion · brand QA P0-07 demands clone templates
+  // go behind a collapsed disclaimer ("for benchmark only") so the
+  // primary surface leads with domain depth, not trademarked names.
+  const [showClones, setShowClones] = useState<boolean>(false);
 
   // ─── Voice-to-build mic ────────────────────────────────────────────────
   // User holds 🎙 → Whisper STT → transcript fills prompt textarea. Reuses
@@ -1011,32 +1015,32 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
     "Build a Discord server with channel sidebar, threaded chat, and voice rooms",
   ];
 
-  // Curated production-grade templates — every entry maps to a curated
-  // multi-card HTML clone via the clone matcher in appBuilder.ts. Mixed
-  // categories so judges see a complete app gallery.
+  // Domain-depth templates · brand QA P0-07 swap. Leads with cockpits
+  // a real practitioner would use, not trademarked clone shells. Each
+  // prompt encodes a workflow — entities, statuses, action surfaces —
+  // so the generated app reads as a tool, not a homepage screenshot.
   const TEMPLATES: Array<{ id: string; label: string; icon: string; prompt: string; tag: string }> = [
-    { id: "claude", label: "Claude Chat", icon: "Sparkles", tag: "AI", prompt: "Build me a Claude clone — sidebar with Recents, model picker (Opus/Sonnet/Haiku), conversation thread with user + assistant bubbles, compose with Send button, footer disclaimer." },
-    { id: "chatgpt", label: "ChatGPT Console", icon: "MessageSquare", tag: "AI", prompt: "Build a ChatGPT clone — left sidebar (New chat / Search / Library / GPTs / Today / Previous 7 days), model dropdown header, chat thread, rounded composer with +/mic/Send." },
-    { id: "perplexity", label: "Perplexity Search", icon: "Search", tag: "AI", prompt: "Build a Perplexity clone — left icon rail, hero 'Where knowledge begins', search bar with focus chips (Web/Academic/YouTube/Reddit), Answer block with [1][2][3] citations, source cards grid." },
-    { id: "github", label: "GitHub Repo", icon: "Github", tag: "DEV", prompt: "Build a GitHub repo dashboard — top nav with search + tabs (Code/Issues/PRs/Actions/Security/Insights), file tree with last-commit messages, About sidebar with stars/forks/languages." },
-    { id: "notion", label: "Notion Workspace", icon: "FileText", tag: "PRODUCTIVITY", prompt: "Build a Notion workspace — left sidebar with favorites + workspace pages, main page with emoji icon + title + status/owner/due cards, milestone checklist, database table with name/status/owner/updated columns." },
-    { id: "linear", label: "Linear Tracker", icon: "CircleDot", tag: "DEV", prompt: "Build a Linear issue tracker — left sidebar with workspace + cycles + projects, header with cycle name + New issue button, filter chips (All/Active/Backlog/Done), issue list with ID/status/title/priority/assignee/date." },
-    { id: "slack", label: "Slack Workspace", icon: "Hash", tag: "TEAM", prompt: "Build a Slack workspace — workspace rail + channel/DM sidebar with sections, channel header with member count, threaded messages with avatars, composer with formatting buttons." },
-    { id: "stripe", label: "Stripe Dashboard", icon: "CreditCard", tag: "BUSINESS", prompt: "Build a Stripe billing dashboard — left nav (Home/Payments/Invoices/Customers/Products), 4 KPI cards (volume/payments/customers/churn), gross-volume SVG line chart, recent payments table with status badges." },
-    { id: "youtube", label: "YouTube Clone", icon: "Youtube", tag: "MEDIA", prompt: "Build a YouTube clone — search bar with mic, category chips (All/Music/Hackathon/Coding/etc), 6-video grid with thumbnail gradients, durations, channel + view counts." },
-    { id: "airbnb", label: "AirBnB Clone", icon: "Home", tag: "TRAVEL", prompt: "Build an AirBnB clone — Stays/Experiences nav, pill-shaped search bar (where/check in/check out/guests + search circle), category icons row (Beach/Mountains/etc), 8-listing grid with photos/title/rating/price." },
-    { id: "tinder", label: "Tinder Swipe", icon: "Heart", tag: "SOCIAL", prompt: "Build a Tinder clone — phone-bezel card with profile gradient, name/age/bio/interests overlay, action button row (rewind/dislike/superlike/like/boost)." },
-    { id: "discord", label: "Discord Server", icon: "MessageSquare", tag: "SOCIAL", prompt: "Build a Discord server — left server rail, channel sidebar (text + voice sections), main chat with avatars + bot tag, message composer with gift/GIF/emoji buttons." },
-    { id: "snapchat", label: "Snapchat", icon: "Ghost", tag: "SOCIAL", prompt: "Build a Snapchat clone — phone bezel with status bar, camera viewfinder + streak pill, filter chips, big shutter button, 5-tab bottom nav (Map/Chat/Camera/Stories/Spotlight), side panel Stories feed." },
-    { id: "uber", label: "Uber Ride", icon: "Car", tag: "TRAVEL", prompt: "Build an Uber clone — pickup + dropoff inputs, ride class picker (UberX/Comfort/Black) with live fare, surge/ETA pills, Request ride button, status card." },
-    { id: "ubereats", label: "UberEats", icon: "UtensilsCrossed", tag: "FOOD", prompt: "Build an UberEats clone — restaurant picker, menu cards with add buttons, live cart total, Place order action." },
-    { id: "amazon", label: "Amazon Shop", icon: "ShoppingCart", tag: "ECOM", prompt: "Build an Amazon clone — search bar, featured products grid (4 items) with ratings + add-to-cart, live cart list + subtotal, Place order + Clear cart actions." },
-    { id: "netflix", label: "Netflix Stream", icon: "PlayCircle", tag: "MEDIA", prompt: "Build a Netflix clone — genre pill, Trending row, Documentaries row, My List with add/clear, now-playing pill." },
-    { id: "spotify", label: "Spotify Music", icon: "Music", tag: "MEDIA", prompt: "Build a Spotify clone — Discover button row (tracks), Play/Pause/+Queue controls, current track pill, queue list." },
-    { id: "macos", label: "macOS Desktop", icon: "Monitor", tag: "OS", prompt: "Build a macOS clone — top menu bar with apple + app menus + status icons + clock, aqua wallpaper, Finder window with traffic lights + Favorites sidebar + icon grid, glassy bottom dock with 10 app icons." },
-    { id: "bookmyshow", label: "Movie Tickets", icon: "Ticket", tag: "TRAVEL", prompt: "Build a BookMyShow clone — Now Showing button row, Showtimes row, Seats row + selection list with ₹ total, Confirm booking action." },
-    { id: "instagram", label: "Instagram Feed", icon: "Camera", tag: "SOCIAL", prompt: "Build an Instagram clone — caption textarea, Post action, scrollable feed with handle/caption/likes." },
-    { id: "snake-pro", label: "Snake Pro", icon: "Worm", tag: "GAMES", prompt: "Build a Snake Pro launcher — hi-score / last-score pills, how-to-play card, score tracker with Save + Reset actions." },
+    { id: "aml-cockpit", label: "Regulatory AML Cockpit", icon: "ShieldAlert", tag: "FINTECH", prompt: "Build a Regulatory AML Cockpit — alert queue with risk score / customer / amount / rule-hit, case review pane with KYC summary + transaction graph, SAR draft button, audit trail log, escalation status pills (open / under-review / cleared / filed)." },
+    { id: "trial-protocol", label: "Clinical Trial Protocol", icon: "FlaskConical", tag: "HEALTH", prompt: "Build a Clinical Trial Protocol Manager — protocol version timeline, IRB amendment tracker with status (submitted / approved / revision-requested), inclusion / exclusion criteria editor, site enrollment dashboard, adverse-event log with severity pills." },
+    { id: "investor-crm", label: "Investor CRM · Warm-Intro Graph", icon: "Network", tag: "GTM", prompt: "Build an Investor CRM with warm-intro graph — investor list with stage / check-size / thesis, mutual-connection chips per row, intro request composer, pipeline kanban (sourced / met / diligence / TS / closed), follow-up reminder dock." },
+    { id: "legal-redline", label: "Legal Redline Bench", icon: "ScrollText", tag: "LEGAL", prompt: "Build a Legal Redline Bench — split-pane contract diff (original vs counter-party), clause inventory sidebar with risk flags (LIMITATION / INDEMNITY / IP / TERM), accept / reject / counter actions per change, negotiation memo composer, version stack." },
+    { id: "ops-incident", label: "Ops Incident Command", icon: "Siren", tag: "SRE", prompt: "Build an Ops Incident Command center — live incident list with severity (sev1 / sev2 / sev3), affected services / impacted users / pager status, comms timeline with status-page draft, runbook checklist, postmortem template launcher." },
+    { id: "ai-tutor", label: "AI Tutor · Spaced Repetition", icon: "GraduationCap", tag: "EDU", prompt: "Build an AI Tutor with spaced repetition — subject mastery dashboard, due-cards queue with ease / interval, free-form answer box with rubric scoring, weakness heatmap, next-session schedule, streak + retention counter." },
+    { id: "warehouse-yard", label: "Warehouse Yard Control", icon: "Truck", tag: "OPS", prompt: "Build a Warehouse Yard Control board — dock assignment grid (door / trailer / carrier / ETA / status), driver check-in queue, cross-dock task list with SLA timers, exception flags (detention / damage / mis-route), shift handoff notes." },
+    { id: "infra-bom", label: "Infra Bill-of-Materials", icon: "Boxes", tag: "DEVOPS", prompt: "Build an Infra Bill-of-Materials viewer — service inventory with owner / SLO / dependency count, license + CVE column, drift status vs IaC source-of-truth, rollback eligibility flag, action row (rotate-secret / patch / decommission)." },
+    { id: "field-service", label: "Field Service Dispatch", icon: "Wrench", tag: "OPS", prompt: "Build a Field Service Dispatch console — work-order queue with SLA timer / parts ETA / technician skills, map-stub of in-progress jobs, parts-availability check, customer comms log, completion checklist with photo-of-record stub." },
+    { id: "research-bench", label: "Research Bench", icon: "Microscope", tag: "RESEARCH", prompt: "Build a Research Bench — hypothesis register with status (open / testing / supported / refuted), experiment log with method + sample-size, citation graph for prior art, peer-review queue, replication checklist." },
+    { id: "policy-comparator", label: "Policy Comparator", icon: "Scale", tag: "PUBLIC-SECTOR", prompt: "Build a Policy Comparator — side-by-side regulation diff (jurisdiction A vs B), obligation extractor (controller / processor / disclosure), impact matrix on internal products, evidence vault, sign-off log." },
+    { id: "grant-pipeline", label: "Grant Pipeline", icon: "Coins", tag: "NONPROFIT", prompt: "Build a Grant Pipeline — opportunity list with funder / amount / deadline / fit-score, narrative drafting workspace with section checklist, budget builder with allowed-cost rules, reviewer assignment, post-award reporting tracker." },
+  ];
+  // Benchmark-only clone templates · kept behind an accordion so judges
+  // can still A/B against well-known surfaces, but the primary template
+  // grid never leads with trademarked names. Labels intentionally
+  // generic.
+  const CLONE_TEMPLATES: Array<{ id: string; label: string; icon: string; prompt: string; tag: string }> = [
+    { id: "search-ui", label: "Search UI", icon: "Search", tag: "BENCHMARK", prompt: "Build a search-results interface — left rail of filters, hero search bar with focus chips, answer block with numbered citations [1][2][3], grid of source cards with favicon + domain + snippet." },
+    { id: "streaming-console", label: "Streaming Console", icon: "MessageSquare", tag: "BENCHMARK", prompt: "Build a conversational streaming console — left sidebar (New / Search / Library / Today / Previous 7 days), model picker header, message thread with user + assistant bubbles, rounded composer with attachment + mic + send." },
+    { id: "workspace-skeleton", label: "Workspace Skeleton", icon: "FileText", tag: "BENCHMARK", prompt: "Build a generic workspace skeleton — left sidebar with favorites + pages tree, main canvas with emoji + title + status / owner / due cards, milestone checklist, database-style table with name / status / owner / updated columns." },
   ];
   // Apply the selected UI style as a theme override on a freshly-built spec.
   // For "brand" we keep whatever the template ships. For "pixel" we strip

@@ -376,21 +376,25 @@ export function DesktopWidgets() {
             </button>
           </div>
         )}
+        {/* SH-1 · slim 24px chip replaces giant 44px yellow + tile.
+            Sits subtly at bottom-right · expanded menu still pops above. */}
         <button
           onClick={() => setAddMenu((v) => !v)}
           style={{
-            width: 44,
-            height: 44,
-            background: "var(--accent)",
-            color: "var(--on-accent)",
-            border: "2px solid var(--shadow)",
-            boxShadow: "3px 3px 0 var(--shadow)",
-            fontSize: 22,
-            fontWeight: 800,
+            width: 24,
+            height: 24,
+            background: "rgba(0,0,0,0.55)",
+            color: addMenu ? "var(--danger)" : "var(--accent)",
+            border: "1px solid var(--surface-2)",
+            borderRadius: 4,
+            fontSize: 14,
+            fontWeight: 700,
             cursor: "pointer",
             fontFamily: "monospace",
+            lineHeight: "20px",
+            padding: 0,
           }}
-          title="Add widget · sticky note · toggle visibility"
+          title="Add desktop widget · sticky note"
           aria-label="Add widget menu"
         >
           {addMenu ? "×" : "+"}
