@@ -141,8 +141,17 @@ export async function POST(req: NextRequest) {
   // a single representative entry so the array matches the top-level
   // intent. Compound multi-step chains keep the full parsed list.
   let executions = rawExecutions.filter((e) => e.status !== "rejected" && e.kind !== "unknown");
-  if (!compound && executions.length > 1) {
-    executions = executions.slice(0, 1);
+  // P0 round 10 · dedupe by `kind` so chunker over-splits ("open browser
+  // show me react docs" → 2× open_app) collapse to a single fulfilled
+  // entry that matches the top-level intent. Distinct kinds in
+  // legitimate compound chains ("open browser AND build app") survive.
+  if (executions.length > 1) {
+    const seen = new Set<string>();
+    executions = executions.filter((e) => {
+      if (seen.has(e.kind)) return false;
+      seen.add(e.kind);
+      return true;
+    });
   }
 
   // ─── Fast path · deterministic regex parser ──────────────────────────────
