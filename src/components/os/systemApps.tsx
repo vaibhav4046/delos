@@ -996,23 +996,23 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Replaces the generic stopwatch/tip-calc presets. These prompts route
-  // through the clone matcher → curated multi-card HTML templates with
-  // sidebars, message lists, dashboards, payment flows. Each ships in
-  // under 1s with brand-coherent palette + working state.
+  // Quick-fill chip presets · lead with domain cockpits so the user's
+  // first impression is "real workflow tool", not "clone gallery".
+  // Earlier revisions were brand-heavy (Claude/Notion/Stripe/etc); QA
+  // P0-07 swapped to neutral practitioner prompts.
   const presets = [
-    "Build me a Claude clone with sidebar, model picker, chat thread, and live compose",
-    "Build a full GitHub repo dashboard with file tree, commits, stars, and language stats",
-    "Build a Notion workspace with sidebar tree, page heading, status pills, and a database table",
-    "Build a Linear issue tracker with cycles, projects, priorities, and assignees",
-    "Build a Stripe billing dashboard with KPI cards, line chart, and recent payments table",
-    "Build a Slack workspace with channels, DMs, threaded messages, and composer",
-    "Build a YouTube clone with search bar, category chips, and a 6-video grid",
-    "Build an AirBnB clone with search bar, category icons, and 8 listings",
-    "Build me an Amazon clone with cart, checkout flow, and live total",
-    "Build a Spotify clone with discover row, queue, and player controls",
-    "Build a Tinder swipe app with profile card and like/dislike buttons",
-    "Build a Discord server with channel sidebar, threaded chat, and voice rooms",
+    "Build a Regulatory AML alert cockpit with queue, case-review pane, and SAR draft action",
+    "Build a Clinical Trial Protocol manager with IRB amendment timeline and adverse-event log",
+    "Build an Investor CRM with warm-intro graph and a sourced→closed pipeline kanban",
+    "Build a Legal Redline Bench with clause inventory, risk flags, and a version stack",
+    "Build an Ops Incident Command center with sev pills, runbook checklist, and status-page draft",
+    "Build an AI Tutor with spaced-repetition queue, rubric scoring, and weakness heatmap",
+    "Build a Warehouse Yard Control board with dock grid and SLA timers",
+    "Build a Field Service Dispatch console with work-order SLA and parts-availability check",
+    "Build a Policy Comparator with side-by-side regulation diff and obligation extractor",
+    "Build a Grant Pipeline with fit-score, narrative drafting, and budget builder",
+    "Build a Research Bench with hypothesis register and citation graph",
+    "Build an Infra Bill-of-Materials viewer with drift status and CVE column",
   ];
 
   // Domain-depth templates · brand QA P0-07 swap. Leads with cockpits
@@ -1419,8 +1419,8 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="font-pixel text-[10px] tracking-widest" style={{ color: "var(--accent)" }}>★ PUBLISHABLE TEMPLATES</span>
-          <span className="text-[9px] font-mono" style={{ color: "var(--muted)" }}>click to fill prompt</span>
+          <span className="font-pixel text-[10px] tracking-widest" style={{ color: "var(--accent)" }}>★ DOMAIN COCKPITS</span>
+          <span className="text-[9px] font-mono" style={{ color: "var(--muted)" }}>practitioner workflows · click to fill</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
           {TEMPLATES.map((t) => {
@@ -1450,6 +1450,53 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
             );
           })}
         </div>
+        {/* Benchmark-only clones · gated behind a collapsed accordion per
+            P0-07 brand-sanitization spec. Generic labels, no trademarked
+            names, explicit "for benchmark only" disclaimer. */}
+        <button
+          type="button"
+          onClick={() => setShowClones((v) => !v)}
+          className="text-[9px] font-mono w-full text-left"
+          style={{ color: "var(--muted)", padding: "2px 0" }}
+          aria-expanded={showClones}
+        >
+          {showClones ? "▾" : "▸"} Show clones (for benchmark only)
+        </button>
+        {showClones && (
+          <div className="space-y-1">
+            <div className="text-[9px] font-mono" style={{ color: "var(--muted)" }}>
+              generic skeletons · no trademarked names · use to compare against well-known UI surfaces.
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+              {CLONE_TEMPLATES.map((t) => {
+                const TIcon = (Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>)[t.icon] ?? Icons.Box;
+                return (
+                  <button
+                    key={t.id}
+                    disabled={busy}
+                    onClick={() => fillPromptSafe(t.prompt)}
+                    className="card-pixel text-left flex flex-col gap-1"
+                    style={{
+                      padding: 6,
+                      cursor: busy ? "not-allowed" : "pointer",
+                      background: prompt === t.prompt ? "var(--surface-2)" : "var(--surface)",
+                      borderColor: prompt === t.prompt ? "var(--accent)" : "var(--surface-2)",
+                      opacity: busy ? 0.5 : 1,
+                      fontSize: 10,
+                    }}
+                    title={t.prompt}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <TIcon size={11} color="var(--muted)" />
+                      <span className="font-pixel text-[10px] tracking-wider truncate" style={{ color: "var(--fg)" }}>{t.label}</span>
+                    </div>
+                    <span className="pill pill-muted" style={{ fontSize: 8, padding: "1px 4px", alignSelf: "flex-start" }}>{t.tag}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
       {builtins.length > 0 && (
         <div className="space-y-2">

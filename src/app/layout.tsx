@@ -15,6 +15,16 @@ export const metadata: Metadata = {
   description:
     "DelOS: the browser-OS where multi-agent orchestration is wired in by default. Memory · Tools · Recovery · Adaptation. Agents build the apps live.",
   manifest: "/manifest.webmanifest",
+  // Explicit icons block · versioned URL busts browser favicon cache so
+  // returning visitors see the DelOS D, not the stale Vercel Z.
+  icons: {
+    icon: [
+      { url: "/icon.svg?v=3", type: "image/svg+xml" },
+      { url: "/icon.svg?v=3", sizes: "any" },
+    ],
+    shortcut: "/icon.svg?v=3",
+    apple: "/icon.svg?v=3",
+  },
   applicationName: "DelOS",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "DelOS" },
   robots: {

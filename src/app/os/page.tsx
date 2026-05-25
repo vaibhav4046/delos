@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import Link from "next/link";
 import * as Icons from "lucide-react";
 import { Boot } from "@/components/os/Boot";
+import { runJudgeDemo, type JudgeRunController } from "@/lib/demo/judgeScript";
 import * as BrandIcons from "@/components/BrandIcons";
 import { Window, type WindowChild, type SnapKind } from "@/components/os/Window";
 import { ToastStack, type ToastItem } from "@/components/os/Toast";
