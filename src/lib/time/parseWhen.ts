@@ -44,6 +44,15 @@ export function parseWhen(raw: string, opts?: { tz?: string; now?: Date }): Pars
     return { at: new Date(now), confidence: 0.6, tz, raw, durationMs: 1_800_000 };
   }
 
+  // F10 · explicit past markers ALWAYS yield past timestamps so caller
+  // (validateCalendarParse) can reject. Was previously letting "yesterday
+  // at 4pm" fall through to todayMatch and roll forward to tomorrow.
+  if (/\b(yesterday|last\s+(?:week|month|year)|\d+\s*(?:hours?|days?|weeks?)\s+ago)\b/.test(t)) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 1);
+    return { at: d, confidence: 0.05, tz, raw, durationMs: 1_800_000 };
+  }
+
   // in N minutes/hours/days/weeks
   const inN = t.match(/\bin\s+(\d+)\s*(min(?:ute)?s?|hours?|hrs?|days?|weeks?)\b/);
   if (inN) {
@@ -118,7 +127,9 @@ export function parseWhen(raw: string, opts?: { tz?: string; now?: Date }): Pars
     }
   }
 
-  // Past markers — reject explicit yesterday/last-week as confidence 0
+  // Past markers — return very-low confidence so caller rejects.
+  // We still return a date (yesterday) so the caller can show the
+  // "past_time" error specifically rather than a generic parse failure.
   if (/\b(yesterday|last\s+(?:week|month|year)|ago)\b/.test(t)) {
     const d = new Date(now);
     d.setDate(d.getDate() - 1);
@@ -126,6 +137,27 @@ export function parseWhen(raw: string, opts?: { tz?: string; now?: Date }): Pars
   }
 
   return null;
+}
+
+// F11 · pre-validate raw text for obvious nonsense. Used before parsing
+// to reject "three eels from sunday" rather than letting the weekday
+// regex pick up the bare "sunday" and pretend it parsed.
+export function isCoherentTimeText(raw: string): boolean {
+  const t = raw.toLowerCase().trim();
+  if (!t || t.length < 3) return false;
+  // Has at least one strong time signal:
+  //   - relative time number ("in 5 minutes", "in 2 hours", "in 3 days")
+  //   - day-relative word + nothing else weird
+  //   - explicit clock time HH(:MM)?(am|pm) or HH:MM 24h
+  //   - "now" / "tonight"
+  const hasRelativeNumber = /\bin\s+\d+\s*(?:min|hour|hr|day|week)/i.test(t);
+  const hasClockTime = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(t) || /\b\d{1,2}:\d{2}\b/.test(t);
+  const hasDayRelative = /\b(?:tomorrow|tonight|today|day\s+after\s+tomorrow|now)\b/i.test(t);
+  const hasWeekday = /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(t);
+  // Weekday alone is too weak unless combined with a clock time
+  if (hasRelativeNumber || hasClockTime || hasDayRelative) return true;
+  if (hasWeekday && hasClockTime) return true;
+  return false;
 }
 
 // Helper · reject past + low confidence at the calendar/server boundary.

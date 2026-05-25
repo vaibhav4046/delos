@@ -7,7 +7,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { listEvents, createEvent, removeEvent } from "@/lib/calendarStore";
-import { parseWhen, validateCalendarParse } from "@/lib/time/parseWhen";
+import { parseWhen, validateCalendarParse, isCoherentTimeText } from "@/lib/time/parseWhen";
 import { resolveTenant, zodErr } from "@/lib/apiAuth";
 
 // F12 · strip HTML/XSS from titles before persistence. Pair with React's
@@ -51,6 +51,10 @@ export async function POST(req: NextRequest) {
   let startAt = data.startAt;
   let endAt = data.endAt;
   if (!startAt && data.when) {
+    // F11 · pre-flight coherence check rejects garbage like "three eels from sunday"
+    if (!isCoherentTimeText(data.when)) {
+      return Response.json({ error: "unparseable_time", when: data.when }, { status: 400 });
+    }
     const p = parseWhen(data.when, { tz });
     const v = validateCalendarParse(p);
     if (!v.ok) {
