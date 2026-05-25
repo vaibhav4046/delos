@@ -15,6 +15,9 @@ import { runQuickAgent } from "@/lib/agents/quick";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { isNimEnabled, nimChat, NIM_MODELS } from "@/lib/llm/providers/nim";
 import { classifyInjection } from "@/lib/security/injection-classifier";
+import { safeAddMemory, ensureTenant } from "@/lib/hydra";
+import { sanitizeMemoryText } from "@/lib/sanitize";
+import { guardMemoryWrite } from "@/lib/memory/writeGuard";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -202,15 +205,49 @@ export async function POST(req: NextRequest) {
       if (reParse.success) verdict = reParse;
     }
   }
+  // EXT-MEM-1 · sync every successful browse plan into Hydra memory so the OS
+  // MemoryDashboard shows what the extension did. Tenant comes from request
+  // body (extension `state.cfg.tenantId`); fall back to `delrio_demo` so
+  // anonymous extension users still see their history on the same dashboard.
+  // Honors writeGuard, sanitize, and the source enum (`browser-search`).
+  const tenantId = (parsed.data.tenantId && String(parsed.data.tenantId).trim()) || "delrio_demo";
+  async function persistRun(finalText: string, planLength: number) {
+    try {
+      const summary = [
+        `Browse · ${task.slice(0, 160)}`,
+        ctx?.url ? `tab: ${ctx.url}` : "",
+        `plan: ${planLength} step${planLength === 1 ? "" : "s"} · planner: ${planner}`,
+        finalText ? `result: ${finalText.slice(0, 400)}` : "",
+      ].filter(Boolean).join(" · ");
+      const guard = guardMemoryWrite(summary);
+      if (!guard.ok) return; // silently skip blocked writes; client still gets the plan
+      await ensureTenant(tenantId);
+      await safeAddMemory({
+        tenantId,
+        text: sanitizeMemoryText(summary),
+        metadata: {
+          tags: ["browser-search", "extension"],
+          source: "browser-search",
+        },
+      });
+    } catch {
+      /* memory write must never block the plan response */
+    }
+  }
+
   if (!verdict.success) {
+    const fallbackFinal = raw.slice(0, 240);
+    await persistRun(fallbackFinal, 1);
     return Response.json({
       ok: true,
       planner,
       plan: [{ action: "answer", args: { text: raw.slice(0, 1200) }, tier: "read" }],
-      final: raw.slice(0, 240),
+      final: fallbackFinal,
+      memorySynced: true,
     });
   }
-  return Response.json({ ok: true, planner, ...verdict.data });
+  await persistRun(verdict.data.final ?? "", verdict.data.plan.length);
+  return Response.json({ ok: true, planner, ...verdict.data, memorySynced: true });
 }
 
 export async function GET() {

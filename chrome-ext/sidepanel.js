@@ -419,6 +419,9 @@ async function runBrowseAgent() {
     plan = j.plan;
     appendLog("browseLog", `${tag("ok", "plan")} ${plan.length} steps · ${esc(j.planner || "")}`);
     if (j.final) appendLog("browseLog", `<div class="muted">${esc(j.final)}</div>`);
+    // EXT-MEM-1 · server persists task+final to Hydra memory under tenantId.
+    // Shows in OS MemoryDashboard (delrio.vercel.app/os → Memory app).
+    if (j.memorySynced) appendLog("browseLog", `${tag("muted", "★ memory")} synced to ${esc(state.cfg.tenantId || "delrio_demo")}`);
   } catch (e) {
     appendLog("browseLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
     return;
