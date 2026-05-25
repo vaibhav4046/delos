@@ -138,13 +138,28 @@ export async function POST(req: NextRequest) {
               // Arena pins each row to ONE model · disable fallback so
               // Mistral's failure is reported as Mistral, not as the
               // Bytez tertiary's "not_in_catalog". Brutal-QA fix.
-              const text = await runQuickAgent({
-                prompt: goal,
-                systemOverride:
-                  "You are a focused expert. Answer the question directly with 2-6 sentences. No filler.",
-                disableFallback: true,
-              });
-              return { text, ms: Date.now() - t0 };
+              // Transient-retry: one bounce on transient errors so a
+              // single 429 or network blip does not strike a model
+              // from the demo board.
+              let lastErr: unknown;
+              for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                  const text = await runQuickAgent({
+                    prompt: goal,
+                    systemOverride:
+                      "You are a focused expert. Answer the question directly with 2-6 sentences. No filler.",
+                    disableFallback: true,
+                  });
+                  return { text, ms: Date.now() - t0 };
+                } catch (e) {
+                  lastErr = e;
+                  const msg = e instanceof Error ? e.message : String(e);
+                  const transient = /429|rate|timeout|ECONN|all_providers_failed|temporar|503|upstream/i.test(msg);
+                  if (!transient || attempt === 1) throw e;
+                  await new Promise((r) => setTimeout(r, 700));
+                }
+              }
+              throw lastErr;
             });
           }),
         );

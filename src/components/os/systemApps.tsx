@@ -863,7 +863,7 @@ const UI_STYLES: Array<{ id: string; label: string; icon: string; desc: string; 
 ];
 
 export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
-  const [prompt, setPrompt] = useState("Build me a stopwatch with start/stop/reset.");
+  const [prompt, setPrompt] = useState("Build me an Investor CRM with warm intro graph, pipeline kanban from sourced to closed, and a follow up reminder dock.");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [stage, setStage] = useState<"idle" | "plan" | "spec" | "validate" | "mount" | "done">("idle");
@@ -937,7 +937,7 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
   // BUG-1 fix · only overwrite the textarea when it's empty, still on the
   // default seed, OR the user has explicitly tapped Apply on a confirm.
   // Was: chip clicks silently wiped a typed-out spec mid-scroll.
-  const DEFAULT_SEED = "Build me a stopwatch with start/stop/reset.";
+  const DEFAULT_SEED = "Build me an Investor CRM with warm intro graph, pipeline kanban from sourced to closed, and a follow up reminder dock.";
   function fillPromptSafe(next: string) {
     if (busy) return;
     const trimmed = prompt.trim();

@@ -589,6 +589,20 @@ export default function OSPage() {
   // bar JUDGE DEMO pill runs. Small delay lets boot + windows mount.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Pre warm cold lambdas the moment the OS mounts. Fires the health
+    // probe plus the endpoints the judge demo will hit so the first
+    // real call from a button click is already warm. Best effort, all
+    // failures swallowed.
+    const prewarm = [
+      "/api/health",
+      "/api/me",
+      "/api/stats",
+      "/api/memory?q=recent&topK=1",
+      "/api/llm/audit",
+    ];
+    for (const u of prewarm) {
+      fetch(u, { cache: "no-store" }).catch(() => {});
+    }
     const params = new URLSearchParams(window.location.search);
     if (params.get("demo") === "judge") {
       const t = window.setTimeout(() => runDemoTour(), 600);
