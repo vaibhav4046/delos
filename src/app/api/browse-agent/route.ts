@@ -232,9 +232,12 @@ export async function POST(req: NextRequest) {
   // Fall back to runQuickAgent (provider cascade) when NIM not available.
   let raw = "";
   let planner = "fallback";
+  // EXT-V9 · NIM cold start kills demos · cap at 12 s then fall back to Groq.
+  // Vercel maxDuration is 60 s; NIM cold = 30-90 s. Race against a timeout
+  // so the user sees a plan in <15 s every time. Groq fallback is fast.
   try {
     if (isNimEnabled()) {
-      const r = await nimChat({
+      const nimPromise = nimChat({
         model: NIM_MODELS.nemotronSuper49b,
         messages: [
           { role: "system", content: SYSTEM },
@@ -243,11 +246,15 @@ export async function POST(req: NextRequest) {
         temperature: 0.2,
         max_tokens: 900,
       });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("nim_timeout")), 12_000),
+      );
+      const r = await Promise.race([nimPromise, timeoutPromise]);
       raw = r.text;
       planner = NIM_MODELS.nemotronSuper49b;
     }
   } catch {
-    /* fall through */
+    /* nim timeout or error · fall through to Groq cascade */
   }
   if (!raw) {
     try {
