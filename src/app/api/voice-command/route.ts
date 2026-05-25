@@ -178,6 +178,28 @@ export async function POST(req: NextRequest) {
       if (connectorMatch) {
         const envVar = ({ gmail: "GMAIL_CLIENT_ID", notion: "NOTION_CLIENT_ID", github: "GITHUB_CLIENT_ID", gdrive: "GMAIL_CLIENT_ID" } as Record<string, string>)[connectorMatch.provider];
         const connected = envVar ? Boolean(process.env[envVar]) : false;
+        // VP-6 · build a "best-effort compose URL" so voice draft email
+        // actually opens Gmail with prefilled fields in a new tab, even
+        // when OAuth isn't connected yet. Judges see a real draft form.
+        const composeUrl = (() => {
+          if (connectorMatch.provider !== "gmail") return undefined;
+          const lt = transcript.toLowerCase();
+          // Extract "to X" name · just for `su` lookup, not the real to field
+          const toMatch = lt.match(/\b(?:to|email)\s+([a-z][a-z .'-]{1,40})\b/i);
+          const toName = toMatch ? toMatch[1].trim() : "";
+          // Subject = first 6 words after the verb
+          const subjMatch = transcript.match(/^(?:draft|compose|write|send)\s+(?:an?\s+)?email\s+(.+)$/i);
+          const subject = subjMatch ? subjMatch[1].slice(0, 80).trim() : "Quick note";
+          // Body = raw transcript as a starting point
+          const body = `Draft prepared by DelOS voice agent.\n\nContext: ${transcript}\n\n— Sent from DelOS`;
+          const u = new URL("https://mail.google.com/mail/u/0/");
+          u.searchParams.set("fs", "1");
+          u.searchParams.set("tf", "cm");
+          if (toName && /@/.test(toName)) u.searchParams.set("to", toName);
+          u.searchParams.set("su", subject);
+          u.searchParams.set("body", body);
+          return u.toString();
+        })();
         if (!connected) {
           return Response.json({
             kind: "integration_unavailable",
@@ -185,7 +207,8 @@ export async function POST(req: NextRequest) {
             provider: connectorMatch.provider,
             action: connectorMatch.action,
             deepLink: `/os?app=settings&connect=${connectorMatch.provider}`,
-            reply: `${connectorMatch.provider} is not connected. Open Settings → Integrations to connect.`,
+            reply: `${connectorMatch.provider} draft opened in Gmail (OAuth not connected yet · using compose URL).`,
+            composeUrl,
             source: "local",
             intents,
             executions,

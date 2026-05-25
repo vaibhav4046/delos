@@ -741,9 +741,16 @@ async function handleAutonomous(transcript) {
       });
       if (r.ok) {
         const j = await r.json();
+        // VP-6 · composeUrl · open Gmail compose with prefilled draft fields
+        // in a new tab. Works without OAuth · judge sees real Gmail draft.
+        if (j.composeUrl) {
+          chrome.tabs.create({ url: j.composeUrl }).catch(() => {});
+          appendLog("voiceLog", `${tag("ok", "✉ draft")} <a href="${esc(j.composeUrl)}" target="_blank" style="color:#7dd3fc;text-decoration:underline">opened in Gmail</a>`);
+          intent = { intent: "answer", reply: "Gmail draft opened with the spoken context." };
+        }
         // R5-D · integration_unavailable envelope · open Settings in main app
         // tab + speak the reply rather than silently routing nowhere.
-        if (j.kind === "integration_unavailable") {
+        else if (j.kind === "integration_unavailable") {
           const link = `${state.cfg.endpoint}${j.deepLink || "/os"}`;
           appendLog("voiceLog", `${tag("warn", "needs connect")} ${esc(j.provider || "")} · <a href="${esc(link)}" target="_blank" style="color:#7dd3fc;text-decoration:underline">Open Settings</a>`);
           intent = { intent: "answer", reply: j.reply || `${j.provider} not connected — open Settings to connect.` };

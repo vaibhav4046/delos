@@ -1108,9 +1108,11 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
       // because they patch a known spec in place. New ambitious builds
       // with productionMode on get the same-to-same fidelity output.
       if (useProduction && !opts?.refineFromSpec) {
-        // Open DelCode FIRST so the user sees files materialize one
-        // by one. Then start the SSE stream.
-        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "codebase" } }));
+        // Claude-Code-style flow · stream files INTO the VibeCode split-
+        // view panel itself (no auto-open of DelCode IDE). User clicks
+        // "★ OPEN DELCODE" button manually when they want the full IDE.
+        // 2026-05-25 ask · "always opening Del code is unnecessary · I
+        // want same flow as Claude Code, see process inline".
         const accFiles: Array<{ path: string; content: string }> = [];
         let projectName = "Generated project";
         const r = await fetch("/api/codegen-app-stream", {
@@ -1141,10 +1143,12 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
             if (!line) continue;
             try {
               const ev = JSON.parse(line.slice(6)) as { t: string;[k: string]: unknown };
-              if (ev.t === "plan_done") {
+              if (ev.t === "plan_start") {
+                setCodeProgress({ index: 0, total: 0, path: "", status: "★ planner · drafting file tree" });
+              } else if (ev.t === "plan_done") {
                 const proj = ev.project as { name?: string; files?: Array<{ path: string; purpose?: string }> };
                 projectName = proj.name ?? projectName;
-                setCodeProgress({ index: 0, total: proj.files?.length ?? 0, path: "(plan)", status: "planning done · writing files" });
+                setCodeProgress({ index: 0, total: proj.files?.length ?? 0, path: "(plan)", status: `✓ planner done · ${proj.files?.length ?? 0} files queued · coder taking over` });
                 // Seed the checklist with every planned file so the
                 // user sees the full file tree before any writes land.
                 setFileChecklist(
@@ -1156,7 +1160,7 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
                   index: (ev.index as number) + 1,
                   total: ev.total as number,
                   path,
-                  status: "writing",
+                  status: "★ coder · writing",
                 });
                 setFileChecklist((prev) =>
                   prev.map((row) => (row.path === path ? { ...row, status: "writing" as const } : row)),

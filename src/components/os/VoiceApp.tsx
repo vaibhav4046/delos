@@ -221,10 +221,19 @@ export function VoiceApp() {
     // dispatches the real connector call when keys are present.
     const connectorIntents = new Set(["gmail_draft_reply", "gmail_send", "gmail_list_recent", "notion_create_page", "notion_search", "gdrive_list_recent", "gdrive_read_pdf", "github_create_repo", "github_create_issue"]);
     if (connectorIntents.has(action.intent as string)) {
-      // If server flagged integration_unavailable, surface a clear toast
       const k = (action as unknown as { kind?: string }).kind;
       const deepLink = (action as unknown as { deepLink?: string }).deepLink;
       const provider = (action as unknown as { provider?: string }).provider;
+      const composeUrl = (action as unknown as { composeUrl?: string }).composeUrl;
+      // VP-6 · if server gave a composeUrl (real Gmail compose link), open it
+      // in a new tab so user sees a real draft form even without OAuth.
+      if (composeUrl) {
+        window.open(composeUrl, "_blank", "noopener,noreferrer");
+        window.dispatchEvent(new CustomEvent("toast", {
+          detail: { text: `✉ Gmail draft opened · ${provider ?? "gmail"}`, tone: "ok" },
+        }));
+        return;
+      }
       if (k === "integration_unavailable") {
         window.dispatchEvent(new CustomEvent("toast", {
           detail: { text: `${provider ?? "Integration"} not connected · open Settings`, tone: "warn" },
