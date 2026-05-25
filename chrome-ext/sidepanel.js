@@ -204,8 +204,17 @@ function renderEvent(ev) {
       return `${muted(t)} ${tag("muted", "m")} ${esc(ev.key)}=${ev.value}`;
     case "answer":
       return `<div class="answer">${tag("info", "answer")} ${esc(ev.text)}</div>`;
-    case "error":
-      return `${muted(t)} ${tag("bad", "ERR")} ${esc(ev.message)}`;
+    case "error": {
+      // EXT-3 · clearer messaging when upstream LLM rate-limits or 5xxs.
+      // The orchestrator already synthesizes a fallback answer in this case
+      // — we just need to translate the technical message into UX-friendly text.
+      const raw = String(ev.message ?? "");
+      let friendly = raw;
+      if (/provider|429|rate.?limit/i.test(raw)) friendly = "Provider rate-limited · agent fell back. Retry in ~30s.";
+      else if (/timeout/i.test(raw)) friendly = "LLM call timed out · retry in a moment.";
+      else if (/api.?key|unauthor/i.test(raw)) friendly = "Auth issue with upstream provider · check env.";
+      return `${muted(t)} ${tag("bad", "ERR")} ${esc(friendly)}`;
+    }
   }
   return "";
 }
@@ -574,6 +583,37 @@ function toggleSttIntoGoal() {
 $("#voiceBtn").addEventListener("click", voiceTurn);
 $("#stopSpeakBtn").addEventListener("click", () => window.speechSynthesis?.cancel());
 
+// EXT-1 · trigger Chrome mic-permission prompt for side panel origin. Without
+// this, SpeechRecognition errors with "not-allowed" because Chrome blocks mic
+// on chrome-extension:// origins until the user explicitly grants. Idempotent ·
+// once granted, the cached permission means future getUserMedia calls return
+// immediately without re-prompt.
+let micGranted = false;
+async function ensureMicPermission() {
+  if (micGranted) return true;
+  if (!navigator?.mediaDevices?.getUserMedia) {
+    appendLog("voiceLog", `${tag("bad", "voice")} mediaDevices unavailable · update Chrome`);
+    return false;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // We don't need the stream itself — just the permission grant. Release it.
+    stream.getTracks().forEach((t) => t.stop());
+    micGranted = true;
+    return true;
+  } catch (e) {
+    const name = e?.name || "error";
+    const guide = name === "NotAllowedError" || name === "PermissionDeniedError"
+      ? "Click the 🔒 / 🎤 icon in the URL bar OR open chrome://settings/content/microphone and allow chrome-extension:// origin"
+      : name === "NotFoundError"
+        ? "No microphone detected. Plug one in + retry."
+        : "Mic permission failed: " + (e?.message || name);
+    appendLog("voiceLog", `${tag("bad", "voice")} ${esc(guide)}`);
+    setVoiceStatus("idle", "READY", "mic denied — see log");
+    return false;
+  }
+}
+
 async function voiceTurn() {
   const Ctor = getSttCtor();
   if (!Ctor) {
@@ -584,6 +624,10 @@ async function voiceTurn() {
     state.voiceRec.stop();
     return;
   }
+  // EXT-1 · pre-flight mic permission BEFORE creating SpeechRecognition
+  const okMic = await ensureMicPermission();
+  if (!okMic) return;
+
   state.voiceLoop = $("#voiceLoop").checked;
   state.voiceAuto = $("#voiceAuto").checked;
   const rec = new Ctor();
@@ -629,10 +673,22 @@ async function voiceTurn() {
     }
   };
   rec.onerror = (e) => {
-    appendLog("voiceLog", `${tag("bad", "voice")} ${esc(e.error || "error")}`);
+    const err = e?.error || "error";
+    const human = err === "not-allowed"
+      ? "Chrome blocked mic. Click the 🔒 in the URL bar → allow microphone, OR open chrome://settings/content/microphone"
+      : err === "no-speech"
+        ? "Heard nothing — speak closer to mic"
+        : err === "audio-capture"
+          ? "Mic hardware busy — close other apps using mic"
+          : err === "network"
+            ? "Network error — speech server unreachable"
+            : err;
+    appendLog("voiceLog", `${tag("bad", "voice")} ${esc(human)}`);
     state.voiceRec = null;
     $("#voiceBtn").textContent = "🎤 HOLD TO TALK";
-    setVoiceStatus("idle", "READY", "error — retry");
+    setVoiceStatus("idle", "READY", err === "not-allowed" ? "mic denied — see log" : "error — retry");
+    // For not-allowed, reset granted flag so next click re-prompts
+    if (err === "not-allowed" || err === "service-not-allowed") micGranted = false;
   };
   rec.start();
   state.voiceRec = rec;
