@@ -148,14 +148,20 @@ function Line({ ev, base }: { ev: RunEvent; base: number }) {
           <div className="mt-1 text-[color:var(--fg)] whitespace-pre-wrap">{ev.text}</div>
         </div>
       );
-    case "error":
+    case "error": {
+      // Brutal-QA · /run synthesises a `t:answer` fallback after every
+      // error, so the user always gets *something*. Render error as a
+      // soft yellow "RECOVERED" pill instead of red GAME OVER unless
+      // the message is truly terminal.
+      const fatal = /^(auth_failed|tenant_mismatch|forbidden)\b/i.test(ev.message || "");
       return (
         <div className="py-0.5">
           <span className="text-[color:var(--muted)]">{t} </span>
-          {tag("pill-bad", "GAME OVER")}
-          <span style={{ color: "var(--danger)" }}>{ev.message}</span>
+          {fatal ? tag("pill-bad", "GAME OVER") : tag("pill-warn", "RECOVERED")}
+          <span style={{ color: fatal ? "var(--danger)" : "var(--warn)" }}>{ev.message}</span>
         </div>
       );
+    }
     default:
       return null;
   }

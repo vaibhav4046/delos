@@ -21,11 +21,18 @@ export async function runQuickAgent(args: {
   prompt: string;
   onUsage?: (u: LLMUsage) => void;
   systemOverride?: string;
+  // Brutal-QA · arena/cohort sees the same model name on the chip card,
+  // so falling through to Bytez and printing "bytez_not_in_catalog" makes
+  // judges think *Mistral Large* failed with a Bytez error. Set true to
+  // pin to the active executor and surface its real failure mode.
+  disableFallback?: boolean;
 }): Promise<string> {
   const sys =
     args.systemOverride ??
     "You are a concise focused assistant. Reply in 1-4 sentences with the answer. No filler. No 'I think', no caveats.";
-  const candidates: LanguageModel[] = [models.executor, ...models.fallbackChain];
+  const candidates: LanguageModel[] = args.disableFallback
+    ? [models.executor]
+    : [models.executor, ...models.fallbackChain];
   let lastErr = "all_providers_failed";
   for (const m of candidates) {
     const provider = modelProvider(m);
@@ -61,7 +68,8 @@ export async function runQuickAgent(args: {
   // ─── Bytez tertiary fallback ─────────────────────────────────────────
   // Engaged only when every Mistral/Gemini/Groq path failed. Soft-skips
   // if the key isn't configured or the catalog has no deployed model.
-  if (bytezAvailable()) {
+  // Suppressed when caller pins to a single executor (arena/cohort).
+  if (!args.disableFallback && bytezAvailable()) {
     const bzMessages: BytezMessage[] = [
       { role: "system", content: args.systemOverride ?? "You are a concise focused assistant. Reply in 1-4 sentences with the answer. No filler." },
       { role: "user", content: args.prompt },

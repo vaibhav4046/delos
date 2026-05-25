@@ -67,10 +67,13 @@ export function Dock({
   const All = Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>;
   const open = new Set(openIds);
 
-  // Magnification params
-  const BASE_SIZE = 24;
-  const MAX_BOOST = 22;
-  const SIGMA = 56;
+  // Magnification params · brutal-QA · was 24/22/56 — icons jumped 22px
+  // on hover (almost 2× size) with sigma 56 (narrow, wobbly). New 20/6/96
+  // gives a subtle 30% bump over a wide-enough zone that the transition
+  // doesn't feel like icons are vibrating under the cursor.
+  const BASE_SIZE = 20;
+  const MAX_BOOST = 6;
+  const SIGMA = 96;
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -170,7 +173,7 @@ export function Dock({
 
   return (
     <footer
-      className="absolute bottom-0 left-0 right-0 z-[100] flex items-end justify-center px-2 sm:px-4 py-2 sm:py-3 pointer-events-none"
+      className="absolute bottom-0 left-0 right-0 z-[100] flex items-end justify-center px-2 sm:px-4 py-1 sm:py-1.5 pointer-events-none"
       style={{
         background: "transparent",
         transform: dockTranslate,
@@ -184,7 +187,7 @@ export function Dock({
         onPointerLeave={onLeave}
         onMouseEnter={() => setRevealed(true)}
         data-app-dock
-        className="flex items-end gap-1 sm:gap-2 px-3 sm:px-4 py-2 sm:py-3 overflow-x-auto pointer-events-auto max-w-[calc(100vw-1rem)]"
+        className="flex items-end gap-0.5 sm:gap-1 px-2 sm:px-3 py-1 sm:py-1.5 overflow-x-auto pointer-events-auto max-w-[calc(100vw-1rem)]"
         style={{
           background: "rgba(var(--bg-rgb), 0.88)",
           border: "2px solid var(--surface-2)",
@@ -210,9 +213,9 @@ export function Dock({
             const dx = Math.abs(center - mx);
             const w = Math.exp(-(dx * dx) / (2 * SIGMA * SIGMA));
             size = BASE_SIZE + MAX_BOOST * w;
-            lift = -10 * w;
+            lift = -3 * w;
           }
-          const pad = Math.round(8 + (size - BASE_SIZE) * 0.4);
+          const pad = Math.round(6 + (size - BASE_SIZE) * 0.3);
           return (
             <div key={key} className="relative group flex-shrink-0">
               <button
@@ -225,8 +228,12 @@ export function Dock({
                   padding: pad,
                   background: isFocused ? "var(--accent)" : isOpen ? "var(--surface-2)" : "var(--surface)",
                   border: `2px solid ${isFocused ? "var(--accent)" : isOpen ? "var(--accent)" : "var(--surface-2)"}`,
-                  transform: `translateY(${lift}px)${isBouncing ? " scale(1.18)" : ""}`,
-                  transition: "transform 140ms cubic-bezier(0.34, 1.56, 0.64, 1), background 200ms, border-color 200ms, padding 140ms",
+                  transform: `translateY(${lift}px)${isBouncing ? " scale(1.10)" : ""}`,
+                  // Brutal-QA · was cubic-bezier(0.34, 1.56, 0.64, 1) — the
+                  // overshoot bounce on every pointer move read as wobble.
+                  // Smooth ease-out kills the vibration without losing the
+                  // hover lift. Bounce reserved for the launch click.
+                  transition: "transform 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94), background 200ms, border-color 200ms, padding 180ms",
                   cursor: "pointer",
                   boxShadow: isOpen
                     ? "0 0 0 1px var(--bg), 0 0 0 2px var(--accent), 3px 3px 0 var(--shadow)"

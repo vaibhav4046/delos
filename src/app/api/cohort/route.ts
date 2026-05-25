@@ -133,10 +133,14 @@ export async function POST(req: NextRequest) {
             }
             return withModels({ executor: m as ModelKey }, async () => {
               const t0 = Date.now();
+              // Arena pins each row to ONE model · disable fallback so
+              // Mistral's failure is reported as Mistral, not as the
+              // Bytez tertiary's "not_in_catalog". Brutal-QA fix.
               const text = await runQuickAgent({
                 prompt: goal,
                 systemOverride:
                   "You are a focused expert. Answer the question directly with 2-6 sentences. No filler.",
+                disableFallback: true,
               });
               return { text, ms: Date.now() - t0 };
             });
