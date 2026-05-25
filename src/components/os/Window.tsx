@@ -140,13 +140,20 @@ export function Window({
     snapHoverTimerRef.current = setTimeout(() => setSnapMenuOpen(false), 250);
   }
 
+  // UI-4 · maximize was producing tall-thin windows when bounds.width was
+  // stale (race on hot reload). Defensively clamp to the actual viewport so
+  // maximize always fills the screen edge-to-edge. Also enforce a useful
+  // minimum on non-maximized state so a slip during resize can't shrink to
+  // 80px wide and lose the scrollbar / close button.
+  const vw = typeof window !== "undefined" ? Math.max(bounds.width, window.innerWidth) : bounds.width;
+  const vh = typeof window !== "undefined" ? Math.max(bounds.height, window.innerHeight) : bounds.height;
   const targetX = maximized ? 0 : win.x;
   const targetY = maximized ? 48 : win.y;
-  const targetW = maximized ? bounds.width : win.width;
+  const targetW = maximized ? vw : Math.max(240, win.width);
   // Reserve top bar (48px) + dock + dock-magnification headroom (~104px total)
   // so maximized windows never hide their own bottom controls (chat input, send)
   // behind the dock. Was 56 — Del Assistant input was clipped at 1440x900.
-  const targetH = maximized ? bounds.height - 48 - 104 : win.height;
+  const targetH = maximized ? vh - 48 - 104 : Math.max(180, win.height);
 
   return (
     <>
@@ -264,21 +271,23 @@ export function Window({
           <AppErrorBoundary appName={win.title}>{win.content}</AppErrorBoundary>
         </div>
 
-        {/* Resize handles — only when not maximized. Use very thin hit regions
-            along each edge + 12×12 corners. cursor + pointerdown wired in. */}
+        {/* Resize handles — only when not maximized. UI-4 · handles now live
+            ENTIRELY OUTSIDE the window content (offset -8 instead of -2) so
+            they never eat clicks on the inner scrollbar. East/south edges
+            were stealing scrollbar drag because they overlapped the rightmost
+            10px of content. SE corner grip remains *just* inside so the user
+            still sees the diagonal-resize affordance — but only 4px into the
+            window, well clear of any scrollbar gutter. */}
         {!maximized && onResize && (
           <>
-            {/* UI-3 · doubled edge handle hit targets (6→12) + larger corner
-                grips (12→20, 14→24) so resize "just works" without precise
-                cursor placement. Was a common QA gripe. */}
-            <ResizeHandle edge="n"  onDown={startResize} style={{ top: -2, left: 12, right: 12, height: 12 }} />
-            <ResizeHandle edge="s"  onDown={startResize} style={{ bottom: -2, left: 12, right: 12, height: 12 }} />
-            <ResizeHandle edge="e"  onDown={startResize} style={{ right: -2, top: 12, bottom: 12, width: 12 }} />
-            <ResizeHandle edge="w"  onDown={startResize} style={{ left: -2, top: 12, bottom: 12, width: 12 }} />
-            <ResizeHandle edge="ne" onDown={startResize} style={{ top: -2, right: -2, width: 20, height: 20 }} />
-            <ResizeHandle edge="nw" onDown={startResize} style={{ top: -2, left: -2, width: 20, height: 20 }} />
-            <ResizeHandle edge="se" onDown={startResize} style={{ bottom: -2, right: -2, width: 24, height: 24 }} grip />
-            <ResizeHandle edge="sw" onDown={startResize} style={{ bottom: -2, left: -2, width: 20, height: 20 }} />
+            <ResizeHandle edge="n"  onDown={startResize} style={{ top: -8, left: 16, right: 16, height: 10 }} />
+            <ResizeHandle edge="s"  onDown={startResize} style={{ bottom: -8, left: 16, right: 16, height: 10 }} />
+            <ResizeHandle edge="e"  onDown={startResize} style={{ right: -8, top: 16, bottom: 16, width: 10 }} />
+            <ResizeHandle edge="w"  onDown={startResize} style={{ left: -8, top: 16, bottom: 16, width: 10 }} />
+            <ResizeHandle edge="ne" onDown={startResize} style={{ top: -8, right: -8, width: 18, height: 18 }} />
+            <ResizeHandle edge="nw" onDown={startResize} style={{ top: -8, left: -8, width: 18, height: 18 }} />
+            <ResizeHandle edge="se" onDown={startResize} style={{ bottom: -8, right: -8, width: 22, height: 22 }} grip />
+            <ResizeHandle edge="sw" onDown={startResize} style={{ bottom: -8, left: -8, width: 18, height: 18 }} />
           </>
         )}
       </motion.div>

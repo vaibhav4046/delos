@@ -455,17 +455,28 @@ button:focus-visible,
   color: var(--on-accent);
 }
 
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: var(--surface); }
+/* UI-4 · scrollbar made visibly clickable. Was 10px with surface-2 thumb
+ * (near-invisible on the surface track). Bumped to 14px wide, thumb is
+ * accent-shadow (gold-dim) so users see the bar without hover, accent on
+ * hover, with a chunky outline so it pops on dark surfaces. */
+::-webkit-scrollbar { width: 14px; height: 14px; }
+::-webkit-scrollbar-track {
+  background: var(--surface);
+  border-left: 1px solid var(--surface-2);
+}
 ::-webkit-scrollbar-thumb {
-  background: var(--surface-2);
-  border: 2px solid var(--surface);
+  background: var(--accent-shadow, #B89500);
+  border: 3px solid var(--surface);
+  border-radius: 0;
+  min-height: 30px;
   transition: background 120ms ease;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+::-webkit-scrollbar-thumb:active { background: var(--accent); border-color: var(--surface-2); }
+::-webkit-scrollbar-corner { background: var(--surface); }
 * {
-  scrollbar-color: var(--surface-2) var(--surface);
-  scrollbar-width: thin;
+  scrollbar-color: var(--accent-shadow, #B89500) var(--surface);
+  scrollbar-width: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {

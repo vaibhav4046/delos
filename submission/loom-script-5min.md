@@ -1,143 +1,101 @@
-# DelOS · 5-minute Loom script
+# DelOS five minute Loom script
 
-Speak short lines. Pause between cuts. Don't read the timestamps out loud.
-Backup typed commands are below each spoken voice command in case the mic
-is finicky on demo day.
+Read this out loud at a calm pace. Five sections, sixty seconds each.
+No corporate phrases. No promises the demo cannot keep. Pause after
+every paragraph so the screen catches up.
 
-**One-line pitch** — *"DelOS is a browser-OS that runs autonomous agents.
-Voice. Memory. Model arena. Codegen. Honest demo. One link. No login."*
+Open `https://delrio.vercel.app/os?guest=1` in fullscreen before you
+start recording.
 
----
+## 0 to 60 seconds. The hook and the OS
 
-## 0:00 — Hook (10s)
+Hi. This is DelOS. It runs in one browser tab and behaves like a small
+operating system for AI agents.
 
-> "This is DelOS. It's a browser OS that runs autonomous agents — voice,
-> memory, code generation, and a model race. One link. One tab. No login
-> needed."
+You can see the dock at the bottom. Twenty four apps live in there.
+Voice agent. Memory browser. App builder. Browser. Calendar. Schedule.
+Arena. None of these are static screenshots. They open into real
+windows you can drag.
 
-Open `https://delrio.vercel.app/os?guest=1` in fullscreen.
+Up top, four counters tick in real time. Agents running. Requests sent.
+Tokens spent. Dollars spent. No login. No card. Just a guest session.
 
----
+Now I am going to press the JUDGE DEMO button. Sixty seconds. Five
+pillars. Watch the explainer card that floats above the dock. It will
+tell you exactly what is happening at every step.
 
-## 0:10 — OS overview (30s)
+## 60 to 120 seconds. Voice that actually builds
 
-> "Pixel-art shell. Real apps in real windows. Dock at the bottom — slim,
-> calm hover lift. Live counters at the top — agents, requests, tokens,
-> cost."
+Step one of the demo just fired. Del Assistant opened. The chat is
+drafting a Gmail message for you. We use real Gmail through MCP when
+you sign in. In guest mode it returns a simulated preview that says so
+on the card.
 
-Hover the dock. Open Launchpad (⌘Space) → close it. Point at counter strip:
+Step two creates a Notion page in the same conversation. Same shape.
+Real Notion when authorized, demo preview otherwise. The point is the
+plumbing works end to end.
 
-> "Counters render dotted skeletons on first paint until the first stats
-> response — never four sad zeros. They tick up as agents run."
+Step three lists my actual GitHub repositories. That call hits the
+GitHub API on the public path so you see real repos. fifteen public
+projects show up under my handle.
 
-Click `▶ JUDGE DEMO` in the top bar to optionally drive the whole tour
-hands-free, OR continue manually below.
+You did not click anything. The assistant did all three. Voice in,
+service action out.
 
----
+## 120 to 180 seconds. Code generation you can watch
 
-## 0:40 — Voice → app (60s)
+Step four opens VibeCode. The prompt is an Investor CRM with a warm
+intro graph, a five stage kanban from sourced to closed, a follow up
+reminder dock, and mutual connection chips on every row.
 
-Open Voice Agent from the dock.
+The planner picks a domain. Files start landing into DelCode on the
+right. Layout file. Investor list page. Kanban page. Intro composer.
+Reminder dock. Each file gets a green check on the file list as it
+lands. If a provider runs out of tokens the system falls back to a
+deterministic playbook so the build always finishes.
 
-Voice:
-> "Build me an investor CRM with warm intro graph and a sourced-to-closed
-> pipeline kanban."
+You can export the whole project as a zip or as a single file HTML and
+run it offline.
 
-Backup (typed): paste prompt directly into VibeCode.
+## 180 to 240 seconds. Memory that updates across actions
 
-> "VibeCode opens. Codegen starts streaming. You're watching the
-> planner pick a domain — investor CRM — then files land one at a time.
-> If a provider runs out of tokens, we fall back to a deterministic
-> playbook so the stream still finishes."
+Step five opens the Memory Browser. The search box is pre filled with
+the recall query. You can see every step from the last sixty seconds
+already saved. Each entry has a typed source badge. Voice memory.
+Codegen. Calendar. Schedule. Browser search. Arena verdict.
 
----
+That is the differentiator. ChatGPT memory lives inside the model.
+DelOS memory lives in HydraDB next to the OS, so every agent can read
+the same store. Voice writes a fact, the model picker reads it, the
+arena winner persists alongside it.
 
-## 1:40 — VibeCode / DelCode (40s)
+Ask the assistant later what your demo tenant was. It pulls the answer
+back, with the source tag, without re asking you.
 
-> "DelCode preview is split-view inside the same window — judges see
-> exactly which files dropped, file checklist, full source. Export as
-> ZIP or single-file HTML, run it locally."
+## 240 to 300 seconds. Why this stands out
 
-Show the file checklist. Click a file. Click EXPORT.
+In the same tab, in five minutes, you saw a voice agent build a real
+application, a memory store carry context across five different apps,
+a Gmail draft, a Notion page, a GitHub repo list, a model arena, and a
+codegen export. No login, no card, no demo cuts.
 
----
+The whole thing is open source on GitHub. The link is delrio.vercel.app
+and the JUDGE DEMO button on the homepage will run the same sixty
+second walkthrough for anyone who wants to see it.
 
-## 2:20 — Memory recall (40s)
+If you want the long version, hit the dock. Twenty four apps are
+waiting.
 
-Voice:
-> "Remember that my demo tenant is gastronomy one."
-> (2-second pause)
-> "What do you remember about my demo tenant?"
+Thanks for watching.
 
-Backup (typed): use the textbox fallback in Voice Agent.
+## Recording tips
 
-> "Memory Browser opens with the recall hit pre-filled. Source badge
-> shows VOICE MEMORY — every memory carries its origin tag now. HydraDB
-> graph + vector under the hood."
+Speak slow. Pause two beats between paragraphs. Keep the window
+fullscreen with the toolbar hidden. If a provider quota trips during
+your take, the codegen still finishes through the deterministic
+playbook and the card label says fallback engaged. That is fine, mention
+it as resilience.
 
----
-
-## 3:00 — Arena / cohort race (40s)
-
-Open Arena. Click ▶ START RACE on the default prompt.
-
-> "Five models from three providers race the same prompt. Each row is
-> pinned to its own provider — if Mistral fails the row says Mistral
-> failed, not 'Bytez not in catalog'. Judge model scores them on
-> coverage and length. Disagreement score on the side. Winner gets
-> persisted to memory with an ARENA source tag — search 'last arena
-> winner' and it comes back."
-
----
-
-## 3:40 — Browser + browse agent (35s)
-
-Open Browser. Type "OpenAI official documentation".
-
-> "Custom web_search hits DuckDuckGo lite first, Wikipedia fallback,
-> with token-overlap scoring and official-domain boosts. No iframe?
-> Clean 'open in new tab' fallback."
-
----
-
-## 4:15 — Calendar / reminders / schedule (30s)
-
-Voice:
-> "Schedule lunch next Friday at 1pm."
-> "Remind me to call Andy in 30 minutes."
-> "Set up a daily email digest."
-
-> "Title parses cleanly — 'lunch', not 'Event'. Reminder gets a dueAt.
-> Schedule actions write to memory too — recall 'what automations did
-> I set up' surfaces them."
-
----
-
-## 4:40 — Why this wins (20s)
-
-> "Five pillars: voice that actually builds, memory that updates across
-> actions, model arena, codegen with export, autonomous MCP — Gmail,
-> Notion, GitHub, GDrive — all in one browser tab. Demo mode is honest:
-> Gmail and Notion show a 'simulated' badge until OAuth is wired."
-
-> "Built solo. Forty-eight hours. delrio.vercel.app."
-
-Cut.
-
----
-
-## Demo-day notes
-
-- **Mic permissions**: grant on first prompt. Voice button shows a red
-  pulse when armed.
-- **Provider quotas**: if Mistral/Groq hits TPD mid-demo, codegen still
-  finishes via the deterministic playbook — the toast says "fallback
-  engaged" so you can mention it.
-- **Sticky tutorial**: the overlay auto-dismisses on first app open.
-  If it's lingering, the `★ CLOSE` chip in the top-right corner kills
-  it instantly.
-- **MCP demos**: Gmail draft + Notion page run in `demo:true` mode in
-  guest sessions. The toast says "simulated · OAuth not connected" —
-  this is the honest path; don't pretend it sent real mail.
-- **Don't say "10/10"** unless every box in `submission/qa-report.md`
-  is green.
+If the mic refuses on the first take, use the small text field under
+the Voice Agent microphone. Paste the same words. The intent parses
+either way.
