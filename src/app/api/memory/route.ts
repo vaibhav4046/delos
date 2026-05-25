@@ -58,16 +58,22 @@ export async function GET(req: NextRequest) {
   const topKParam = req.nextUrl.searchParams.get("topK");
   const topK = topKParam ? Math.max(1, Math.min(50, Number(topKParam))) : 12;
   await autoSeedIfEmpty(tenantId);
-  const hits = await safeRecall({ tenantId, query: q, topK });
+  let hits = await safeRecall({ tenantId, query: q, topK });
   // B08 · query-sensitive local recall. Empty queries → chronological
-  // tail so the dashboard always shows something on first open. Unmatched
-  // queries → chronological tail too (so vague prompts like "recent" or
-  // "my stuff" surface entries instead of an empty pane). Tight queries
-  // still get the relevance-scored slice.
+  // tail. Unmatched vague queries → fall through to recency. Tight
+  // queries still get the relevance-scored slice. Cold-lambda recovery:
+  // when localFallback is empty (process-local store on a different
+  // lambda instance) try a broad recall against Hydra with a generic
+  // sweep query so the dashboard never renders empty after auto-seed.
   const localAll = getLocalFallback(tenantId);
   let local = q.trim() ? recallLocal(q, localAll, topK) : [];
   if (local.length === 0 && localAll.length > 0) {
     local = localAll.slice(-topK).reverse();
+  }
+  if (hits.length === 0 && local.length === 0) {
+    // Sweep Hydra with broad terms to surface SOMETHING for fresh
+    // tenants whose lambda doesn't have localFallback populated.
+    hits = await safeRecall({ tenantId, query: "run research user", topK });
   }
   return Response.json({ query: q, hits, local, tenantId, scope: source });
 }
@@ -86,11 +92,14 @@ export async function POST(req: NextRequest) {
   const { tenantId, source } = await resolveTenant(req);
   const topK = Math.max(1, Math.min(50, Number(body.topK ?? 12)));
   await autoSeedIfEmpty(tenantId);
-  const hits = await safeRecall({ tenantId, query: q, topK });
+  let hits = await safeRecall({ tenantId, query: q, topK });
   const localAll = getLocalFallback(tenantId);
   let local = q.trim() ? recallLocal(q, localAll, topK) : [];
   if (local.length === 0 && localAll.length > 0) {
     local = localAll.slice(-topK).reverse();
+  }
+  if (hits.length === 0 && local.length === 0) {
+    hits = await safeRecall({ tenantId, query: "run research user", topK });
   }
   return Response.json({ query: q, hits, local, tenantId, scope: source });
 }

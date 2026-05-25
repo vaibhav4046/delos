@@ -79,8 +79,108 @@ function pageReadFn() {
   };
 }
 
+// EXT-V3-1 · DelOS visual overlay primitives — injected into the active tab so
+// the user sees what the agent is about to do, Perplexity/Claude-in-Chrome
+// style. Three roles: click (blue), fill (orange), destructive (red). Lives
+// behind a single window.__delosOverlay namespace so repeated injection is a
+// no-op except for the new action call.
+function pageOverlayBootFn() {
+  if (window.__delosOverlay) return { ok: true, already: true };
+  const overlay = {};
+  const COLORS = {
+    click: "#3a86ff",
+    fill: "#fb8500",
+    destructive: "#e63946",
+    nav: "#06d6a0",
+    info: "#fbc531",
+  };
+  const styleEl = document.createElement("style");
+  styleEl.id = "__delos-overlay-style";
+  styleEl.textContent = `
+    @keyframes __delos_pulse {
+      0%   { box-shadow: 0 0 0 0 var(--__delos_c), 0 0 0 2px var(--__delos_c); opacity: 1; }
+      70%  { box-shadow: 0 0 0 14px transparent, 0 0 0 2px var(--__delos_c); opacity: 1; }
+      100% { box-shadow: 0 0 0 0 transparent, 0 0 0 2px var(--__delos_c); opacity: 1; }
+    }
+    .__delos-highlight {
+      outline: 3px solid var(--__delos_c) !important;
+      outline-offset: 2px !important;
+      border-radius: 4px !important;
+      transition: outline-color 200ms ease !important;
+      animation: __delos_pulse 900ms ease-out 2 !important;
+    }
+    .__delos-banner {
+      position: fixed !important;
+      top: 16px !important;
+      right: 16px !important;
+      z-index: 2147483647 !important;
+      background: rgba(20,20,30,0.92) !important;
+      color: var(--__delos_c, #fbc531) !important;
+      padding: 10px 14px !important;
+      border-left: 4px solid var(--__delos_c, #fbc531) !important;
+      border-radius: 4px !important;
+      font: 600 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif !important;
+      letter-spacing: 0.3px !important;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.04) !important;
+      backdrop-filter: blur(6px) !important;
+      -webkit-backdrop-filter: blur(6px) !important;
+      max-width: 360px !important;
+      transform: translateX(120%) !important;
+      transition: transform 220ms cubic-bezier(0.2,0.9,0.25,1) !important;
+      pointer-events: none !important;
+    }
+    .__delos-banner.__on { transform: translateX(0) !important; }
+    .__delos-banner-sub {
+      display: block !important;
+      font-weight: 400 !important;
+      font-size: 11px !important;
+      color: rgba(255,255,255,0.65) !important;
+      margin-top: 2px !important;
+    }
+  `;
+  document.documentElement.appendChild(styleEl);
+
+  overlay.banner = (() => {
+    const el = document.createElement("div");
+    el.className = "__delos-banner";
+    el.innerHTML = '<div class="__delos-banner-main">🤖 DelOS</div><div class="__delos-banner-sub"></div>';
+    document.documentElement.appendChild(el);
+    return el;
+  })();
+  overlay.bannerTimer = null;
+  overlay.setBanner = (message, kind = "info", subtitle = "", durationMs = 0) => {
+    const color = COLORS[kind] || COLORS.info;
+    overlay.banner.style.setProperty("--__delos_c", color);
+    overlay.banner.querySelector(".__delos-banner-main").textContent = "🤖 DelOS · " + String(message).slice(0, 80);
+    overlay.banner.querySelector(".__delos-banner-sub").textContent = String(subtitle || "").slice(0, 140);
+    overlay.banner.classList.add("__on");
+    if (overlay.bannerTimer) clearTimeout(overlay.bannerTimer);
+    if (durationMs > 0) {
+      overlay.bannerTimer = setTimeout(() => overlay.banner.classList.remove("__on"), durationMs);
+    }
+  };
+  overlay.clearBanner = () => {
+    overlay.banner.classList.remove("__on");
+    if (overlay.bannerTimer) clearTimeout(overlay.bannerTimer);
+  };
+
+  overlay.highlight = (el, kind = "click", durationMs = 1200) => {
+    if (!el || el.nodeType !== 1) return;
+    const color = COLORS[kind] || COLORS.click;
+    el.style.setProperty("--__delos_c", color);
+    el.classList.add("__delos-highlight");
+    setTimeout(() => {
+      el.classList.remove("__delos-highlight");
+      el.style.removeProperty("--__delos_c");
+    }, durationMs);
+  };
+  window.__delosOverlay = overlay;
+  return { ok: true, mounted: true };
+}
+
 /** Find a clickable element by visible text (case-insensitive substring)
- *  and click it. Tries common interactive selectors first. */
+ *  and click it. EXT-V3-1 · pulses a blue outline before clicking so the user
+ *  sees exactly what the agent is targeting. */
 function pageClickFn(needle) {
   if (!needle) return { ok: false, error: "empty needle" };
   const want = String(needle).trim().toLowerCase();
@@ -104,7 +204,14 @@ function pageClickFn(needle) {
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) continue;
         el.scrollIntoView({ block: "center", behavior: "instant" });
-        el.click();
+        // EXT-V3-1 · pulse blue highlight before click so the user sees the
+        // target. Banner text updates with the matched label.
+        if (window.__delosOverlay) {
+          window.__delosOverlay.highlight(el, "click", 1200);
+          window.__delosOverlay.setBanner("clicking", "click", label.slice(0, 80), 1800);
+        }
+        // Small delay so the highlight is visible before the click fires.
+        setTimeout(() => el.click(), 300);
         return { ok: true, clicked: label.slice(0, 80) };
       }
     }
@@ -138,12 +245,58 @@ function pageFillFn(field, value) {
       .map((s) => String(s).toLowerCase());
     if (labels.some((l) => l === want || l.includes(want))) {
       el.focus();
+      // EXT-V3-1 · orange highlight + banner before fill.
+      if (window.__delosOverlay) {
+        window.__delosOverlay.highlight(el, "fill", 1400);
+        window.__delosOverlay.setBanner(
+          "filling",
+          "fill",
+          `${labels[0]} ← ${String(value).slice(0, 40)}`,
+          2000,
+        );
+      }
       if (el.isContentEditable) el.innerText = String(value);
       else setVal(el, String(value));
       return { ok: true, filled: labels[0] };
     }
   }
   return { ok: false, error: `no input matching "${field}"` };
+}
+
+// EXT-V3-2 · standalone banner action (no element). Used by the side panel
+// before/after navigation, scroll, plan-start, plan-done so the user sees a
+// continuous narration. kind selects the accent color.
+function pageBannerFn(message, subtitle, kind, durationMs) {
+  if (!window.__delosOverlay) return { ok: false, error: "overlay not mounted" };
+  window.__delosOverlay.setBanner(message || "", kind || "info", subtitle || "", durationMs || 2200);
+  return { ok: true };
+}
+
+// EXT-V3-1 · dim the page to indicate the agent is acting (Perplexity does
+// this during multi-step browse). Lightweight: opacity overlay you can see
+// through, doesn't intercept clicks.
+function pageDimFn(on) {
+  let dim = document.getElementById("__delos-dim");
+  if (on) {
+    if (!dim) {
+      dim = document.createElement("div");
+      dim.id = "__delos-dim";
+      Object.assign(dim.style, {
+        position: "fixed",
+        inset: "0",
+        background: "rgba(0,0,0,0.18)",
+        pointerEvents: "none",
+        zIndex: "2147483646",
+        transition: "opacity 250ms ease",
+      });
+      document.documentElement.appendChild(dim);
+    }
+    dim.style.opacity = "1";
+  } else if (dim) {
+    dim.style.opacity = "0";
+    setTimeout(() => dim?.remove(), 300);
+  }
+  return { ok: true };
 }
 
 /** Smooth-scroll the tab. direction = up/down/top/bottom, amount in px. */
@@ -214,12 +367,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ ok: true, data: await runInTab(t.id, pageReadFn) });
             break;
           case "click":
+            // EXT-V3-1 · ensure the overlay is mounted before the click runs.
+            await runInTab(t.id, pageOverlayBootFn);
             sendResponse({ ok: true, data: await runInTab(t.id, pageClickFn, [args.needle]) });
             break;
           case "fill":
+            // EXT-V3-1 · same overlay boot for fill.
+            await runInTab(t.id, pageOverlayBootFn);
             sendResponse({
               ok: true,
               data: await runInTab(t.id, pageFillFn, [args.field, args.value]),
+            });
+            break;
+          case "overlay_boot":
+            sendResponse({ ok: true, data: await runInTab(t.id, pageOverlayBootFn) });
+            break;
+          case "banner":
+            await runInTab(t.id, pageOverlayBootFn);
+            sendResponse({
+              ok: true,
+              data: await runInTab(t.id, pageBannerFn, [args.message, args.subtitle, args.kind, args.durationMs]),
+            });
+            break;
+          case "dim":
+            await runInTab(t.id, pageOverlayBootFn);
+            sendResponse({
+              ok: true,
+              data: await runInTab(t.id, pageDimFn, [Boolean(args.on)]),
             });
             break;
           case "scroll":
@@ -237,6 +411,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const u = normalizeUrl(args.url || args.query || "");
             if (!u) return sendResponse({ ok: false, error: "could not resolve URL" });
             await chrome.tabs.update(t.id, { url: u });
+            // EXT-V3-2 · wait for the new page to finish loading, then mount
+            // the overlay + show a green "navigated" banner so the user sees
+            // continuity across the navigation.
+            chrome.tabs.onUpdated.addListener(function onLoad(tabId, info) {
+              if (tabId === t.id && info.status === "complete") {
+                chrome.tabs.onUpdated.removeListener(onLoad);
+                runInTab(t.id, pageOverlayBootFn).then(() => {
+                  runInTab(t.id, pageBannerFn, [
+                    "navigated",
+                    u.slice(0, 100),
+                    "nav",
+                    2400,
+                  ]).catch(() => {});
+                }).catch(() => {});
+              }
+            });
             sendResponse({ ok: true, data: { url: u } });
             break;
           }

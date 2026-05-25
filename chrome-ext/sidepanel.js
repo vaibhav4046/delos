@@ -451,6 +451,10 @@ async function runBrowseAgent() {
   $("#browseLog").innerHTML = "";
   browseStop = false;
   appendLog("browseLog", `${tag("info", "task")} ${esc(task)}`);
+  // EXT-V3-2 · mount overlay + show "planning" banner on the active tab so
+  // the user sees activity start on the page itself, not just the side panel.
+  await tabAction("overlay_boot");
+  await tabAction("banner", { message: "planning", subtitle: task.slice(0, 120), kind: "info", durationMs: 3500 });
 
   // Gather current tab context if checkbox checked.
   // EXT-FIX-2 · truncate fields to server schema limits BEFORE serializing so
@@ -520,11 +524,18 @@ async function runBrowseAgent() {
   for (let i = 0; i < plan.length; i++) {
     if (browseStop) {
       appendLog("browseLog", `${tag("warn", "stopped")} by user`);
+      // EXT-V3-2 · clear page banner when the user stops a run.
+      tabAction("banner", { message: "stopped by user", kind: "info", durationMs: 1800 }).catch(() => {});
       break;
     }
     const step = plan[i];
     const label = `${i + 1}/${plan.length}`;
     appendLog("browseLog", `${tag(step.tier === "destructive" ? "bad" : step.tier === "external" ? "warn" : "info", label)} ${esc(step.action)} ${esc(JSON.stringify(step.args).slice(0, 120))}`);
+    // EXT-V3-2 · narrate the step on the target page so the user sees
+    // step-by-step what the agent is doing without looking at the side panel.
+    const kind = step.tier === "destructive" ? "destructive" : step.action === "navigate" ? "nav" : step.action === "fill" ? "fill" : step.action === "click" ? "click" : "info";
+    const subtitle = step.args?.url || step.args?.needle || step.args?.field || step.args?.query || "";
+    tabAction("banner", { message: `${label} · ${step.action}`, subtitle: String(subtitle).slice(0, 120), kind, durationMs: 2400 }).catch(() => {});
 
     // Gate destructive always · external once per plan
     if (step.tier === "destructive") {
