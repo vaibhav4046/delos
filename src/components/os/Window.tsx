@@ -268,14 +268,17 @@ export function Window({
             along each edge + 12×12 corners. cursor + pointerdown wired in. */}
         {!maximized && onResize && (
           <>
-            <ResizeHandle edge="n"  onDown={startResize} style={{ top: 0, left: 8, right: 8, height: 6 }} />
-            <ResizeHandle edge="s"  onDown={startResize} style={{ bottom: 0, left: 8, right: 8, height: 6 }} />
-            <ResizeHandle edge="e"  onDown={startResize} style={{ right: 0, top: 8, bottom: 8, width: 6 }} />
-            <ResizeHandle edge="w"  onDown={startResize} style={{ left: 0, top: 8, bottom: 8, width: 6 }} />
-            <ResizeHandle edge="ne" onDown={startResize} style={{ top: 0, right: 0, width: 12, height: 12 }} />
-            <ResizeHandle edge="nw" onDown={startResize} style={{ top: 0, left: 0, width: 12, height: 12 }} />
-            <ResizeHandle edge="se" onDown={startResize} style={{ bottom: 0, right: 0, width: 14, height: 14 }} grip />
-            <ResizeHandle edge="sw" onDown={startResize} style={{ bottom: 0, left: 0, width: 12, height: 12 }} />
+            {/* UI-3 · doubled edge handle hit targets (6→12) + larger corner
+                grips (12→20, 14→24) so resize "just works" without precise
+                cursor placement. Was a common QA gripe. */}
+            <ResizeHandle edge="n"  onDown={startResize} style={{ top: -2, left: 12, right: 12, height: 12 }} />
+            <ResizeHandle edge="s"  onDown={startResize} style={{ bottom: -2, left: 12, right: 12, height: 12 }} />
+            <ResizeHandle edge="e"  onDown={startResize} style={{ right: -2, top: 12, bottom: 12, width: 12 }} />
+            <ResizeHandle edge="w"  onDown={startResize} style={{ left: -2, top: 12, bottom: 12, width: 12 }} />
+            <ResizeHandle edge="ne" onDown={startResize} style={{ top: -2, right: -2, width: 20, height: 20 }} />
+            <ResizeHandle edge="nw" onDown={startResize} style={{ top: -2, left: -2, width: 20, height: 20 }} />
+            <ResizeHandle edge="se" onDown={startResize} style={{ bottom: -2, right: -2, width: 24, height: 24 }} grip />
+            <ResizeHandle edge="sw" onDown={startResize} style={{ bottom: -2, left: -2, width: 20, height: 20 }} />
           </>
         )}
       </motion.div>

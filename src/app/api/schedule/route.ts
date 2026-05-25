@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { addAction, listActions, removeAction, type ScheduledActionKind } from "@/lib/scheduler";
 import { resolveTenant, zodErr } from "@/lib/apiAuth";
+import { safeAddMemory } from "@/lib/hydra";
 
 export const runtime = "nodejs";
 
@@ -44,6 +45,27 @@ export async function POST(req: NextRequest) {
   }
   const { tenantId } = await resolveTenant(req, { bodyTenantId });
   const action = addAction({ ...parsed.data, tenantId });
+  // Memory event · so recall surfaces "what automations did I set up" and
+  // the dashboard shows scheduled work alongside calendar events. Tag with
+  // the action kind so filtering by `read_email` etc works.
+  try {
+    const cadence = action.everyMs
+      ? `every ${Math.round(action.everyMs / 60000)} min`
+      : action.runAt
+      ? `at ${new Date(action.runAt).toISOString()}`
+      : "ad-hoc";
+    await safeAddMemory({
+      tenantId,
+      text: `Scheduled action "${action.label}" · kind=${action.kind} · ${cadence}.`,
+      metadata: {
+        runId: "schedule",
+        tags: ["schedule", action.kind],
+        source: "schedule",
+        actionId: action.id,
+        kind: action.kind,
+      },
+    });
+  } catch {}
   return Response.json({ ok: true, action });
 }
 

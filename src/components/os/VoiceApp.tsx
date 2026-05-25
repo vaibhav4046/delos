@@ -278,12 +278,12 @@ export function VoiceApp() {
         window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "terminal.run", goal: payload } }));
         break;
       case "recall_memory":
-        // "memory" OS app id resolves to the Memory Match game — wrong target.
-        // Real memory browser lives at /memory. Open Del Assistant so the user
-        // can ask the memory-aware chat, which already recalls HydraDB context.
-        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "assistant" } }));
+        // Memory Browser is the canonical recall surface — filters by tag/
+        // source, shows pinned facts, accepts memory.search via intent bus.
+        // Was incorrectly opening Del Assistant; now lands the user
+        // exactly where the recall result will render.
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "memoryBrowser" } }));
         await new Promise((r) => setTimeout(r, 400));
-        // Fire memory.search anyway — Del Assistant or future memory browser can listen.
         window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "memory.search", query: payload } }));
         break;
       case "open_app":
@@ -394,12 +394,14 @@ export function VoiceApp() {
         break;
       }
       case "store_memory": {
-        // M01 · "remember that ..." → actual memory write
+        // M01 · "remember that ..." → actual memory write. Source tag
+        // "voice-memory" lets the dashboard group voice-stored facts and
+        // recall queries filter to the right origin.
         try {
           const r = await fetch("/api/memory/write", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: `User fact · ${payload}`, tags: ["user-fact", "voice"] }),
+            body: JSON.stringify({ text: `User fact · ${payload}`, tags: ["user-fact", "voice", "voice-memory"], source: "voice-memory" }),
           });
           window.dispatchEvent(new CustomEvent("toast", {
             detail: { text: r.ok ? `Saved · ${payload.slice(0, 40)}` : "Memory write failed", tone: r.ok ? "ok" : "bad" }

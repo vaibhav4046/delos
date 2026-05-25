@@ -832,7 +832,15 @@ export default function OSPage() {
           if (step.payload) setTimeout(() => emitIntent({ kind: "assistant.ask", text: step.payload! }), 250);
           break;
         case "recall_memory":
-          spawnSystemApp("mission");
+          // Route to Memory Browser, not Mission Control. The dashboard
+          // is the canonical surface for memory recall — it filters by
+          // tag/source, shows pinned facts, and feeds the search bar
+          // straight from the payload. Mission Control was a holdover
+          // from the earlier prototype.
+          spawnSystemApp("memoryBrowser");
+          if (step.payload) {
+            setTimeout(() => emitIntent({ kind: "memory.search", query: step.payload! }), 250);
+          }
           break;
         case "change_wallpaper": {
           const idx = WALLPAPERS.findIndex((w) => w.id === wallpaper);
@@ -1268,14 +1276,8 @@ export default function OSPage() {
             order={dockOrder}
             onLaunch={(k) => { spawnSystemApp(k); setLaunchpadOpen(false); }}
           />
-          {!hintsDismissed && (
-            <HintSticky
-              onDismiss={dismissHints}
-              onTile={gridArrange}
-              onCascade={cascadeArrange}
-              onLaunchpad={() => setLaunchpadOpen(true)}
-            />
-          )}
+          {/* SH-3 · HintSticky removed · ShortcutsSticky replaces it with the
+              same shortcut info in a cleaner, dismissible panel. */}
 
           {ctxMenu && (
             <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} onPick={async (action) => {

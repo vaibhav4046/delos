@@ -35,13 +35,28 @@ const Req = z.object({
   text: z.string().min(1).max(2000),
   tags: z.array(z.string()).default([]),
   tenantId: z.string().min(1).max(120).optional(),
+  // Caller can hint the source — used by VoiceApp store_memory to tag
+  // "voice-memory" instead of the generic "memory-write" default so the
+  // dashboard can group by origin. Allowed values are whitelisted to
+  // stop arbitrary string injection.
+  source: z.enum([
+    "memory-write",
+    "voice-memory",
+    "codegen",
+    "arena",
+    "browser-search",
+    "calendar",
+    "schedule",
+    "user-fact",
+    "assistant",
+  ]).optional(),
 });
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.json().catch(() => ({}));
   const parsed = Req.safeParse(rawBody);
   if (!parsed.success) return zodErr(parsed.error);
-  const { text, tags } = parsed.data;
+  const { text, tags, source } = parsed.data;
   // B10 · write-guard front-and-center. Returns 400 + reason.
   const guard = guardMemoryWrite(text);
   if (!guard.ok) {
@@ -68,7 +83,7 @@ export async function POST(req: NextRequest) {
   await safeAddMemory({
     tenantId,
     text: safeText,
-    metadata: { tags: safeTags, source: "memory-write" },
+    metadata: { tags: safeTags, source: source ?? "memory-write" },
   });
   return Response.json({ ok: true, tenantId });
 }

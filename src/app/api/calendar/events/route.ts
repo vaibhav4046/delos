@@ -10,6 +10,7 @@ import { listEvents, createEvent, removeEvent } from "@/lib/calendarStore";
 import { parseWhen, validateCalendarParse, isCoherentTimeText } from "@/lib/time/parseWhen";
 import { parseWhenZeroDep } from "@/lib/time/parseWhenZeroDep";
 import { resolveTenant, zodErr } from "@/lib/apiAuth";
+import { safeAddMemory } from "@/lib/hydra";
 
 // F12 · strip HTML/XSS from titles before persistence. Pair with React's
 // default escaping (NEVER dangerouslySetInnerHTML the title).
@@ -101,6 +102,24 @@ export async function POST(req: NextRequest) {
     attendees: data.attendees,
     source: data.source ?? "manual",
   });
+  // Memory event · let recall surface "what events do I have next week" and
+  // "remind me what I scheduled with Andy". Short, human-readable single
+  // line. Tagged with "calendar" + the original source (voice/manual/sched).
+  try {
+    const whenISO = new Date(startAt).toISOString();
+    const text = `Calendar event "${event.title}" on ${whenISO}${event.attendees?.length ? ` with ${event.attendees.slice(0, 4).join(", ")}` : ""}.`;
+    await safeAddMemory({
+      tenantId,
+      text,
+      metadata: {
+        runId: "calendar",
+        tags: ["calendar", event.source ?? "manual"],
+        source: "calendar",
+        eventId: event.id,
+        startAt: event.startAt,
+      },
+    });
+  } catch {}
   return Response.json({ ok: true, event });
 }
 

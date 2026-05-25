@@ -46,7 +46,9 @@ const INTENT_MAP: Record<string, { kind: string; key: string } | undefined> = {
   builder: { kind: "builder.build", key: "prompt" },
   cohort: { kind: "cohort.run", key: "goal" },
   terminal: { kind: "terminal.run", key: "goal" },
-  memory: { kind: "memory.search", key: "query" },
+  // Memory Browser listens for memory.search · was wired to "memory" which
+  // resolves to MemoryMatchGame (the card-flip game). QA finding.
+  memoryBrowser: { kind: "memory.search", key: "query" },
 };
 
 function launchApp(id: string, payload?: string) {
@@ -93,7 +95,8 @@ export function VoiceWakeMount() {
               launchApp("cohort", j.payload);
               break;
             case "recall_memory":
-              launchApp("memory", j.payload);
+              // Memory Browser, not Memory Match game.
+              launchApp("memoryBrowser", j.payload);
               break;
             case "change_wallpaper":
               window.dispatchEvent(new CustomEvent("delos-wallpaper-cycle"));

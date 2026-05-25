@@ -58,6 +58,40 @@ function renderText(text: string): string {
   return text;
 }
 
+// Extract a single canonical source from the tag bag. Falls back to
+// inspecting the text body so older memories without explicit source
+// tags still show a badge.
+const KNOWN_SOURCES = [
+  "voice-memory",
+  "arena",
+  "cohort",
+  "codegen",
+  "browser-search",
+  "calendar",
+  "schedule",
+  "user-fact",
+] as const;
+type KnownSource = (typeof KNOWN_SOURCES)[number];
+const SOURCE_COLOR: Record<KnownSource, { bg: string; fg: string }> = {
+  "voice-memory": { bg: "rgba(34, 197, 94, 0.18)", fg: "#86efac" },
+  arena: { bg: "rgba(244, 114, 182, 0.18)", fg: "#fbcfe8" },
+  cohort: { bg: "rgba(244, 114, 182, 0.18)", fg: "#fbcfe8" },
+  codegen: { bg: "rgba(251, 191, 36, 0.18)", fg: "#fde68a" },
+  "browser-search": { bg: "rgba(56, 189, 248, 0.18)", fg: "#7dd3fc" },
+  calendar: { bg: "rgba(99, 102, 241, 0.20)", fg: "#a5b4fc" },
+  schedule: { bg: "rgba(168, 85, 247, 0.18)", fg: "#d8b4fe" },
+  "user-fact": { bg: "rgba(34, 197, 94, 0.14)", fg: "#86efac" },
+};
+function sourceOf(text: string, tags: string[]): KnownSource | null {
+  for (const s of KNOWN_SOURCES) if (tags.includes(s)) return s;
+  if (/^Arena race\b/i.test(text)) return "arena";
+  if (/^Codegen stream\b/i.test(text)) return "codegen";
+  if (/^Calendar event\b/i.test(text)) return "calendar";
+  if (/^Scheduled action\b/i.test(text)) return "schedule";
+  if (/^User fact\b/i.test(text)) return "user-fact";
+  return null;
+}
+
 export function MemoryDashboard({
   tenant,
   compact = false,
@@ -124,6 +158,25 @@ export function MemoryDashboard({
     return () => clearInterval(tid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSync, autoRefreshMs, query]);
+
+  // Voice / cross-app recall · listen on the intent bus so a "recall X"
+  // command lands here with the query pre-filled and the search already
+  // fired. Was the QA gap — voice opened this window but the textbox
+  // stayed empty.
+  useEffect(() => {
+    function onIntent(e: Event) {
+      const d = (e as CustomEvent).detail as { kind?: string; query?: string };
+      if (!d || d.kind !== "memory.search") return;
+      const q = (d.query || "").trim();
+      if (!q) return;
+      setQuery(q);
+      // Bypass the 320ms debounce — the user already spoke; show results now.
+      load(q);
+    }
+    window.addEventListener("delos-intent", onIntent as EventListener);
+    return () => window.removeEventListener("delos-intent", onIntent as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function deleteOne(id: string) {
     setBusy(id);
@@ -389,6 +442,20 @@ function MemoryRow({
           >
             {label}
           </span>
+          {(() => {
+            const src = sourceOf(rendered, tags ?? []);
+            if (!src) return null;
+            const sc = SOURCE_COLOR[src];
+            return (
+              <span
+                className="font-pixel text-[9px] tracking-wider"
+                style={{ padding: "2px 7px", background: sc.bg, color: sc.fg, borderRadius: 999 }}
+                title={`source: ${src}`}
+              >
+                {src.replace("-", " ").toUpperCase()}
+              </span>
+            );
+          })()}
           {score !== undefined && (
             <span className="font-mono text-[9px]" style={{ color: "var(--muted)" }}>
               score {score.toFixed(2)}
@@ -399,11 +466,14 @@ function MemoryRow({
               {relativeTime(createdAt)}
             </span>
           )}
-          {tags && tags.length > 0 && tags.slice(0, 3).map((t) => (
-            <span key={t} className="font-mono text-[9px]" style={{ color: "var(--muted)", padding: "1px 5px", background: "var(--surface-2)", borderRadius: 2 }}>
-              {t}
-            </span>
-          ))}
+          {tags && tags.length > 0 && tags
+            .filter((t) => !KNOWN_SOURCES.includes(t as KnownSource))
+            .slice(0, 3)
+            .map((t) => (
+              <span key={t} className="font-mono text-[9px]" style={{ color: "var(--muted)", padding: "1px 5px", background: "var(--surface-2)", borderRadius: 2 }}>
+                {t}
+              </span>
+            ))}
         </div>
         <p className="text-[11px] leading-relaxed" style={{ color: "var(--fg)", fontFamily: "var(--font-mono, monospace)" }}>
           {rendered}

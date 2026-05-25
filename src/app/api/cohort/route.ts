@@ -6,8 +6,9 @@ import { runQuickAgent } from "@/lib/agents/quick";
 import { generateJson } from "@/lib/agents/jsonGen";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { isNimEnabled, nimChat, NIM_MODELS } from "@/lib/llm/providers/nim";
+import { safeAddMemory } from "@/lib/hydra";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -77,6 +78,9 @@ export async function POST(req: NextRequest) {
     return zodErr(parsed.error);
   }
   const { goal } = parsed.data;
+  // Tenant resolution · always server-side. Used downstream for arena
+  // memory writes so cohort verdicts get persisted under the right tenant.
+  const { tenantId } = await resolveTenant(req);
   // F16 · godMode adds 2× NIM rows + spawns a verifier pass at temp 0.
   // Honor ?godMode=1 query param.
   const url = new URL(req.url);
@@ -240,6 +244,28 @@ Output JSON:
             }
           }
           send({ t: "cohort_verdict", winnerIndex, rationale: verdict.rationale, scores: verdict.scores, merged: verdict.merged, at: Date.now() });
+          // Arena memory · persist the verdict so "last arena winner",
+          // "what did arena decide about graph DB memory", and dashboard
+          // recall surface real history. Audit P1 — cohort had been
+          // streaming results then discarding them. Source tag "arena".
+          try {
+            const winnerModel = members[winnerIndex] ?? "?";
+            const scoreLine = (verdict.scores ?? [])
+              .map((s) => `${members[s.index]?.split(":").pop()?.slice(0, 24) ?? "?"}=${s.score}`)
+              .join(", ");
+            const summary = `Arena race · goal "${goal.slice(0, 80)}". Winner: ${winnerModel}. Scores: ${scoreLine || "n/a"}. Disagreement: ${disagreement.toFixed(2)}. Merged: ${String(verdict.merged).slice(0, 240)}`;
+            await safeAddMemory({
+              tenantId,
+              text: summary,
+              metadata: {
+                runId: "arena",
+                tags: ["arena", "cohort", "verdict"],
+                source: "arena",
+                winner: winnerModel,
+                disagreement,
+              },
+            });
+          } catch {}
         } catch (e) {
           // Rubric fallback · was "pick fastest" which let a 50-char
           // half-answer beat a 400-char real answer when the judge LLM
@@ -304,6 +330,21 @@ Output JSON:
             // surfaces this string; only `rationale` is shown.
             error: e instanceof Error ? e.message : String(e),
           });
+          // Arena memory · rubric-fallback path. Same shape as the
+          // judge-success path so recall queries find both kinds.
+          try {
+            const summary = `Arena race · goal "${goal.slice(0, 80)}". Winner (rubric fallback): ${bestModel} at ${bestMs}ms. Rationale: ${rationale}. Merged: ${(best?.text ?? "").slice(0, 240)}`;
+            await safeAddMemory({
+              tenantId,
+              text: summary,
+              metadata: {
+                runId: "arena",
+                tags: ["arena", "cohort", "verdict", "fallback"],
+                source: "arena",
+                winner: bestModel,
+              },
+            });
+          } catch {}
         }
       } catch (e) {
         send({ t: "error", message: e instanceof Error ? e.message : String(e), at: Date.now() });

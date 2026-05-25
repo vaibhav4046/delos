@@ -14,6 +14,11 @@ const BLOCK_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "tone-preamble", re: /^tone:\s*(concise|verbose|balanced)/i },
   { name: "redacted-stub", re: /\[REDACTED\]/i },
   { name: "system-prompt-leak", re: /SYSTEM[_\s-]?PROMPT\b/i },
+  // QA P1 · noisy run metrics like "drift=0.05 tokens=1247 ms=540" were
+  // flowing into pinned memory and resurfacing as user-facts during
+  // recall. Block any text that's predominantly key=value telemetry.
+  { name: "run-metric-noise", re: /^\s*(?:drift|tokens?|completion_tokens?|prompt_tokens?|elapsed|ms|wall_time|cost|usd|tier|replans?|tool_calls?)\s*[:=]/i },
+  { name: "run-metric-cloud", re: /\b(?:drift\s*[:=]\s*0?\.\d+|tokens\s*[:=]\s*\d+|ms\s*[:=]\s*\d+|usd\s*[:=]\s*\$?\d+)\b.*\b(?:drift\s*[:=]|tokens\s*[:=]|ms\s*[:=])\b/i },
 ];
 
 // A "verb" presence check for the long-text rule. Run-summary lines are

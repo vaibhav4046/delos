@@ -209,13 +209,21 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
   //   "book Andy for Tuesday 2pm"
   // VP-1 · calendar event · broaden noun list so "schedule lunch Friday" works.
   // Time signal still required so this doesn't catch "schedule a thing" without when.
-  const calMatch = raw.match(/^(?:please\s+)?(?:schedule|create|add|book|set\s+up)\s+(?:a\s+|an\s+)?(?:event|meeting|call|sync|standup|reminder|appointment|lunch|dinner|breakfast|coffee|drinks|catch\s+up|chat|talk|interview|review|demo|session|1[:-]?1|one[\s-]?on[\s-]?one)?\s*(.+)$/i);
+  // Capture the noun group · was non-capturing and ate "lunch" / "meeting"
+  // leaving title="Event". Now we glue the noun back into the title when
+  // present, so "schedule lunch next Friday at 1pm" yields title="lunch".
+  const calMatch = raw.match(/^(?:please\s+)?(?:schedule|create|add|book|set\s+up)\s+(?:a\s+|an\s+)?(event|meeting|call|sync|standup|reminder|appointment|lunch|dinner|breakfast|coffee|drinks|catch\s+up|chat|talk|interview|review|demo|session|1[:-]?1|one[\s-]?on[\s-]?one)?\s*(.+)$/i);
   if (calMatch && /\b(?:today|tonight|tomorrow|day\s+after\s+tomorrow|next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)|at\s+\d|in\s+\d+\s*(?:min|hour|day))\b/i.test(raw)) {
     // Split into title + when so calendar widget doesn't end up with
     // event title = "next Friday at 1pm". 2026-05-25 QA bug · voice
     // create_event lost the noun. Now we strip the time portion to get
-    // a clean title.
-    const fullText = calMatch[1].trim();
+    // a clean title and prefix the matched noun (lunch, meeting) back in.
+    const noun = (calMatch[1] || "").trim();
+    const rest = (calMatch[2] || "").trim();
+    // If noun is "event/meeting/reminder/etc" we drop it as filler; if it's
+    // a real noun like "lunch / coffee" we keep it as the title anchor.
+    const FILLER = new Set(["event", "meeting", "call", "sync", "standup", "reminder", "appointment", "demo", "session", "interview", "review", "chat", "talk", "1:1", "1-1", "11", "one-on-one", "one on one", "catch up", "catchup"]);
+    const fullText = (noun && !FILLER.has(noun.toLowerCase()) ? `${noun} ${rest}` : rest).trim();
     const whenRe = /\b(today|tonight|tomorrow|day\s+after\s+tomorrow|next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?\b/i;
     const timeRe = /\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i;
     const inRe = /\bin\s+\d+\s*(?:min|minute|minutes|hour|hours|day|days)\b/i;
@@ -226,7 +234,9 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
       when = whenMatch[0].trim();
       title = fullText.replace(whenRe, "").replace(timeRe, "").replace(inRe, "").replace(/\s+/g, " ").replace(/^(?:with|on|for|to|about)\s+/i, "").trim();
     }
-    if (!title) title = "Event";
+    // Strip lingering "with"/"to" preposition prefixes that survived noun glue.
+    title = title.replace(/^(?:with|on|for|to|about)\s+/i, "").trim();
+    if (!title) title = noun && !FILLER.has(noun.toLowerCase()) ? noun : "Event";
     return {
       intent: "create_event",
       app: "calendar",
@@ -487,7 +497,7 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
   // anything about X" / "recall X" / "remember my X" all route to
   // recall_memory. Was failing on natural phrasing in 2026-05-25 QA.
   const recall = lower.match(
-    /^(?:recall|what\s+(?:was|did|were|is\s+my|do\s+you\s+remember)|show\s+me\s+my|find\s+my|look\s+up\s+my|do\s+you\s+remember|remember\s+anything|search\s+memory\s+for|what\s+(?:do\s+)?you\s+(?:remember|know)(?:\s+about)?)\s+(.{2,300})$/i,
+    /^(?:recall|what\s+(?:was|did|were|is\s+my|do\s+you\s+remember)|show\s+me\s+(?:my|memories(?:\s+about)?)|show\s+memories(?:\s+about)?|find\s+my|look\s+up\s+my|do\s+you\s+remember|remember\s+anything|search\s+memory\s+for|search\s+(?:my\s+)?memories?\s+(?:for|about)|what\s+(?:do\s+)?you\s+(?:remember|know)(?:\s+about)?)\s+(.{2,300})$/i,
   );
   if (recall) {
     return {

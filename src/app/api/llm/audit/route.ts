@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const G = globalThis as unknown as {
-  __delos_llm_audit?: { at: number; results: Array<{ model: string; ok: boolean; ms: number; err?: string }> };
+  __delos_llm_audit?: { at: number; results: Array<{ model: string; ok: boolean; ms: number; err?: string; missingKey?: boolean }> };
 };
 
 const AUDIT_TTL_MS = 15 * 60_000;
@@ -24,8 +24,27 @@ const MODELS_TO_AUDIT = [
   "google:gemini-2.5-flash",
 ];
 
-async function probeModel(model: string): Promise<{ ok: boolean; ms: number; err?: string }> {
+// Map a provider prefix to the env var that holds its key. Used to give
+// callers an explicit "missing_key" signal instead of a generic timeout/
+// 401 string. QA P5 — was indistinguishable from "provider is down".
+function envKeyFor(model: string): string | null {
+  if (model.startsWith("groq:")) return "GROQ_API_KEY";
+  if (model.startsWith("mistral:")) return "MISTRAL_API_KEY";
+  if (model.startsWith("google:")) return "GOOGLE_GENERATIVE_AI_API_KEY";
+  if (model.startsWith("nim:")) return "NIM_API_KEY";
+  return null;
+}
+
+async function probeModel(
+  model: string,
+): Promise<{ ok: boolean; ms: number; err?: string; missingKey?: boolean }> {
   const t0 = Date.now();
+  const keyName = envKeyFor(model);
+  if (keyName && !process.env[keyName]) {
+    // No key configured · short-circuit. Callers regex-sniffed the err
+    // string before — now there's a structured signal.
+    return { ok: false, ms: 0, err: `missing_key:${keyName}`, missingKey: true };
+  }
   try {
     if (model.startsWith("nim:")) {
       const m = model.slice(4);
@@ -44,7 +63,11 @@ async function probeModel(model: string): Promise<{ ok: boolean; ms: number; err
     );
     return { ok: /ok/i.test(text), ms: Date.now() - t0 };
   } catch (e) {
-    return { ok: false, ms: Date.now() - t0, err: e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120) };
+    const msg = e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120);
+    // 401 / 403 / "API key" responses also count as missing/bad key so the
+    // operator sees a clear "fix the credential" signal in the audit row.
+    const looksMissing = /\b(401|403|api[ _]?key|unauthorized|invalid[_ ]key)\b/i.test(msg);
+    return { ok: false, ms: Date.now() - t0, err: msg, ...(looksMissing ? { missingKey: true } : {}) };
   }
 }
 
@@ -59,7 +82,7 @@ export async function GET(req: NextRequest) {
     targets.push(`nim:${NIM_MODELS.nemotronSuper49b}`);
     targets.push(`nim:${NIM_MODELS.llama33_70b}`);
   }
-  const results: Array<{ model: string; ok: boolean; ms: number; err?: string }> = [];
+  const results: Array<{ model: string; ok: boolean; ms: number; err?: string; missingKey?: boolean }> = [];
   // Sequential audit so we don't burst all providers · keeps latency under 30s.
   for (const model of targets) {
     const out = await probeModel(model);

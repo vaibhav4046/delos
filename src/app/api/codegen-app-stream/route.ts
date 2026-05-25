@@ -575,52 +575,76 @@ Output JSON: { "path":"${f.path}","content":"…escaped source…","language":"$
         // generic-dashboard project so the stream NEVER ends without
         // project_done on demo day. QA report 2026-05-25 · "arbitrary
         // clone builder consistently returned plan_start → error mistral 429".
+        // Brutal-QA · regardless of error category, always engage the
+        // deterministic playbook fallback so the stream never ends without
+        // a project_done. Old logic only fired fallback on 429/quota,
+        // letting `fileResults.length < 3` and other failures leak as raw
+        // error → judges saw plan_start then a stall.
         const isQuotaErr = /429|rate.?limit|quota|tokens per day|tpd/i.test(msg);
-        if (isQuotaErr) {
-          try {
-            const fallback = buildDomainPlaybook(userPrompt + " generic dashboard", stackHint);
-            if (fallback) {
+        const reason = isQuotaErr
+          ? "provider quota exhausted · deterministic playbook fallback"
+          : `planner failure · deterministic playbook fallback (${msg.slice(0, 120)})`;
+        try {
+          // Primary attempt · honor the user's prompt verbatim so domain
+          // playbooks (investor CRM, AML, clinical, etc) catch the right
+          // pack. Secondary attempt appends "generic dashboard" so the
+          // generic builder picks it up if the prompt is vague.
+          const fallback =
+            buildDomainPlaybook(userPrompt, stackHint) ??
+            buildDomainPlaybook(userPrompt + " generic dashboard", stackHint);
+          if (fallback) {
+            send({ t: "fallback_engaged", reason, at: Date.now() });
+            for (let i = 0; i < fallback.project.files.length; i++) {
+              const f = fallback.project.files[i];
               send({
-                t: "fallback_engaged",
-                reason: "provider quota exhausted · deterministic playbook fallback",
-                at: Date.now(),
-              });
-              for (let i = 0; i < fallback.project.files.length; i++) {
-                const f = fallback.project.files[i];
-                send({
-                  t: "file_done",
-                  path: f.path,
-                  content: f.content,
-                  language: f.language,
-                  index: i,
-                  total: fallback.project.files.length,
-                  at: Date.now(),
-                  fallback: true,
-                });
-              }
-              send({
-                t: "project_done",
-                project: {
-                  name: fallback.project.name + " (fallback)",
-                  description: fallback.project.description,
-                  stack: fallback.project.stack,
-                  files: fallback.project.files,
-                },
+                t: "file_done",
+                path: f.path,
+                content: f.content,
+                language: f.language,
+                index: i,
+                total: fallback.project.files.length,
                 at: Date.now(),
                 fallback: true,
               });
-            } else {
-              send({
-                t: "error",
-                message: "Provider quota exhausted · retry in ~60s or pick a simpler prompt",
-                at: Date.now(),
-              });
             }
-          } catch {
-            send({ t: "error", message: msg, at: Date.now() });
+            send({
+              t: "project_done",
+              project: {
+                name: fallback.project.name + " (fallback)",
+                description: fallback.project.description,
+                stack: fallback.project.stack,
+                files: fallback.project.files,
+              },
+              at: Date.now(),
+              fallback: true,
+            });
+            // Memory parity · success paths at 373/547 write memory, the
+            // fallback path used to skip. Audit-flagged asymmetry.
+            try {
+              await safeAddMemory({
+                tenantId,
+                text: `Codegen stream fallback "${fallback.project.name}" — ${fallback.project.files.length} files. Reason: ${reason}. Prompt: ${userPrompt.slice(0, 160)}`,
+                metadata: { runId: "codegen-stream", tags: ["codegen", "stream", "fallback"] },
+              });
+            } catch {}
+          } else {
+            // Truly no playbook matched — recoverable error w/ guidance.
+            send({
+              t: "error",
+              message: isQuotaErr
+                ? "Provider quota exhausted and no domain playbook matched. Retry in ~60s or use a domain prompt (investor CRM / AML cockpit / ops incident)."
+                : `Codegen planner failed and no domain playbook matched. (${msg.slice(0, 120)}) — pick a domain prompt for a deterministic build.`,
+              recoverable: true,
+              at: Date.now(),
+            });
           }
-        } else {
-          send({ t: "error", message: msg, at: Date.now() });
+        } catch (fallbackErr) {
+          send({
+            t: "error",
+            message: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+            recoverable: false,
+            at: Date.now(),
+          });
         }
       } finally {
         try {

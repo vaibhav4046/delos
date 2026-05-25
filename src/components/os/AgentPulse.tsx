@@ -50,8 +50,12 @@ export function AgentPulse({ onOpen }: { onOpen: () => void }) {
 
   return (
     <div
-      className="fixed left-3 z-[90]"
-      style={{ bottom: 70 }}
+      // UI-2 · moved from bottom-left:70 z-90 to top-left below header at
+      // z-120 · was getting covered by the dock (z-100) and stacking with
+      // ShortcutsSticky in the bottom-left corner. Top-left below header
+      // keeps it always visible during runs.
+      className="fixed left-3 z-[120]"
+      style={{ top: 60 }}
     >
       {expanded && (
         <div
