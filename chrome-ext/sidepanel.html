@@ -4,89 +4,59 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>DelOS</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg" />
     <link rel="stylesheet" href="sidepanel.css" />
   </head>
   <body>
     <header class="hdr">
       <div class="brand">
-        <span class="brand-mark">▮</span>
+        <!-- EXT-V4-1 · D logo · same asset as the OS favicon (pixel-D, navy
+             on yellow). Source: chrome-ext/icon.svg, mirrors public/icon.svg. -->
+        <img src="icon.svg" alt="DelOS" class="brand-logo" width="22" height="22" />
         <span class="brand-name">DelOS</span>
-        <span class="brand-sub">v2.9</span>
+        <span class="brand-sub">v3.0</span>
       </div>
       <div class="hdr-right">
-        <span id="conn" class="pill pill-warn">● checking</span>
+        <span id="conn" class="pill pill-warn" title="connection state · click to recheck">● checking</span>
         <button id="settingsBtn" class="iconbtn" title="Settings">⚙</button>
       </div>
     </header>
 
-    <!-- EXT-FIX-3 · stripped to focus on the headline browse-agent feature.
-         Removed Memory tab (cross-device sync was confusing) and made Browse
-         the default. Voice + Mission + Cohort stay for completeness. -->
+    <!-- EXT-V4-2 · Voice tab REMOVED entirely. Browse covers all action paths.
+         EXT-V4-3 · Memory tab restored · synced cross-device via /api/memory. -->
     <nav class="tabs">
       <button data-tab="browse" class="tab on">Browse</button>
-      <button data-tab="voice" class="tab">Voice</button>
       <button data-tab="mission" class="tab">Mission</button>
       <button data-tab="cohort" class="tab">Cohort</button>
+      <button data-tab="memory" class="tab">Memory</button>
     </nav>
 
     <main class="panels">
-      <!-- VOICE — autonomous tab agent -->
-      <section data-panel="voice" class="panel">
-        <div id="voiceStatus" class="voice-status idle">
-          <span class="dot"></span>
-          <span class="label" id="voiceStatusLabel">READY</span>
-          <span class="meta" id="voiceStatusMeta">tap to wake</span>
-        </div>
-
-        <div class="row">
-          <button id="voiceBtn" class="primary big" style="flex:1">🎤 HOLD TO TALK</button>
-        </div>
-        <!-- EXT-V2-1 · TTS removed · "speak" checkbox + 🔇 mute btn deleted.
-             Voice STT still works · agent replies render in the log panel. -->
-        <div class="row tightrow">
-          <label class="check small"><input type="checkbox" id="voiceAuto" checked /> autonomous</label>
-          <label class="check small"><input type="checkbox" id="voiceLoop" checked /> loop</label>
-        </div>
-
-        <div class="row tightrow">
-          <button id="analyzeTabBtn" class="ghost small" style="flex:1">🔎 Analyze current tab</button>
-          <button id="summarizeTabBtn" class="ghost small" style="flex:1">📝 Summarize</button>
-        </div>
-
-        <div class="hint" style="margin-bottom:8px">
-          Say <code>summarize this page</code> · <code>open github</code> · <code>click sign in</code> ·
-          <code>fill email with foo@bar</code> · <code>scroll down</code> · <code>read this</code>.
-          Autonomous mode runs intent classifier + acts on current tab.
-        </div>
-
-        <div id="voiceLog" class="log"></div>
-      </section>
-
-      <!-- BROWSE — Perplexity-style autonomous browser agent (default tab) -->
+      <!-- BROWSE — Perplexity/Claude-style autonomous browser agent (default) -->
       <section data-panel="browse" class="panel on">
         <div class="row">
-          <textarea id="browseTask" rows="3" placeholder="Give the agent a complex task — e.g. 'find me the cheapest flight from SF to NYC next Friday', 'summarize the top 5 HN front page items', 'fill this form with my resume info', 'complete my assignment on this page'…"></textarea>
+          <textarea id="browseTask" rows="3" placeholder="Give the agent any complex task — e.g. &quot;research the best 3 budget gaming laptops 2025&quot;, &quot;summarize the top 5 HN front-page items&quot;, &quot;find airbnb under $150 in SF this weekend&quot;, &quot;complete my assignment on this page&quot;…"></textarea>
         </div>
-        <!-- EXT-V2-1 · "speak progress" checkbox removed; TTS gone. -->
         <div class="row tightrow">
           <label class="check small"><input type="checkbox" id="browseUseTab" checked /> use current tab as context</label>
           <label class="check small"><input type="checkbox" id="browseAutoNav" checked /> auto-navigate</label>
           <label class="check small"><input type="checkbox" id="browseScreenshots" checked /> screenshots</label>
           <label class="check small"><input type="checkbox" id="browseOverlay" checked /> page highlights</label>
+          <label class="check small"><input type="checkbox" id="browseChain" checked /> chain re-plan</label>
         </div>
         <div class="row">
           <button id="browseRunBtn" class="primary" style="flex:1">▶ RUN BROWSER AGENT</button>
           <button id="browseStopBtn" class="danger small">■</button>
         </div>
-        <!-- EXT-V3-3 · quick "read this tab" + "summarize" buttons mirror the
-             Voice tab features so the user has them on Browse without tab switch. -->
         <div class="row tightrow">
           <button id="browseReadBtn" class="ghost small" style="flex:1">📖 Read current tab</button>
           <button id="browseSummarizeBtn" class="ghost small" style="flex:1">📝 Summarize</button>
+          <button id="browseSaveMemBtn" class="ghost small" style="flex:1">★ Save to memory</button>
         </div>
         <div class="hint" style="margin-bottom:8px">
           Plans multi-step browse · scrolls + clicks + extracts + summarizes.
-          Each step shows in the trace below with approval on destructive actions.
+          Each step pulses a colored highlight on the target element.
+          Destructive actions need approval.
         </div>
         <div id="browseLog" class="log"></div>
       </section>
@@ -96,8 +66,6 @@
         <div class="row">
           <textarea id="goal" rows="2" placeholder="give the agent a mission…"></textarea>
         </div>
-        <!-- EXT-FIX-3 · dropped 🎤 Voice mic icon from Mission tab per UX feedback.
-             Voice tab already handles speech-to-mission flow. -->
         <div class="row tightrow">
           <button id="grabTab" class="ghost small">⤓ Use current tab</button>
           <label class="check small"><input type="checkbox" id="useMcp" checked /> MCP</label>
@@ -121,8 +89,6 @@
         </div>
         <div class="stats" id="stats"></div>
         <div id="log" class="log"></div>
-        <!-- EXT-V2-2 · follow-up input · appears after first answer · refines
-             with prior context so user can ask "and what about X" / "deeper". -->
         <div id="followupRow" class="row hidden" style="margin-top:8px">
           <input id="followupInput" placeholder="ask follow-up — e.g. 'what about pricing?' / 'go deeper'…" style="flex:1" />
           <button id="followupBtn" class="primary small">★ ASK</button>
@@ -149,15 +115,30 @@
         <div id="cohortResults" class="log"></div>
       </section>
 
-      <!-- EXT-FIX-3 · Memory tab removed · cross-device memory now lives in
-           the main delrio.vercel.app/os app where the dashboard already shows
-           it. Kept the API endpoint untouched for the OS-side dashboard. -->
+      <!-- MEMORY · EXT-V4-3 · interactive + synced -->
+      <section data-panel="memory" class="panel">
+        <div class="row">
+          <input id="memQuery" placeholder="search memory…" style="flex:1" />
+          <button id="memRecallBtn" class="primary small">RECALL</button>
+          <button id="memRefreshBtn" class="ghost small" title="refresh full list">↻</button>
+        </div>
+        <div class="row tightrow">
+          <input id="memNewText" placeholder="write a new memory…" style="flex:1" />
+          <button id="memSaveBtn" class="ghost small">★ SAVE</button>
+        </div>
+        <div class="hint" style="margin-bottom:6px">
+          Synced cross-device via Hydra · same tenant as <code>delrio.vercel.app/os</code>.
+          Tasks from Browse + Mission auto-save here. Click any entry to copy.
+        </div>
+        <div id="memLog" class="log"></div>
+      </section>
     </main>
 
     <!-- SETTINGS MODAL -->
     <div id="settingsModal" class="modal hidden" role="dialog">
       <div class="modal-card">
         <div class="modal-hdr">
+          <img src="icon.svg" alt="DelOS" width="18" height="18" style="vertical-align:middle;margin-right:6px" />
           <span class="brand-name">SETTINGS</span>
           <button id="settingsClose" class="iconbtn">×</button>
         </div>
@@ -177,14 +158,12 @@
           <label>Critic model
             <select id="cfgCritic"></select>
           </label>
-          <div class="hint">MCP servers and shared settings auto-sync from <code>delrio.vercel.app</code> when you open the app there.</div>
+          <div class="hint">MCP servers + shared settings auto-sync from <code>delrio.vercel.app</code> when you open the OS app there.</div>
           <button id="cfgSave" class="primary">SAVE</button>
         </div>
       </div>
     </div>
 
-    <!-- EXT-FIX-3 · footer sync line removed · was noisy + only relevant
-         once per install. Tenant ID still settable via the settings modal. -->
     <script src="sidepanel.js" type="module"></script>
   </body>
 </html>

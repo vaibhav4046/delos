@@ -2,12 +2,24 @@
   "manifest_version": 3,
   "name": "DelOS — Agents Under Pressure",
   "short_name": "DelOS",
-  "version": "2.9.0",
-  "description": "Autonomous browse agent with in-page visual overlay (Perplexity-style highlights + banner), live screenshots, mission follow-ups, cohort racing.",
+  "version": "3.0.0",
+  "description": "Autonomous browser agent · Perplexity/Claude-style in-page overlay, live screenshots, complex multi-step task chaining, follow-up Q&A, cohort racing, cross-device Hydra memory.",
   "author": "DelOS",
   "minimum_chrome_version": "114",
+  "icons": {
+    "16": "icon.svg",
+    "32": "icon.svg",
+    "48": "icon.svg",
+    "128": "icon.svg"
+  },
   "action": {
-    "default_title": "Open DelOS"
+    "default_title": "Open DelOS",
+    "default_icon": {
+      "16": "icon.svg",
+      "32": "icon.svg",
+      "48": "icon.svg",
+      "128": "icon.svg"
+    }
   },
   "side_panel": {
     "default_path": "sidepanel.html"

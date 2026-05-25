@@ -1,26 +1,10 @@
-// DelOS side panel v2.8 — autonomous browser + voice agent.
+// DelOS side panel v3.0 — autonomous browser agent.
 //
-// EXT-V2-1 · TTS (speechSynthesis) removed everywhere · agent replies now
-// render only in the log panel · keeps the side panel quiet and stops
-// awkward speaker-on demos.
-//
-// Voice flow (when "autonomous" is checked):
-//   1. Web Speech API → final transcript.
-//   2. POST /api/voice-command → { intent, app, payload, reply }.
-//   3. Map intent → tab action via background.js RPC, or fall back to
-//      /api/quick-agent for free-text answers.
-//   4. Reply renders in #voiceLog (no TTS).
-//
-// Intents we handle natively against the active tab (no /api/run trip):
-//   read_tab / summarize_tab / click / fill / scroll / open_url /
-//   navigate / open_tab / close_tab / reload / back / forward / links
-//
-// Everything else still falls through to /api/quick-agent so the agent
-// can answer general questions ("what time is it in Tokyo").
+// EXT-V4 · Voice tab removed entirely. Browse is the headline flow. Memory
+// tab restored as interactive + cross-device synced. TTS gone. D logo
+// everywhere. Connection check is now resilient to transient flake.
 
-// MODELS list trimmed to 7 verified-connected providers · 2026-05-25 audit.
-// Dropped: gemini-2.5-pro (latency), llama-4-scout (redundant w/ maverick),
-// mistral-small (NIM Nemotron replaces). Added NIM Nemotron + Llama-3.3-70b.
+// MODELS list trimmed to 7 verified-connected providers.
 const MODELS = [
   "groq:openai/gpt-oss-120b",
   "groq:openai/gpt-oss-20b",
@@ -45,22 +29,24 @@ const state = {
   cfg: { ...DEFAULTS },
   runCtrl: null,
   runId: null,
-  voiceRec: null,
-  voiceLoop: false,
-  voiceBusy: false,
-  voiceAuto: true,
   activeTab: "browse",
   runBase: Date.now(),
+  lastConnOk: false,
+  lastConnAt: 0,
 };
 
 // ───────────────────────── storage / sync ─────────────────────────
 async function loadCfg() {
-  const stored = await chrome.storage.local.get(["endpoint", "tenantId", "modelOverrides", "mcpServers", "syncedFrom"]);
+  const stored = await chrome.storage.local.get([
+    "endpoint",
+    "tenantId",
+    "modelOverrides",
+    "mcpServers",
+  ]);
   state.cfg.endpoint = stored.endpoint || DEFAULTS.endpoint;
-  state.cfg.tenantId = stored.tenantId || "";
+  state.cfg.tenantId = stored.tenantId || DEFAULTS.tenantId;
   state.cfg.modelOverrides = stored.modelOverrides || {};
   state.cfg.mcpServers = stored.mcpServers || [];
-  state.cfg.syncedFrom = stored.syncedFrom || null;
 }
 
 async function saveCfg() {
@@ -81,30 +67,50 @@ chrome.storage.onChanged.addListener((changes, area) => {
       changed = true;
     }
   }
-  // EXT-FIX-3 · `#syncedFrom` footer was removed · just refresh derived UI.
   if (changed) {
     renderSettings();
     refreshConn();
   }
 });
 
-// ───────────────────────── connection ────────────────────────────
+// ───────────────────────── connection (V4-4 hardened) ────────────
+// Resilient health check · retries 3× with 250ms/600ms backoff before
+// flipping the pill to "offline". Caches the last-good state so a single
+// failed probe never shows red. Click pill to force re-check.
+async function probeHealth() {
+  try {
+    const r = await fetch(`${state.cfg.endpoint}/api/health`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function refreshConn() {
   const pill = $("#conn");
+  if (!pill) return;
   pill.className = "pill pill-warn";
   pill.textContent = "● checking";
-  try {
-    const r = await fetch(`${state.cfg.endpoint}/api/health`, { method: "GET" });
-    if (r.ok) {
-      pill.className = "pill pill-ok";
-      pill.textContent = "● connected";
-    } else {
-      pill.className = "pill pill-bad";
-      pill.textContent = `● ${r.status}`;
-    }
-  } catch {
+  let ok = false;
+  // 3 attempts with light backoff so a transient cold-lambda doesn't show offline.
+  for (let i = 0; i < 3; i++) {
+    ok = await probeHealth();
+    if (ok) break;
+    if (i < 2) await new Promise((res) => setTimeout(res, 250 + i * 350));
+  }
+  state.lastConnOk = ok;
+  state.lastConnAt = Date.now();
+  if (ok) {
+    pill.className = "pill pill-ok";
+    pill.textContent = "● connected";
+    pill.title = `connected · last checked ${new Date().toLocaleTimeString()}`;
+  } else {
     pill.className = "pill pill-bad";
     pill.textContent = "● offline";
+    pill.title = `health probe failed · click to retry`;
   }
 }
 
@@ -116,6 +122,8 @@ $$(".tab").forEach((t) =>
     t.classList.add("on");
     $(`[data-panel="${t.dataset.tab}"]`).classList.add("on");
     state.activeTab = t.dataset.tab;
+    // Auto-load memory list when user opens the Memory tab.
+    if (t.dataset.tab === "memory") memoryRefresh();
   }),
 );
 
@@ -125,15 +133,18 @@ function renderSettings() {
   $("#cfgTenant").value = state.cfg.tenantId || "";
   for (const role of ["planner", "executor", "critic"]) {
     const sel = $(`#cfg${role.charAt(0).toUpperCase() + role.slice(1)}`);
-    sel.innerHTML = '<option value="">(default)</option>' + MODELS.map((m) => `<option value="${m}">${m}</option>`).join("");
+    sel.innerHTML =
+      '<option value="">(default)</option>' +
+      MODELS.map((m) => `<option value="${m}">${m}</option>`).join("");
     sel.value = state.cfg.modelOverrides[role] || "";
   }
 }
 $("#settingsBtn").addEventListener("click", () => $("#settingsModal").classList.remove("hidden"));
 $("#settingsClose").addEventListener("click", () => $("#settingsModal").classList.add("hidden"));
+$("#conn")?.addEventListener("click", () => refreshConn());
 $("#cfgSave").addEventListener("click", async () => {
   state.cfg.endpoint = $("#cfgEndpoint").value.trim() || DEFAULTS.endpoint;
-  state.cfg.tenantId = $("#cfgTenant").value.trim();
+  state.cfg.tenantId = $("#cfgTenant").value.trim() || DEFAULTS.tenantId;
   const ov = {};
   for (const role of ["planner", "executor", "critic"]) {
     const v = $(`#cfg${role.charAt(0).toUpperCase() + role.slice(1)}`).value;
@@ -150,10 +161,13 @@ function tag(cls, label) {
   return `<span class="tag ${cls}">${label}</span>`;
 }
 function esc(s) {
-  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  return String(s ?? "").replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]),
+  );
 }
 function appendLog(targetId, html) {
   const el = $(`#${targetId}`);
+  if (!el) return;
   if (el.firstChild?.classList?.contains("empty")) el.innerHTML = "";
   const div = document.createElement("div");
   div.className = "line";
@@ -163,16 +177,14 @@ function appendLog(targetId, html) {
 }
 function setStats(s) {
   const el = $("#stats");
-  el.innerHTML = ["tok in", "tok out", "calls", "ms"]
-    .map((k, i) => `<div class="stat"><div class="v">${s[i] ?? 0}</div><div class="k">${k}</div></div>`)
-    .join("") + `<div class="stat"><div class="v">${s[4] ?? "·"}</div><div class="k">cost</div></div>`;
-}
-
-function setVoiceStatus(kind, label, meta = "") {
-  const el = $("#voiceStatus");
-  el.className = `voice-status ${kind}`;
-  $("#voiceStatusLabel").textContent = label;
-  $("#voiceStatusMeta").textContent = meta;
+  if (!el) return;
+  el.innerHTML =
+    ["tok in", "tok out", "calls", "ms"]
+      .map(
+        (k, i) =>
+          `<div class="stat"><div class="v">${s[i] ?? 0}</div><div class="k">${k}</div></div>`,
+      )
+      .join("") + `<div class="stat"><div class="v">${s[4] ?? "·"}</div><div class="k">cost</div></div>`;
 }
 
 function renderEvent(ev) {
@@ -207,9 +219,6 @@ function renderEvent(ev) {
     case "answer":
       return `<div class="answer">${tag("info", "answer")} ${esc(ev.text)}</div>`;
     case "error": {
-      // EXT-3 · clearer messaging when upstream LLM rate-limits or 5xxs.
-      // The orchestrator already synthesizes a fallback answer in this case
-      // — we just need to translate the technical message into UX-friendly text.
       const raw = String(ev.message ?? "");
       let friendly = raw;
       if (/provider|429|rate.?limit/i.test(raw)) friendly = "Provider rate-limited · agent fell back. Retry in ~30s.";
@@ -221,17 +230,14 @@ function renderEvent(ev) {
   return "";
 }
 
-// ───────────────────────── mission run (kept) ────────────────────
+// ───────────────────────── mission run ───────────────────────────
 const runStats = { pin: 0, pout: 0, calls: 0, llmMs: 0 };
-// EXT-V2-2 · accumulate mission Q/A pairs so follow-ups have prior context.
-// Reset at the start of every fresh /run. Latest answer drives "ask follow-up".
 let missionThread = [];
 
 $("#runBtn").addEventListener("click", run);
 $("#stopBtn").addEventListener("click", () => state.runCtrl?.abort());
 $("#steerBtn").addEventListener("click", sendSteer);
 $("#grabTab").addEventListener("click", grabTabContext);
-// EXT-FIX-3 · #micBtn removed from Mission tab UX · Voice tab handles speech.
 
 async function grabTabContext() {
   const res = await tabAction("read");
@@ -250,7 +256,6 @@ async function run() {
   setStats([0, 0, 0, 0, "$0"]);
   $("#log").innerHTML = "";
   $("#steerRow").classList.remove("hidden");
-  // EXT-V2-2 · reset thread on a fresh mission run; latest goal becomes turn 1.
   missionThread = [{ role: "user", text: $("#goal").value.trim() }];
   $("#followupRow")?.classList.add("hidden");
 
@@ -273,7 +278,6 @@ async function run() {
     const res = await fetch(`${state.cfg.endpoint}/api/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // QA-2 · use canonical input field, keep goal as legacy mirror
       body: JSON.stringify({ ...body, input: body.goal }),
       signal: ctrl.signal,
     });
@@ -306,19 +310,14 @@ async function run() {
             runStats.llmMs += ev.ms;
             setStats([runStats.pin, runStats.pout, runStats.calls, runStats.llmMs, "·"]);
           }
-          // EXT-V2-3 · capture a screenshot after tool calls that touch the
-          // current tab (navigate / click / fill / scroll). The mission's
-          // /api/run streams tool_result events with `name` set to the tool.
           if (
             $("#missionScreenshots")?.checked &&
             ev.t === "tool_result" &&
             ev.ok &&
             /tab|browse|navigate|click|fill|scroll/i.test(String(ev.name || ""))
           ) {
-            // Fire-and-forget so we don't block stream parsing.
             captureAndLog("log", ev.name).catch(() => {});
           }
-          // EXT-V2-2 · capture the final answer text so follow-ups have it.
           if (ev.t === "answer" && ev.text) {
             missionThread.push({ role: "agent", text: String(ev.text) });
           }
@@ -329,8 +328,6 @@ async function run() {
     if (e.name !== "AbortError") appendLog("log", `${tag("bad", "ERR")} ${esc(e.message)}`);
   } finally {
     $("#steerRow").classList.add("hidden");
-    // EXT-V2-2 · reveal the follow-up row once the run yielded at least one
-    // agent answer. Checkbox lets the user opt out.
     if ($("#missionFollowups")?.checked && missionThread.some((m) => m.role === "agent")) {
       $("#followupRow")?.classList.remove("hidden");
       $("#followupInput")?.focus();
@@ -338,8 +335,7 @@ async function run() {
   }
 }
 
-// EXT-V2-2 · follow-up handler · chains a prior-answer-aware /quick-agent call.
-// Renders inline in the Mission log so the conversation stays in one place.
+// Follow-up handler · chains a prior-answer-aware /quick-agent call.
 $("#followupBtn")?.addEventListener("click", askFollowup);
 $("#followupInput")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
@@ -373,8 +369,7 @@ async function askFollowup() {
       }),
     });
     if (!r.ok) {
-      const err = r.status === 429 ? "rate-limited · retry in ~30s" : `HTTP ${r.status}`;
-      appendLog("log", `${tag("bad", "agent")} ${esc(err)}`);
+      appendLog("log", `${tag("bad", "agent")} ${esc(r.status === 429 ? "rate-limited · retry in ~30s" : `HTTP ${r.status}`)}`);
       return;
     }
     const j = await r.json();
@@ -407,43 +402,203 @@ function rewriteUrl(u) {
   return u;
 }
 
-// ───────────────────────── analyze tab (X1) ──────────────────────
-$("#analyzeTabBtn")?.addEventListener("click", () => analyzeTab(false));
-$("#summarizeTabBtn")?.addEventListener("click", () => analyzeTab(true));
-
-async function analyzeTab(summarize) {
-  appendLog("voiceLog", `${tag("info", "tab")} ${summarize ? "summarizing" : "analyzing"}…`);
-  const tabRes = await tabAction("read");
-  if (!tabRes?.ok) {
-    appendLog("voiceLog", `${tag("bad", "ERR")} ${esc(tabRes?.error || "read failed")}`);
-    return;
-  }
-  const data = tabRes.data;
-  appendLog("voiceLog", `<div class="muted">${esc(data.title || "(no title)")} · ${esc(data.url)}</div>`);
-  const prompt = summarize
-    ? `Summarize this web page in 4-6 concise bullets. Be specific, no filler.\n\nTITLE: ${data.title}\nURL: ${data.url}\n\nPAGE TEXT:\n${(data.text || "").slice(0, 6000)}`
-    : `Analyze this web page. Identify the main topic, key claims, source quality, and any action items.\n\nTITLE: ${data.title}\nURL: ${data.url}\n\nPAGE TEXT:\n${(data.text || "").slice(0, 6000)}`;
-  try {
-    const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: prompt, tenantId: state.cfg.tenantId }),
-    });
-    const j = await r.json();
-    appendLog("voiceLog", `<div class="answer">${tag("info", summarize ? "summary" : "analysis")} ${esc(j.text || j.error || "(no result)")}</div>`);
-    if ($("#voiceSpeak")?.checked && j.text) speakText(j.text);
-  } catch (e) {
-    appendLog("voiceLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
-  }
-}
-
-// ───────────────────────── browse agent (X2) ─────────────────────
-$("#browseRunBtn")?.addEventListener("click", runBrowseAgent);
+// ───────────────────────── browse agent (V3 + V4 chaining) ───────
+$("#browseRunBtn")?.addEventListener("click", () => runBrowseAgent(false));
 let browseStop = false;
 $("#browseStopBtn")?.addEventListener("click", () => { browseStop = true; });
 
-// EXT-V3-3 · "read current tab" + "summarize" buttons on the Browse tab.
-// Mirrors the Voice tab features so the user has them in the default tab.
+async function runBrowseAgent(isContinuation = false, prevSummary = "") {
+  const taskRaw = $("#browseTask").value.trim();
+  const task = isContinuation
+    ? `Continue this multi-step task. Original goal: ${taskRaw}\n\nWhat has been done so far:\n${prevSummary}\n\nReturn next concrete steps; mark "answer" if the goal is fully achieved.`
+    : taskRaw;
+  if (!taskRaw) {
+    appendLog("browseLog", `${tag("bad", "ERR")} task required`);
+    return;
+  }
+  if (!isContinuation) {
+    $("#browseLog").innerHTML = "";
+    browseStop = false;
+    appendLog("browseLog", `${tag("info", "task")} ${esc(taskRaw)}`);
+  }
+  await tabAction("overlay_boot");
+  await tabAction("banner", { message: isContinuation ? "re-planning" : "planning", subtitle: taskRaw.slice(0, 120), kind: "info", durationMs: 3500 });
+
+  let tabContext = null;
+  if ($("#browseUseTab")?.checked) {
+    const r = await tabAction("read");
+    if (r?.ok && r.data) {
+      tabContext = {
+        url: String(r.data.url || "").slice(0, 380),
+        title: String(r.data.title || "").slice(0, 380),
+        text: String(r.data.text || "").slice(0, 7500),
+        selection: String(r.data.selection || "").slice(0, 1900),
+      };
+      if (!isContinuation) {
+        appendLog("browseLog", `${tag("muted", "ctx")} ${esc(r.data.title || r.data.url || "(tab)")}`);
+      }
+    } else if (r && !r.ok && !isContinuation) {
+      appendLog("browseLog", `${tag("muted", "ctx")} skipped (${esc(r.error || "no tab")})`);
+    }
+  }
+
+  appendLog("browseLog", `${tag("info", "plan")} ${isContinuation ? "re-" : ""}requesting…`);
+  let plan;
+  let planSummary = prevSummary;
+  let planFinal = "";
+  try {
+    const payload = { task: String(task).slice(0, 1900), tenantId: state.cfg.tenantId || undefined };
+    if (tabContext) payload.tabContext = tabContext;
+    const r = await fetch(`${state.cfg.endpoint}/api/browse-agent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.plan) {
+      const reason = r.status === 429
+        ? "rate-limited · retry in ~30s"
+        : j.detail
+          ? `${j.error || "error"} · ${String(j.detail).slice(0, 200)}`
+          : (j.error || `HTTP ${r.status}`);
+      appendLog("browseLog", `${tag("bad", "ERR")} ${esc(reason)}`);
+      return;
+    }
+    plan = j.plan;
+    planFinal = j.final || "";
+    appendLog("browseLog", `${tag("ok", "plan")} ${plan.length} steps · ${esc(j.planner || "")}`);
+    if (planFinal) appendLog("browseLog", `<div class="muted">${esc(planFinal)}</div>`);
+    if (j.memorySynced) {
+      appendLog("browseLog", `${tag("muted", "★ memory")} synced to ${esc(state.cfg.tenantId || "delrio_demo")}`);
+      // Refresh memory tab list if user is looking at it
+      if (state.activeTab === "memory") memoryRefresh();
+    }
+  } catch (e) {
+    appendLog("browseLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+    return;
+  }
+
+  const externalCount = plan.filter((s) => s.tier === "external").length;
+  let externalApproved = false;
+  if (externalCount > 0) {
+    externalApproved = confirm(`Plan has ${externalCount} external step${externalCount === 1 ? "" : "s"} (form submits / nav). Approve all in one go?`);
+    if (!externalApproved) appendLog("browseLog", `${tag("warn", "external")} ${externalCount} step(s) will be skipped`);
+  }
+
+  const stepResults = [];
+  for (let i = 0; i < plan.length; i++) {
+    if (browseStop) {
+      appendLog("browseLog", `${tag("warn", "stopped")} by user`);
+      tabAction("banner", { message: "stopped by user", kind: "info", durationMs: 1800 }).catch(() => {});
+      break;
+    }
+    const step = plan[i];
+    const label = `${i + 1}/${plan.length}`;
+    appendLog("browseLog", `${tag(step.tier === "destructive" ? "bad" : step.tier === "external" ? "warn" : "info", label)} ${esc(step.action)} ${esc(JSON.stringify(step.args).slice(0, 120))}`);
+    const bannerKind = step.tier === "destructive" ? "destructive" : step.action === "navigate" ? "nav" : step.action === "fill" ? "fill" : step.action === "click" ? "click" : "info";
+    const subtitle = step.args?.url || step.args?.needle || step.args?.field || step.args?.query || "";
+    tabAction("banner", { message: `${label} · ${step.action}`, subtitle: String(subtitle).slice(0, 120), kind: bannerKind, durationMs: 2400 }).catch(() => {});
+
+    if (step.tier === "destructive") {
+      const ok = confirm(`DESTRUCTIVE step ${label}:\n${step.action} ${JSON.stringify(step.args)}\n\nApprove?`);
+      if (!ok) {
+        appendLog("browseLog", `${tag("warn", "skip")} user denied`);
+        continue;
+      }
+    } else if (step.tier === "external") {
+      if (!externalApproved) {
+        appendLog("browseLog", `${tag("warn", "skip")} external (not approved)`);
+        continue;
+      }
+    }
+
+    try {
+      if (step.action === "answer") {
+        appendLog("browseLog", `<div class="answer">${tag("info", "answer")} ${esc(step.args.text || "")}</div>`);
+        stepResults.push(`answer: ${String(step.args.text || "").slice(0, 200)}`);
+        continue;
+      }
+      if (step.action === "summarize" || step.action === "extract") {
+        const tabRes = await tabAction("read");
+        if (!tabRes?.ok) throw new Error(tabRes?.error || "read failed");
+        const q = step.args.query || task;
+        const summarizePrompt = step.action === "summarize"
+          ? `Summarize this page in 4-6 concise bullets.\n\nURL: ${tabRes.data.url}\nTITLE: ${tabRes.data.title}\n\n${(tabRes.data.text || "").slice(0, 5000)}`
+          : `Extract from this page only what's relevant to: ${q}\n\nURL: ${tabRes.data.url}\nTITLE: ${tabRes.data.title}\n\n${(tabRes.data.text || "").slice(0, 5000)}`;
+        const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: summarizePrompt, tenantId: state.cfg.tenantId }),
+        });
+        const j = await r.json();
+        const result = j.text || j.error || "(no result)";
+        appendLog("browseLog", `<div class="answer">${tag("ok", step.action)} ${esc(result)}</div>`);
+        stepResults.push(`${step.action}: ${result.slice(0, 300)}`);
+        continue;
+      }
+      const navUrl =
+        step.args.url ||
+        step.args.query ||
+        (step.action === "navigate"
+          ? "https://duckduckgo.com/?q=" + encodeURIComponent(task)
+          : "");
+      const map = {
+        navigate: ["navigate", { url: navUrl }],
+        scroll: ["scroll", { direction: step.args.direction || "down", amount: step.args.amount || 800 }],
+        click: ["click", { needle: step.args.needle }],
+        fill: ["fill", { field: step.args.field, value: step.args.value }],
+        read: ["read", {}],
+        links: ["links", { limit: step.args.limit || 20 }],
+      };
+      const [act, args] = map[step.action] || [step.action, step.args];
+      const result = await tabAction(act, args);
+      if (result?.ok) {
+        appendLog("browseLog", `${tag("ok", "✓")} ${esc(JSON.stringify(result.data || {}).slice(0, 160))}`);
+        stepResults.push(`${act}(${JSON.stringify(args).slice(0, 80)}) ok`);
+      } else {
+        appendLog("browseLog", `${tag("bad", "✗")} ${esc(result?.error || "failed")}`);
+        stepResults.push(`${act} failed: ${String(result?.error || "").slice(0, 80)}`);
+      }
+      const mutating = ["navigate", "click", "fill", "scroll"];
+      if ($("#browseScreenshots")?.checked && mutating.includes(act)) {
+        await new Promise((r) => setTimeout(r, act === "navigate" ? 1500 : 400));
+        await captureAndLog("browseLog", `${label} · ${step.action}`);
+      }
+      await new Promise((r) => setTimeout(r, 600));
+    } catch (e) {
+      appendLog("browseLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+      stepResults.push(`error: ${String(e.message || "").slice(0, 80)}`);
+    }
+  }
+  appendLog("browseLog", `${tag("ok", isContinuation ? "round done" : "done")}`);
+  tabAction("banner", { message: "done", subtitle: `${plan.length} step${plan.length === 1 ? "" : "s"} executed`, kind: "nav", durationMs: 3000 }).catch(() => {});
+
+  // EXT-V4-5 · chain re-plan · if user enabled it and the plan ended on a
+  // non-answer step (e.g. extract/read/scroll), ask the planner whether
+  // anything else is needed to fully satisfy the original task. Up to 3
+  // rounds total so we never loop forever.
+  const lastAction = plan[plan.length - 1]?.action;
+  const completed = lastAction === "answer" || stepResults.some((s) => s.startsWith("answer:"));
+  planSummary = (planSummary ? planSummary + "\n" : "") + stepResults.join("\n");
+  // Count continuations via simple data attr on the run btn.
+  const btn = $("#browseRunBtn");
+  const round = parseInt(btn?.dataset.round || "0", 10);
+  if (
+    !browseStop &&
+    !completed &&
+    $("#browseChain")?.checked &&
+    round < 2
+  ) {
+    btn.dataset.round = String(round + 1);
+    appendLog("browseLog", `${tag("info", "chain")} round ${round + 2} · re-planning to finish goal`);
+    await new Promise((r) => setTimeout(r, 800));
+    await runBrowseAgent(true, planSummary.slice(-1200));
+  } else {
+    btn.dataset.round = "0";
+  }
+}
+
+// ───────────────────────── Browse tab quick actions (V3-3) ───────
 $("#browseReadBtn")?.addEventListener("click", async () => {
   appendLog("browseLog", `${tag("info", "tab")} reading…`);
   const res = await tabAction("read");
@@ -480,185 +635,38 @@ $("#browseSummarizeBtn")?.addEventListener("click", async () => {
   }
 });
 
-async function runBrowseAgent() {
-  const task = $("#browseTask").value.trim();
-  if (!task) {
-    appendLog("browseLog", `${tag("bad", "ERR")} task required`);
+// EXT-V4-3 · save the active tab to memory directly from Browse.
+$("#browseSaveMemBtn")?.addEventListener("click", async () => {
+  const res = await tabAction("read");
+  if (!res?.ok) {
+    appendLog("browseLog", `${tag("bad", "ERR")} ${esc(res?.error || "read failed")}`);
     return;
   }
-  $("#browseLog").innerHTML = "";
-  browseStop = false;
-  appendLog("browseLog", `${tag("info", "task")} ${esc(task)}`);
-  // EXT-V3-2 · mount overlay + show "planning" banner on the active tab so
-  // the user sees activity start on the page itself, not just the side panel.
-  await tabAction("overlay_boot");
-  await tabAction("banner", { message: "planning", subtitle: task.slice(0, 120), kind: "info", durationMs: 3500 });
-
-  // Gather current tab context if checkbox checked.
-  // EXT-FIX-2 · truncate fields to server schema limits BEFORE serializing so
-  // long selections / page text never overflow Zod max() and 400 the request.
-  let tabContext = null;
-  if ($("#browseUseTab")?.checked) {
-    const r = await tabAction("read");
-    if (r?.ok && r.data) {
-      tabContext = {
-        url: String(r.data.url || "").slice(0, 380),
-        title: String(r.data.title || "").slice(0, 380),
-        text: String(r.data.text || "").slice(0, 7500),
-        selection: String(r.data.selection || "").slice(0, 1900),
-      };
-      appendLog("browseLog", `${tag("muted", "ctx")} ${esc(r.data.title || r.data.url || "(tab)")}`);
-    } else if (r && !r.ok) {
-      // Read failed (chrome:// or extension page) — skip context, proceed.
-      appendLog("browseLog", `${tag("muted", "ctx")} skipped (${esc(r.error || "no tab")})`);
-    }
-  }
-
-  // Get plan from /api/browse-agent. Only include tabContext when non-null
-  // so Zod .optional() never sees `null` (older server builds reject it).
-  appendLog("browseLog", `${tag("info", "plan")} requesting…`);
-  let plan;
+  const d = res.data || {};
+  const text = `Saved · ${d.title || "(no title)"} · ${d.url || ""} · excerpt: ${String(d.text || "").slice(0, 400)}`;
   try {
-    const payload = { task: String(task).slice(0, 1900), tenantId: state.cfg.tenantId || undefined };
-    if (tabContext) payload.tabContext = tabContext;
-    const r = await fetch(`${state.cfg.endpoint}/api/browse-agent`, {
+    const r = await fetch(`${state.cfg.endpoint}/api/memory/write`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        text,
+        tags: ["browser-search", "user-save"],
+        source: "browser-search",
+        tenantId: state.cfg.tenantId,
+      }),
     });
-    const j = await r.json();
-    if (!r.ok || !j.plan) {
-      // EXT-FIX-2 · surface the schema detail when planner endpoint 400s so the
-      // user knows whether it was rate-limit / payload-size / blocked / 5xx.
-      const reason = r.status === 429
-        ? "rate-limited · retry in ~30s"
-        : j.detail
-          ? `${j.error || "error"} · ${String(j.detail).slice(0, 200)}`
-          : (j.error || `HTTP ${r.status}`);
-      appendLog("browseLog", `${tag("bad", "ERR")} ${esc(reason)}`);
+    if (!r.ok) {
+      appendLog("browseLog", `${tag("bad", "ERR")} memory save HTTP ${r.status}`);
       return;
     }
-    plan = j.plan;
-    appendLog("browseLog", `${tag("ok", "plan")} ${plan.length} steps · ${esc(j.planner || "")}`);
-    if (j.final) appendLog("browseLog", `<div class="muted">${esc(j.final)}</div>`);
-    // EXT-MEM-1 · server persists task+final to Hydra memory under tenantId.
-    // Shows in OS MemoryDashboard (delrio.vercel.app/os → Memory app).
-    if (j.memorySynced) appendLog("browseLog", `${tag("muted", "★ memory")} synced to ${esc(state.cfg.tenantId || "delrio_demo")}`);
+    appendLog("browseLog", `${tag("ok", "★ saved")} ${esc(d.title || d.url || "tab")}`);
+    if (state.activeTab === "memory") memoryRefresh();
   } catch (e) {
     appendLog("browseLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
-    return;
   }
+});
 
-  // QA-4 · batch approval · ask once at plan start for all external steps,
-  // always confirm each destructive step individually.
-  const externalCount = plan.filter((s) => s.tier === "external").length;
-  let externalApproved = false;
-  if (externalCount > 0) {
-    externalApproved = confirm(`Plan has ${externalCount} external step${externalCount === 1 ? "" : "s"} (form submits / nav). Approve all in one go?`);
-    if (!externalApproved) appendLog("browseLog", `${tag("warn", "external")} ${externalCount} step(s) will be skipped`);
-  }
-
-  // Execute each step against active tab
-  for (let i = 0; i < plan.length; i++) {
-    if (browseStop) {
-      appendLog("browseLog", `${tag("warn", "stopped")} by user`);
-      // EXT-V3-2 · clear page banner when the user stops a run.
-      tabAction("banner", { message: "stopped by user", kind: "info", durationMs: 1800 }).catch(() => {});
-      break;
-    }
-    const step = plan[i];
-    const label = `${i + 1}/${plan.length}`;
-    appendLog("browseLog", `${tag(step.tier === "destructive" ? "bad" : step.tier === "external" ? "warn" : "info", label)} ${esc(step.action)} ${esc(JSON.stringify(step.args).slice(0, 120))}`);
-    // EXT-V3-2 · narrate the step on the target page so the user sees
-    // step-by-step what the agent is doing without looking at the side panel.
-    const kind = step.tier === "destructive" ? "destructive" : step.action === "navigate" ? "nav" : step.action === "fill" ? "fill" : step.action === "click" ? "click" : "info";
-    const subtitle = step.args?.url || step.args?.needle || step.args?.field || step.args?.query || "";
-    tabAction("banner", { message: `${label} · ${step.action}`, subtitle: String(subtitle).slice(0, 120), kind, durationMs: 2400 }).catch(() => {});
-
-    // Gate destructive always · external once per plan
-    if (step.tier === "destructive") {
-      const ok = confirm(`DESTRUCTIVE step ${label}:\n${step.action} ${JSON.stringify(step.args)}\n\nApprove?`);
-      if (!ok) {
-        appendLog("browseLog", `${tag("warn", "skip")} user denied`);
-        continue;
-      }
-    } else if (step.tier === "external") {
-      if (!externalApproved) {
-        appendLog("browseLog", `${tag("warn", "skip")} external (not approved)`);
-        continue;
-      }
-    }
-
-    try {
-      let result;
-      if (step.action === "answer") {
-        appendLog("browseLog", `<div class="answer">${tag("info", "answer")} ${esc(step.args.text || "")}</div>`);
-        if ($("#browseSpeak")?.checked && step.args.text) speakText(step.args.text);
-        continue;
-      }
-      if (step.action === "summarize" || step.action === "extract") {
-        const tabRes = await tabAction("read");
-        if (!tabRes?.ok) throw new Error(tabRes?.error || "read failed");
-        const q = step.args.query || task;
-        const summarizePrompt = step.action === "summarize"
-          ? `Summarize this page in 4-6 concise bullets.\n\nURL: ${tabRes.data.url}\nTITLE: ${tabRes.data.title}\n\n${(tabRes.data.text || "").slice(0, 5000)}`
-          : `Extract from this page only what's relevant to: ${q}\n\nURL: ${tabRes.data.url}\nTITLE: ${tabRes.data.title}\n\n${(tabRes.data.text || "").slice(0, 5000)}`;
-        const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: summarizePrompt, tenantId: state.cfg.tenantId }),
-        });
-        const j = await r.json();
-        result = j.text || j.error || "(no result)";
-        appendLog("browseLog", `<div class="answer">${tag("ok", step.action)} ${esc(result)}</div>`);
-        if ($("#browseSpeak")?.checked) speakText(result);
-        continue;
-      }
-      // EXT-V2-4 · belt-and-braces · if server returned navigate with no URL
-      // (legacy build), fall back to a DDG search using the original task so
-      // we always land somewhere instead of erroring "could not resolve URL".
-      const navUrl =
-        step.args.url ||
-        step.args.query ||
-        (step.action === "navigate"
-          ? "https://duckduckgo.com/?q=" + encodeURIComponent(task)
-          : "");
-      // Map action → tabAction
-      const map = {
-        navigate: ["navigate", { url: navUrl }],
-        scroll: ["scroll", { direction: step.args.direction || "down", amount: step.args.amount || 800 }],
-        click: ["click", { needle: step.args.needle }],
-        fill: ["fill", { field: step.args.field, value: step.args.value }],
-        read: ["read", {}],
-        links: ["links", { limit: step.args.limit || 20 }],
-      };
-      const [act, args] = map[step.action] || [step.action, step.args];
-      result = await tabAction(act, args);
-      if (result?.ok) {
-        appendLog("browseLog", `${tag("ok", "✓")} ${esc(JSON.stringify(result.data || {}).slice(0, 160))}`);
-      } else {
-        appendLog("browseLog", `${tag("bad", "✗")} ${esc(result?.error || "failed")}`);
-      }
-      // EXT-V2-3 · live screenshot after every tab-mutating step so the user
-      // can see what the agent did. Skipped on `read` / `links` (no UI change)
-      // and gated by the `#browseScreenshots` checkbox.
-      const mutating = ["navigate", "click", "fill", "scroll"];
-      if ($("#browseScreenshots")?.checked && mutating.includes(act)) {
-        // Wait a beat for nav/SPA route changes to paint before capturing.
-        await new Promise((r) => setTimeout(r, act === "navigate" ? 1500 : 400));
-        await captureAndLog("browseLog", `${label} · ${step.action}`);
-      }
-      await new Promise((r) => setTimeout(r, 600));
-    } catch (e) {
-      appendLog("browseLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
-    }
-  }
-  appendLog("browseLog", `${tag("ok", "done")}`);
-  // EXT-V3-2 · green "done" banner on the target page once the plan finishes.
-  tabAction("banner", { message: "done", subtitle: `${plan.length} step${plan.length === 1 ? "" : "s"} executed`, kind: "nav", durationMs: 3000 }).catch(() => {});
-}
-
-// ───────────────────────── cohort (kept) ─────────────────────────
+// ───────────────────────── cohort ─────────────────────────────────
 $("#cohortBtn").addEventListener("click", runCohort);
 
 async function runCohort() {
@@ -682,7 +690,6 @@ async function runCohort() {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // QA-2 · canonical input + members
       body: JSON.stringify({ input: goal, goal, members }),
     });
     if (!res.ok) {
@@ -732,339 +739,166 @@ async function runCohort() {
 // ───────────────────────── tab action RPC ────────────────────────
 function tabAction(action, args = {}) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ kind: "delos-tab-action", action, args }, (res) => resolve(res || { ok: false, error: "no response" }));
+    chrome.runtime.sendMessage({ kind: "delos-tab-action", action, args }, (res) =>
+      resolve(res || { ok: false, error: "no response" }),
+    );
   });
 }
 
-// EXT-V2-3 · render a screenshot dataURL inline in the given log panel.
-// Captures the active tab via background `screenshot` action. Caps height
-// to keep the side panel scrollable. Tagged with the step label so the
-// user can scan the trace at a glance.
 async function captureAndLog(targetId, label = "") {
   try {
     const shot = await tabAction("screenshot");
     if (!shot?.ok || !shot.data?.dataUrl) return;
-    const safeLabel = esc(label);
     appendLog(
       targetId,
-      `<div class="screenshot"><span class="muted small">📸 ${safeLabel}</span><br>` +
-        `<img src="${shot.data.dataUrl}" alt="screenshot ${safeLabel}" ` +
+      `<div class="screenshot"><span class="muted small">📸 ${esc(label)}</span><br>` +
+        `<img src="${shot.data.dataUrl}" alt="screenshot ${esc(label)}" ` +
         `style="max-width:100%;max-height:200px;border:1px solid var(--accent,#fbc531);margin-top:4px" /></div>`,
     );
-  } catch {
-    /* screenshot failures should not derail the run */
-  }
+  } catch {}
 }
 
-// ───────────────────────── voice agent (autonomous) ──────────────
-function getSttCtor() {
-  return window.SpeechRecognition || window.webkitSpeechRecognition;
-}
-
-// EXT-V2-1 · speakText is now a no-op. TTS removed per UX request — the side
-// panel should never speak. Replies still render in the log. Kept the function
-// signature so legacy call sites compile without churn.
-function speakText(_text) { /* TTS removed */ }
-
-// EXT-FIX-3 · toggleSttIntoGoal removed alongside the Mission #micBtn handler.
-
-$("#voiceBtn").addEventListener("click", voiceTurn);
-// EXT-V2-1 · #stopSpeakBtn removed from DOM · listener wrapped in optional
-// chain for safety in case stray builds still ship the button.
-$("#stopSpeakBtn")?.addEventListener("click", () => window.speechSynthesis?.cancel());
-
-// EXT-1 · trigger Chrome mic-permission prompt for side panel origin. Without
-// this, SpeechRecognition errors with "not-allowed" because Chrome blocks mic
-// on chrome-extension:// origins until the user explicitly grants. Idempotent ·
-// once granted, the cached permission means future getUserMedia calls return
-// immediately without re-prompt.
-let micGranted = false;
-async function ensureMicPermission() {
-  if (micGranted) return true;
-  if (!navigator?.mediaDevices?.getUserMedia) {
-    appendLog("voiceLog", `${tag("bad", "voice")} mediaDevices unavailable · update Chrome`);
-    return false;
+// ───────────────────────── memory (V4-3 interactive) ─────────────
+$("#memRecallBtn")?.addEventListener("click", memoryRecall);
+$("#memRefreshBtn")?.addEventListener("click", memoryRefresh);
+$("#memSaveBtn")?.addEventListener("click", memorySave);
+$("#memQuery")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    memoryRecall();
   }
+});
+$("#memNewText")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    memorySave();
+  }
+});
+
+async function memoryRecall() {
+  const q = $("#memQuery")?.value.trim();
+  if (!q) {
+    return memoryRefresh();
+  }
+  $("#memLog").innerHTML = "";
+  appendLog("memLog", `${tag("muted", "…")} querying "${esc(q)}"`);
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // We don't need the stream itself — just the permission grant. Release it.
-    stream.getTracks().forEach((t) => t.stop());
-    micGranted = true;
-    return true;
-  } catch (e) {
-    const name = e?.name || "error";
-    const guide = name === "NotAllowedError" || name === "PermissionDeniedError"
-      ? "Click the 🔒 / 🎤 icon in the URL bar OR open chrome://settings/content/microphone and allow chrome-extension:// origin"
-      : name === "NotFoundError"
-        ? "No microphone detected. Plug one in + retry."
-        : "Mic permission failed: " + (e?.message || name);
-    appendLog("voiceLog", `${tag("bad", "voice")} ${esc(guide)}`);
-    setVoiceStatus("idle", "READY", "mic denied — see log");
-    return false;
-  }
-}
-
-async function voiceTurn() {
-  const Ctor = getSttCtor();
-  if (!Ctor) {
-    appendLog("voiceLog", `${tag("bad", "voice")} unsupported in this browser`);
-    return;
-  }
-  if (state.voiceRec) {
-    state.voiceRec.stop();
-    return;
-  }
-  // EXT-1 · pre-flight mic permission BEFORE creating SpeechRecognition
-  const okMic = await ensureMicPermission();
-  if (!okMic) return;
-
-  state.voiceLoop = $("#voiceLoop").checked;
-  state.voiceAuto = $("#voiceAuto").checked;
-  const rec = new Ctor();
-  rec.lang = "en-US";
-  rec.interimResults = true;
-  rec.continuous = false;
-  let live = "", finalText = "";
-  setVoiceStatus("listening", "LISTENING…", "speak now");
-  $("#voiceBtn").textContent = "■ STOP";
-  rec.onresult = (e) => {
-    finalText = "";
-    live = "";
-    for (let i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
-      else live += e.results[i][0].transcript;
-    }
-    if (live) setVoiceStatus("listening", "LISTENING…", live.slice(0, 60));
-  };
-  rec.onend = async () => {
-    state.voiceRec = null;
-    $("#voiceBtn").textContent = "🎤 HOLD TO TALK";
-    const text = (finalText || live).trim();
-    if (!text) {
-      setVoiceStatus("idle", "READY", "no speech");
-      return;
-    }
-    appendLog("voiceLog", `<b>YOU</b> ${esc(text)}`);
-    state.voiceBusy = true;
-    setVoiceStatus("thinking", "THINKING", "classifying intent");
-
-    try {
-      if (state.voiceAuto) {
-        await handleAutonomous(text);
-      } else {
-        await handleAsk(text);
-      }
-    } catch (e) {
-      appendLog("voiceLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
-    } finally {
-      state.voiceBusy = false;
-      setVoiceStatus("idle", "READY", state.voiceLoop ? "looping…" : "tap to talk");
-      if (state.voiceLoop) setTimeout(voiceTurn, 800);
-    }
-  };
-  rec.onerror = (e) => {
-    const err = e?.error || "error";
-    const human = err === "not-allowed"
-      ? "Chrome blocked mic. Click the 🔒 in the URL bar → allow microphone, OR open chrome://settings/content/microphone"
-      : err === "no-speech"
-        ? "Heard nothing — speak closer to mic"
-        : err === "audio-capture"
-          ? "Mic hardware busy — close other apps using mic"
-          : err === "network"
-            ? "Network error — speech server unreachable"
-            : err;
-    appendLog("voiceLog", `${tag("bad", "voice")} ${esc(human)}`);
-    state.voiceRec = null;
-    $("#voiceBtn").textContent = "🎤 HOLD TO TALK";
-    setVoiceStatus("idle", "READY", err === "not-allowed" ? "mic denied — see log" : "error — retry");
-    // For not-allowed, reset granted flag so next click re-prompts
-    if (err === "not-allowed" || err === "service-not-allowed") micGranted = false;
-  };
-  rec.start();
-  state.voiceRec = rec;
-}
-
-// Heuristic local intent classifier — runs before /api/voice-command so the
-// common cases ("scroll down", "click sign in", "summarize this page",
-// "open github") don't burn an LLM call. Returns null if no local match;
-// then we fall through to the server classifier.
-function localIntent(text) {
-  const t = text.trim().toLowerCase();
-  // Tab-content reading
-  if (/^(read|tell me|what does this page say|read this( (page|tab))?)\b/i.test(t)) {
-    return { intent: "read_tab" };
-  }
-  if (/^(summari[sz]e|sum up|tldr|tl;dr)(\s+(this|the)?\s*(page|tab|article|video|post)?)?/i.test(t)) {
-    return { intent: "summarize_tab" };
-  }
-  // Scrolling
-  let m = t.match(/^scroll\s+(up|down|top|bottom)$/);
-  if (m) return { intent: "scroll", direction: m[1] };
-  if (/^scroll$/.test(t)) return { intent: "scroll", direction: "down" };
-  // Click
-  m = t.match(/^(click|press|tap)\s+(on\s+)?(.+)$/);
-  if (m) return { intent: "click", target: m[3].replace(/\.$/, "") };
-  // Fill
-  m = t.match(/^(fill|type|enter|set)\s+(?:the\s+)?(.+?)\s+(?:with|to|=)\s+(.+)$/);
-  if (m) return { intent: "fill", field: m[2], value: m[3] };
-  // Navigation
-  m = t.match(/^(open|go to|navigate to|visit|launch)\s+(.+)$/);
-  if (m) return { intent: "open_url", url: m[2] };
-  if (/^reload$|^refresh$/.test(t)) return { intent: "reload" };
-  if (/^go back$|^back$/.test(t)) return { intent: "back" };
-  if (/^go forward$|^forward$/.test(t)) return { intent: "forward" };
-  if (/^close (this )?tab$|^close it$/.test(t)) return { intent: "close_tab" };
-  return null;
-}
-
-async function handleAutonomous(transcript) {
-  // 1) Try local pattern matcher first — fast, free, deterministic.
-  let intent = localIntent(transcript);
-
-  // 2) Fall back to server intent classifier for fuzzier inputs.
-  if (!intent) {
-    try {
-      const r = await fetch(`${state.cfg.endpoint}/api/voice-command`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript, tenantId: state.cfg.tenantId || undefined }),
-      });
-      if (r.ok) {
-        const j = await r.json();
-        // VP-6 · composeUrl · open Gmail compose with prefilled draft fields
-        // in a new tab. Works without OAuth · judge sees real Gmail draft.
-        if (j.composeUrl) {
-          chrome.tabs.create({ url: j.composeUrl }).catch(() => {});
-          appendLog("voiceLog", `${tag("ok", "✉ draft")} <a href="${esc(j.composeUrl)}" target="_blank" style="color:#7dd3fc;text-decoration:underline">opened in Gmail</a>`);
-          intent = { intent: "answer", reply: "Gmail draft opened with the spoken context." };
-        }
-        // R5-D · integration_unavailable envelope · open Settings in main app
-        // tab + speak the reply rather than silently routing nowhere.
-        else if (j.kind === "integration_unavailable") {
-          const link = `${state.cfg.endpoint}${j.deepLink || "/os"}`;
-          appendLog("voiceLog", `${tag("warn", "needs connect")} ${esc(j.provider || "")} · <a href="${esc(link)}" target="_blank" style="color:#7dd3fc;text-decoration:underline">Open Settings</a>`);
-          intent = { intent: "answer", reply: j.reply || `${j.provider} not connected — open Settings to connect.` };
-        }
-        else if (j.kind === "fulfilled") {
-          appendLog("voiceLog", `${tag("ok", "✓")} ${esc(j.provider || "")} · ${esc(j.action || "")}`);
-          intent = { intent: "answer", reply: j.reply || "ok" };
-        }
-        else if (j.kind === "integration_call") {
-          // Direct provider call · trust server's reply text
-          intent = { intent: "answer", reply: j.reply || "dispatched" };
-        }
-        // Bridge server intent vocabulary → our tab-action vocabulary.
-        else if (j.intent === "open_app" && j.app) intent = { intent: "open_url", url: j.app };
-        else if (j.intent === "navigate" && j.payload) intent = { intent: "open_url", url: j.payload };
-        else if (j.intent === "answer") intent = { intent: "answer", reply: j.reply };
-        else intent = { intent: "answer", reply: j.reply || "ok" };
-      }
-    } catch {}
-  }
-  if (!intent) intent = { intent: "ask" };
-
-  setVoiceStatus("acting", intent.intent.toUpperCase(), "");
-
-  // 3) Execute the intent against the current tab or the agent.
-  switch (intent.intent) {
-    case "read_tab": {
-      const res = await tabAction("read");
-      const text = res?.data?.text?.slice(0, 240) || "(no text)";
-      appendLog("voiceLog", `${tag("cyan", "read")} ${esc(text)}…`);
-      speakText(text);
-      break;
-    }
-    case "summarize_tab": {
-      const res = await tabAction("read");
-      if (!res?.ok) { speakText("Could not read the page."); break; }
-      const ctx = res.data;
-      const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: `Summarize this web page in 3 short bullets.\n\nTitle: ${ctx.title}\nURL: ${ctx.url}\n\n${ctx.text}`,
-          models: state.cfg.modelOverrides,
-          tenantId: state.cfg.tenantId || undefined,
-        }),
-      });
-      const j = await r.json();
-      const reply = j.text || `err: ${j.error || "unknown"}`;
-      appendLog("voiceLog", `<div class="answer">${tag("info", "summary")} ${esc(reply)}</div>`);
-      if ($("#voiceSpeak").checked) speakText(reply);
-      break;
-    }
-    case "click": {
-      const res = await tabAction("click", { needle: intent.target });
-      const ok = res?.data?.ok;
-      appendLog("voiceLog", `${tag(ok ? "ok" : "bad", "click")} ${esc(intent.target)} ${ok ? "✓" : ""}`);
-      if ($("#voiceSpeak").checked) speakText(ok ? `Clicked ${intent.target}.` : `Could not find ${intent.target}.`);
-      break;
-    }
-    case "fill": {
-      const res = await tabAction("fill", { field: intent.field, value: intent.value });
-      const ok = res?.data?.ok;
-      appendLog("voiceLog", `${tag(ok ? "ok" : "bad", "fill")} ${esc(intent.field)} = ${esc(intent.value)} ${ok ? "✓" : ""}`);
-      if ($("#voiceSpeak").checked) speakText(ok ? `Filled ${intent.field}.` : `Could not find a ${intent.field} field.`);
-      break;
-    }
-    case "scroll": {
-      await tabAction("scroll", { direction: intent.direction || "down" });
-      appendLog("voiceLog", `${tag("info", "scroll")} ${esc(intent.direction || "down")}`);
-      break;
-    }
-    case "open_url": {
-      await tabAction("navigate", { url: intent.url });
-      appendLog("voiceLog", `${tag("info", "→")} ${esc(intent.url)}`);
-      if ($("#voiceSpeak").checked) speakText(`Opening ${intent.url}.`);
-      break;
-    }
-    case "reload":
-    case "back":
-    case "forward":
-    case "close_tab": {
-      await tabAction(intent.intent);
-      appendLog("voiceLog", `${tag("info", intent.intent)} ✓`);
-      break;
-    }
-    case "answer": {
-      const reply = intent.reply || "ok";
-      appendLog("voiceLog", `<div class="answer">${tag("info", "agent")} ${esc(reply)}</div>`);
-      if ($("#voiceSpeak").checked) speakText(reply);
-      break;
-    }
-    case "ask":
-    default: {
-      await handleAsk(transcript);
-      break;
-    }
-  }
-}
-
-async function handleAsk(transcript) {
-  try {
-    const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // QA-2/QA-6 · use canonical input field + surface HTTP errors clearly
-      body: JSON.stringify({ input: transcript, models: state.cfg.modelOverrides, tenantId: state.cfg.tenantId || undefined }),
-    });
+    const t = state.cfg.tenantId;
+    const tParam = t ? `&tenant=${encodeURIComponent(t)}` : "";
+    const url = `${state.cfg.endpoint}/api/memory?q=${encodeURIComponent(q)}&topK=12${tParam}`;
+    const r = await fetch(url);
     if (!r.ok) {
-      const err = r.status === 429 ? "rate-limited · try in ~30s" : `HTTP ${r.status}`;
-      appendLog("voiceLog", `${tag("bad", "agent")} ${err}`);
-      if ($("#voiceSpeak").checked) speakText(`Agent error: ${err}`);
+      appendLog("memLog", `${tag("bad", "ERR")} HTTP ${r.status}`);
       return;
     }
     const j = await r.json();
-    const reply = j.text || (j.error ? `err: ${j.error}` : "ok");
-    appendLog("voiceLog", `<div class="answer">${tag("info", "agent")} ${esc(reply)}</div>`);
-    if ($("#voiceSpeak").checked) speakText(reply);
+    $("#memLog").innerHTML = "";
+    const total = (j.hits?.length ?? 0) + (j.local?.length ?? 0);
+    if (total === 0) {
+      appendLog("memLog", `<span class="empty">no matches for "${esc(q)}"</span>`);
+      return;
+    }
+    appendLog("memLog", `${tag("info", "hits")} ${total} for "${esc(q)}"`);
+    for (const h of j.hits || []) renderMemoryEntry(h, true);
+    for (const m of j.local || []) renderMemoryEntry(m, false);
   } catch (e) {
-    appendLog("voiceLog", `${tag("bad", "agent")} ${esc(e.message)}`);
+    appendLog("memLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
   }
 }
 
-// EXT-FIX-3 · Memory tab + recallMem() removed · the OS app's MemoryDashboard
-// is the canonical view. The /api/memory endpoint remains for the dashboard.
+async function memoryRefresh() {
+  $("#memLog").innerHTML = "";
+  appendLog("memLog", `${tag("muted", "…")} loading memory`);
+  try {
+    const t = state.cfg.tenantId;
+    const tParam = t ? `&tenant=${encodeURIComponent(t)}` : "";
+    const url = `${state.cfg.endpoint}/api/memory?q=&topK=25${tParam}`;
+    const r = await fetch(url);
+    if (!r.ok) {
+      appendLog("memLog", `${tag("bad", "ERR")} HTTP ${r.status}`);
+      return;
+    }
+    const j = await r.json();
+    $("#memLog").innerHTML = "";
+    const total = (j.hits?.length ?? 0) + (j.local?.length ?? 0);
+    if (total === 0) {
+      appendLog("memLog", `<span class="empty">no memories yet · run a Browse task or click ★ Save to memory above</span>`);
+      return;
+    }
+    appendLog("memLog", `${tag("ok", "memory")} ${total} entries · tenant <code>${esc(state.cfg.tenantId)}</code>`);
+    for (const h of j.hits || []) renderMemoryEntry(h, true);
+    for (const m of j.local || []) renderMemoryEntry(m, false);
+  } catch (e) {
+    appendLog("memLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+  }
+}
+
+function renderMemoryEntry(m, isHit) {
+  const tags = (m.tags || []).map((t) => `<span class="tag muted">${esc(t)}</span>`).join("");
+  const score = m.score != null ? `<span class="tag muted">s=${m.score.toFixed(2)}</span>` : "";
+  const id = m.id || "";
+  const html =
+    `<div class="memrow" style="border-left:2px solid var(--accent,#fbc531);padding:6px 8px;margin-bottom:6px;background:rgba(255,255,255,0.02);cursor:pointer" data-id="${esc(id)}" title="click to copy">` +
+    `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:3px">` +
+    `<div>${tags} ${score}</div>` +
+    `<button class="ghost small mem-del-btn" data-id="${esc(id)}" style="font-size:10px;padding:1px 5px">✕</button>` +
+    `</div>` +
+    `<div style="font-size:12px;line-height:1.4">${esc(m.text)}</div>` +
+    `</div>`;
+  const el = $("#memLog");
+  const wrap = document.createElement("div");
+  wrap.innerHTML = html;
+  el.appendChild(wrap.firstChild);
+  // Click row to copy, click ✕ to delete.
+  const row = el.lastElementChild;
+  row.addEventListener("click", (e) => {
+    if (e.target.classList.contains("mem-del-btn")) return;
+    navigator.clipboard?.writeText(m.text).catch(() => {});
+    row.style.outline = "2px solid var(--accent)";
+    setTimeout(() => (row.style.outline = "none"), 500);
+  });
+  row.querySelector(".mem-del-btn")?.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (!id) return;
+    if (!confirm("Delete this memory?")) return;
+    try {
+      const r = await fetch(`${state.cfg.endpoint}/api/memory/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, tenantId: state.cfg.tenantId }),
+      });
+      if (r.ok) row.remove();
+      else appendLog("memLog", `${tag("bad", "ERR")} delete HTTP ${r.status}`);
+    } catch (err) {
+      appendLog("memLog", `${tag("bad", "ERR")} ${esc(err.message)}`);
+    }
+  });
+}
+
+async function memorySave() {
+  const text = $("#memNewText")?.value.trim();
+  if (!text) return;
+  try {
+    const r = await fetch(`${state.cfg.endpoint}/api/memory/write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        tags: ["user-write"],
+        source: "user-fact",
+        tenantId: state.cfg.tenantId,
+      }),
+    });
+    if (!r.ok) {
+      appendLog("memLog", `${tag("bad", "ERR")} HTTP ${r.status}`);
+      return;
+    }
+    $("#memNewText").value = "";
+    memoryRefresh();
+  } catch (e) {
+    appendLog("memLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+  }
+}
 
 // ───────────────────────── boot ─────────────────────────────────
 (async function init() {
@@ -1075,7 +909,6 @@ async function handleAsk(transcript) {
   if (stored.pendingGoal) {
     $("#goal").value = stored.pendingGoal;
     await chrome.storage.local.remove("pendingGoal");
-    // If a selection-context-menu drop arrived, jump to Mission tab.
     $$(".tab").forEach((x) => x.classList.remove("on"));
     $$(".panel").forEach((x) => x.classList.remove("on"));
     $('[data-tab="mission"]')?.classList.add("on");
@@ -1084,11 +917,9 @@ async function handleAsk(transcript) {
   }
   $("#log").innerHTML = '<div class="empty">terminal ready <span class="cursor"></span></div>';
   $("#cohortResults").innerHTML = '<div class="empty">no cohort run yet</div>';
-  $("#voiceLog").innerHTML = '<div class="empty">tap the mic, say "summarize this page"</div>';
-  $("#browseLog").innerHTML = '<div class="empty">give the agent a browse task above</div>';
-  setVoiceStatus("idle", "READY", "autonomous mode");
-  // EXT-FIX-3 · Browse is now the default tab · ensure correct active state
-  // even if pendingGoal didn't redirect us to Mission.
+  $("#browseLog").innerHTML = '<div class="empty">give the agent any complex task above</div>';
+  $("#memLog").innerHTML = '<div class="empty">memory loading…</div>';
   if (state.activeTab !== "mission") state.activeTab = "browse";
+  // Health probe every 15s but only flips to "offline" after 3 fails.
   setInterval(refreshConn, 15000);
 })();
