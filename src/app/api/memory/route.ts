@@ -60,17 +60,31 @@ export async function GET(req: NextRequest) {
   let hits = await safeRecall({ tenantId, query: q, topK });
   // B08 · query-sensitive local recall. Empty queries → chronological
   // tail. Unmatched vague queries → fall through to recency. Tight
-  // queries still get the relevance-scored slice. Cold-lambda recovery:
-  // when localFallback is empty (process-local store on a different
-  // lambda instance) try a broad recall against Hydra with a generic
-  // sweep query so the dashboard never renders empty after auto-seed.
+  // queries still get the relevance-scored slice.
   const localAll = getLocalFallback(tenantId);
   let local = q.trim() ? recallLocal(q, localAll, topK) : [];
+  // P0 round 11 · gate hits[] by min score + token overlap so Hydra's
+  // semantic recall doesn't surface unrelated facts on negative queries.
+  // Was: `apple banana XYZ` returned favorite_color at score 0.49 because
+  // vector similarity isn't 0 between random English words. Gate it.
+  const qTokenCount = q.trim().split(/\s+/).filter(Boolean).length;
+  if (q.trim() && qTokenCount >= 2) {
+    const qTokens = new Set(
+      q.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t) => t.length >= 2),
+    );
+    hits = hits.filter((h) => {
+      const score = (h as { score?: number }).score ?? 0;
+      // Lexical sanity check · at least one query token must appear in text.
+      const text = String((h as { text?: string }).text || "").toLowerCase();
+      const overlapTokens = [...qTokens].filter((t) => text.includes(t));
+      // Strict gate · score must be high OR text must contain at least one
+      // distinctive query token. Generic stop-words don't pass either bar.
+      return score >= 0.6 || overlapTokens.length >= 1;
+    });
+  }
   // P0 · chronological fallback only fires for EMPTY queries (dashboard
   // "load all") or single-token queries. Was firing for any zero-score
-  // recall, which surfaced unrelated entries for negative-match queries
-  // (e.g. `apple banana XYZ` returned `favorite_color = electric blue`).
-  const qTokenCount = q.trim().split(/\s+/).filter(Boolean).length;
+  // recall, which surfaced unrelated entries for negative-match queries.
   if (local.length === 0 && localAll.length > 0 && qTokenCount <= 1) {
     local = localAll.slice(-topK).reverse();
   }
@@ -101,10 +115,23 @@ export async function POST(req: NextRequest) {
   let local = q.trim() ? recallLocal(q, localAll, topK) : [];
   // P0 · same guard as GET · only chronological-fallback for empty/single-token queries.
   const qTokenCountPost = q.trim().split(/\s+/).filter(Boolean).length;
+  // P0 round 11 · hits[] gate matches GET path · semantic recall must have
+  // either ≥0.6 score or ≥1 lexical token overlap to survive.
+  if (q.trim() && qTokenCountPost >= 2) {
+    const qTokens = new Set(
+      q.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t) => t.length >= 2),
+    );
+    hits = hits.filter((h) => {
+      const score = (h as { score?: number }).score ?? 0;
+      const text = String((h as { text?: string }).text || "").toLowerCase();
+      const overlapTokens = [...qTokens].filter((t) => text.includes(t));
+      return score >= 0.6 || overlapTokens.length >= 1;
+    });
+  }
   if (local.length === 0 && localAll.length > 0 && qTokenCountPost <= 1) {
     local = localAll.slice(-topK).reverse();
   }
-  if (hits.length === 0 && local.length === 0) {
+  if (hits.length === 0 && local.length === 0 && qTokenCountPost <= 1) {
     hits = await safeRecall({ tenantId, query: "run research user", topK });
   }
   return Response.json({ query: q, hits, local, tenantId, scope: source });

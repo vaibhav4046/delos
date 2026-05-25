@@ -510,24 +510,36 @@ function MemoryRow({
 
 function EmptyState({ tenant, onSeeded }: { tenant: string | null; onSeeded: () => void }) {
   const [seeding, setSeeding] = useState(false);
-  // P1 · auto-fire seed on mount for guest/anon/demo tenants so judges who
-  // randomly click Memory Browser never see the sad empty state. Manual
-  // tenants (u_*) keep the explicit button so we don't pollute their store.
+  // P1 round 11 · auto-fire seed for null/guest/anon/demo tenants. Seed
+  // under the SAME tenant the dashboard queries (was mismatching: seeded
+  // demo_<timestamp> but read delrio_demo, so refresh stayed empty).
+  // Manual u_*/account tenants get the explicit button.
   useEffect(() => {
-    if (!tenant) return;
-    const isGuest = /^(demo|qa|test|judge|hack|anon|delrio_demo)/i.test(tenant) || tenant === "delrio_demo";
+    const isGuest = !tenant
+      || /^(demo|qa|test|judge|hack|anon|delrio_demo)/i.test(tenant)
+      || tenant === "delrio_demo";
     if (!isGuest) return;
     let cancelled = false;
     (async () => {
       setSeeding(true);
       try {
-        const tid = /^(demo|qa|test|judge|hack)_/i.test(tenant) ? tenant : `demo_${Date.now()}`;
+        // Use the SAME tenant id the dashboard uses for recall. For guest
+        // sessions that resolves to `delrio_demo` (matches autoSeedIfEmpty
+        // server-side rules + survives across page reloads).
+        const tid = (tenant && /^(demo|qa|test|judge|hack)_/i.test(tenant))
+          ? tenant
+          : "delrio_demo";
         const r = await fetch("/api/memory/seed", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tenantId: tid }),
         });
-        if (r.ok && !cancelled) onSeeded();
+        if (r.ok && !cancelled) {
+          // Give the server one tick to flush writes through HydraDB +
+          // localFallback before re-querying.
+          await new Promise((res) => setTimeout(res, 400));
+          onSeeded();
+        }
       } finally {
         if (!cancelled) setSeeding(false);
       }

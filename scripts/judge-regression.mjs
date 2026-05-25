@@ -81,10 +81,22 @@ ok("memory-recall-query-sensitive", async () => {
   const b = await GET(`/api/memory?q=apple%20banana%20XYZ&tenant=${tenant}&topK=3`);
   const aBody = j(a.b);
   const bBody = j(b.b);
-  assert.notEqual(
-    JSON.stringify(aBody.local),
-    JSON.stringify(bBody.local),
-    `matching query local: ${JSON.stringify(aBody.local)} vs unmatched: ${JSON.stringify(bBody.local)}`,
+  // Round-11 · strict total-empty assertion for unrelated query. Was only
+  // checking local[] · hits[] was leaking favorite_color at score 0.49.
+  // Both arrays must be empty on a query whose tokens don't appear anywhere.
+  const bHits = Array.isArray(bBody.hits) ? bBody.hits : [];
+  const bLocal = Array.isArray(bBody.local) ? bBody.local : [];
+  assert.equal(
+    bHits.length + bLocal.length,
+    0,
+    `unmatched query leaked results · hits=${bHits.length} local=${bLocal.length} sample=${JSON.stringify(bHits[0] || bLocal[0])}`,
+  );
+  // Positive: matching query must surface SOMETHING.
+  const aHits = Array.isArray(aBody.hits) ? aBody.hits : [];
+  const aLocal = Array.isArray(aBody.local) ? aBody.local : [];
+  assert.ok(
+    aHits.length + aLocal.length > 0,
+    `matching query returned empty · hits=${aHits.length} local=${aLocal.length}`,
   );
 });
 
