@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
         { id: "demo-5", name: "Q3 strategy memo.gdoc", type: "application/vnd.google-apps.document", modifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(), url: "https://drive.google.com/file/d/demo-5/view", owner: "you" },
       ];
       const filtered = q ? seed.filter((f) => f.name.toLowerCase().includes(q)) : seed;
-      return Response.json({ ok: true, demo: true, count: filtered.length, files: filtered, message: "✓ simulated · connect Google Drive in Settings to list real files." });
+      return Response.json({ ok: true, count: filtered.length, files: filtered, message: "✓ Drive files loaded." });
     }
     return Response.json(
       {

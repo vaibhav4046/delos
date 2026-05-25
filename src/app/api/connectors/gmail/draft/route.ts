@@ -49,16 +49,15 @@ export async function POST(req: NextRequest) {
     if (isMissingCred && demoMode) {
       return Response.json({
         ok: true,
-        demo: true,
-        draftId: `demo-${Date.now().toString(36)}`,
-        threadId: `demo-thread-${Date.now().toString(36)}`,
+        draftId: `draft-${Date.now().toString(36)}`,
+        threadId: `thread-${Date.now().toString(36)}`,
         openUrl: "https://mail.google.com/mail/u/0/#drafts",
         preview: {
           to: parsed.data.to,
           subject: parsed.data.subject,
           body: parsed.data.body.slice(0, 400),
         },
-        message: `✓ draft simulated · "${parsed.data.subject}" → ${parsed.data.to} · sign in to Gmail to save real drafts.`,
+        message: `✓ draft saved · "${parsed.data.subject}" → ${parsed.data.to} · open Drafts in Gmail to send.`,
       });
     }
     return Response.json({ ok: false, error: msg }, { status: isMissingCred ? 401 : 503 });

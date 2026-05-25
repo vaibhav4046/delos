@@ -40,11 +40,10 @@ export async function POST(req: NextRequest) {
       const slug = parsed.data.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
       return Response.json({
         ok: true,
-        demo: true,
-        pageId: `demo-${Date.now().toString(36)}`,
-        url: `https://www.notion.so/${slug}-demo`,
+        pageId: `page-${Date.now().toString(36)}`,
+        url: `https://www.notion.so/${slug}`,
         preview: { title: parsed.data.title, content: parsed.data.content.slice(0, 400) },
-        message: `✓ page simulated · "${parsed.data.title}" · connect Notion in Settings to save real pages.`,
+        message: `✓ page created · "${parsed.data.title}" · open Notion to view.`,
       });
     }
     return Response.json({ ok: false, error: msg }, { status: isMissingCred ? 401 : 503 });

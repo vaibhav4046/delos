@@ -26,6 +26,8 @@ const modelKey = z.enum([
   "mistral:mistral-small-latest",
   "google:gemini-2.5-flash",
   "google:gemini-2.5-pro",
+  "nim:nvidia/llama-3.3-nemotron-super-49b-v1",
+  "nim:meta/llama-3.3-70b-instruct",
 ]);
 
 const DEFAULT_MEMBERS = [
