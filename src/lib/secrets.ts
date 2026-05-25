@@ -11,11 +11,11 @@
 // Versioned so we can change algorithm later without breaking decryption.
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { getSecret } from "./session";
 
 function deriveKey(): Buffer {
-  const secret = process.env.AUTH_SECRET ?? "delos-dev-secret-rotate-in-prod";
   // SHA-256 gives a deterministic 32-byte key from any-length secret.
-  return createHash("sha256").update(secret).digest();
+  return createHash("sha256").update(getSecret()).digest();
 }
 
 export function encryptSecret(plaintext: string): string {

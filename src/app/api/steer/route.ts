@@ -10,15 +10,16 @@ export const runtime = "nodejs";
 // Garbage IDs (e.g. "abc") still get 404 so test B8 contract holds.
 const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{10,60}$/;
 
-// Accept both `instruction` (canonical) and `newGoal` (alias for external integrations).
+// B12 · accept canonical `input`, plus legacy `instruction` and `newGoal`.
 const bodySchema = z
   .object({
     runId: z.string().min(1).max(60),
+    input: z.string().min(3).max(600).optional(),
     instruction: z.string().min(3).max(600).optional(),
     newGoal: z.string().min(3).max(600).optional(),
   })
-  .refine((d) => !!(d.instruction || d.newGoal), {
-    message: "either 'instruction' or 'newGoal' is required",
+  .refine((d) => !!(d.input || d.instruction || d.newGoal), {
+    message: "either 'input', 'instruction', or 'newGoal' is required",
   });
 
 export async function POST(req: NextRequest) {
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
     return zodErr(parsed.error);
   }
   const { runId } = parsed.data;
-  const instruction = parsed.data.instruction ?? parsed.data.newGoal!;
+  const instruction = parsed.data.input ?? parsed.data.instruction ?? parsed.data.newGoal!;
   // Ownership check (QA report BUG-2) — caller must own the run when we know
   // who owns it. /api/run binds runId→tenant on boot via bindRun(). If the
   // binding exists and disagrees with the caller's resolved tenant, 403.
@@ -61,4 +62,8 @@ export async function POST(req: NextRequest) {
   }
   pushSteer(runId, instruction);
   return Response.json({ ok: true, runId });
+}
+
+export async function GET() {
+  return Response.json({ error: "method_not_allowed" }, { status: 405 });
 }

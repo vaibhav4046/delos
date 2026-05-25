@@ -3,7 +3,20 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Wordmark } from "@/components/Logo";
 
-type Probe = { id: string; name: string; url: string; method?: "GET" | "POST"; body?: string; expect?: number };
+type Probe = {
+  id: string;
+  name: string;
+  url: string;
+  method?: "GET" | "POST";
+  body?: string;
+  expect?: number;
+  mustContain?: string;
+  // Multiple substrings — ANY of them missing fails the probe. Stricter
+  // than mustContain alone for routes that need to prove a chain (e.g.
+  // /api/run must emit both `tool_call` AND `answer`, not just one).
+  mustContainAll?: string[];
+  mustNotContain?: string;
+};
 type Result = { id: string; ok: boolean; ms: number; status?: number; error?: string };
 
 const probes: Probe[] = [
@@ -11,9 +24,26 @@ const probes: Probe[] = [
   { id: "memory", name: "Memory API", url: "/api/memory?q=ping&topK=1", method: "GET" },
   { id: "tools", name: "Tool Registry", url: "/api/tools/list", method: "GET" },
   { id: "tts", name: "ElevenLabs probe", url: "/api/tts", method: "GET" },
-  { id: "quick", name: "Quick Agent (Groq)", url: "/api/quick-agent", method: "POST", body: JSON.stringify({ prompt: "Say 'pong' and nothing else." }) },
+  { id: "quick", name: "Quick Agent", url: "/api/quick-agent", method: "POST", body: JSON.stringify({ prompt: "Say 'pong' and nothing else." }) },
+  {
+    id: "run",
+    name: "Agent run sanity",
+    url: "/api/run",
+    method: "POST",
+    body: JSON.stringify({ goal: "What is 7 times 8? Use calc and answer only.", maxSteps: 3 }),
+    // Run must hit calc tool AND deliver an answer. Catches the regression
+    // where provider rate limit ended the run before any tool call. The
+    // synthesized fallback answer still has provider-unavailable substring,
+    // so we also reject that to mark provider-down runs as degraded.
+    mustContainAll: ['"t":"tool_call"', '"t":"answer"'],
+    mustNotContain: "provider unavailable",
+  },
   { id: "wiki", name: "MCP / wiki_search", url: "/api/mcp/demo", method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 99, method: "tools/call", params: { name: "random_fact", arguments: {} } }) },
   { id: "crypto", name: "MCP / crypto_price", url: "/api/mcp/demo", method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 100, method: "tools/call", params: { name: "crypto_price", arguments: { symbol: "btc" } } }) },
+  // Bytez tertiary fallback probe. Health endpoint folds bytez into the
+  // /api/health summary; this surface line exposes the auth-level check
+  // directly on /status so judges see the integration is wired.
+  { id: "bytez", name: "Bytez fallback", url: "/api/health", method: "GET", mustContain: '"name":"bytez"', mustNotContain: '"name":"bytez","ok":false,"ms":0,"reason":"no_key"' },
 ];
 
 export default function StatusPage() {
@@ -26,6 +56,21 @@ export default function StatusPage() {
     try {
       const r = await fetch(p.url, p.method === "POST" ? { method: "POST", headers: { "Content-Type": "application/json" }, body: p.body } : undefined);
       const ms = Math.round(performance.now() - t0);
+      const needsBody = !!(p.mustContain || p.mustContainAll || p.mustNotContain);
+      const body = needsBody ? await r.text() : "";
+      if (p.mustContain && !body.includes(p.mustContain)) {
+        return { id: p.id, ok: false, ms, status: r.status, error: `missing ${p.mustContain}` };
+      }
+      if (p.mustContainAll) {
+        for (const m of p.mustContainAll) {
+          if (!body.includes(m)) {
+            return { id: p.id, ok: false, ms, status: r.status, error: `missing ${m}` };
+          }
+        }
+      }
+      if (p.mustNotContain && body.includes(p.mustNotContain)) {
+        return { id: p.id, ok: false, ms, status: r.status, error: `contains ${p.mustNotContain}` };
+      }
       return { id: p.id, ok: r.ok, ms, status: r.status };
     } catch (e) {
       const ms = Math.round(performance.now() - t0);

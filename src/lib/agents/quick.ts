@@ -2,6 +2,7 @@ import { generateText, type LanguageModel } from "ai";
 import { models, getEffectiveTemperature } from "../llm";
 import type { LLMUsage } from "./jsonGen";
 import { isProviderCool, shelveProvider, sanitizeProviderError } from "./jsonGen";
+import { bytezChat, bytezAvailable, type BytezMessage } from "../bytez";
 
 function modelProvider(m: LanguageModel): string {
   const x = m as { provider?: string; modelId?: string };
@@ -56,6 +57,23 @@ export async function runQuickAgent(args: {
       if (lastErr === "rate_limited") shelveProvider(provider);
       if (lastErr === "auth_failed" || lastErr === "network_error") continue;
     }
+  }
+  // ─── Bytez tertiary fallback ─────────────────────────────────────────
+  // Engaged only when every Mistral/Gemini/Groq path failed. Soft-skips
+  // if the key isn't configured or the catalog has no deployed model.
+  if (bytezAvailable()) {
+    const bzMessages: BytezMessage[] = [
+      { role: "system", content: args.systemOverride ?? "You are a concise focused assistant. Reply in 1-4 sentences with the answer. No filler." },
+      { role: "user", content: args.prompt },
+    ];
+    const bz = await bytezChat({ messages: bzMessages, temperature: getEffectiveTemperature(0.6), maxLength: 600, timeoutMs: 22_000 });
+    if (bz.ok && bz.text) {
+      if (args.onUsage) {
+        args.onUsage({ model: `bytez:${bz.modelId}`, promptTokens: 0, completionTokens: 0, ms: bz.ms });
+      }
+      return bz.text;
+    }
+    if (bz.reason) lastErr = `bytez_${bz.reason}`;
   }
   throw new Error(`quick_agent_failed (${lastErr})`);
 }

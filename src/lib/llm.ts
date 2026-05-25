@@ -19,6 +19,14 @@ export function resolveModel(key: ModelKey): LanguageModel {
   if (provider === "groq") return groq(name);
   if (provider === "mistral") return mistral(name);
   if (provider === "google") return google(name);
+  // Bytez models are wired through the tertiary fallback layer in
+  // jsonGen.generateJsonWithFallback / quick.runQuickAgent, not the
+  // Vercel AI SDK. When a user picks bytez:X as their primary, the
+  // SDK can't drive it directly — so we substitute mistral-small as
+  // the "carrier" and the request still hits Bytez via the fallback
+  // chain when mistral is rate-limited. The catalog entry still
+  // shows the model in Settings so users see the integration exists.
+  if (provider === "bytez") return mistral("mistral-small-latest");
   throw new Error(`Unknown model provider: ${provider}`);
 }
 

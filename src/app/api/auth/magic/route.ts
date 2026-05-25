@@ -9,6 +9,7 @@ import { env } from "@/lib/env";
 import { safeAddMemory, safeRecall } from "@/lib/hydra";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { sendMail, renderMagicLinkEmail } from "@/lib/mail";
+import { getSecret } from "@/lib/session";
 import { createHash, randomBytes } from "node:crypto";
 
 import { zodErr } from "@/lib/apiAuth";
@@ -55,7 +56,7 @@ const EMAIL_LIMIT_PER_MIN = 3;
 const WINDOW_MS = 60_000;
 
 function hashToken(t: string): string {
-  return createHash("sha256").update(t + (process.env.AUTH_SECRET ?? "delos-dev-secret")).digest("hex").slice(0, 32);
+  return createHash("sha256").update(t + getSecret()).digest("hex").slice(0, 32);
 }
 
 export async function POST(req: NextRequest) {

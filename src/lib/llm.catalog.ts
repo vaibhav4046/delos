@@ -7,7 +7,15 @@ export type ModelKey =
   | "mistral:mistral-large-latest"
   | "mistral:mistral-small-latest"
   | "google:gemini-2.5-flash"
-  | "google:gemini-2.5-pro";
+  | "google:gemini-2.5-pro"
+  // Bytez · unified API across 175k+ open + closed models. Tertiary
+  // fallback layer; engaged only when Mistral + Gemini are exhausted.
+  // Specific Bytez models are catalog-deployed per-account, so they
+  // may soft-skip with "not_in_catalog" until provisioned.
+  | "bytez:Qwen/Qwen3-4B"
+  | "bytez:Qwen/Qwen2.5-7B-Instruct"
+  | "bytez:meta-llama/Llama-3.2-3B-Instruct"
+  | "bytez:google/gemma-2-9b-it";
 
 // Production default: use the lowest-friction provider that survived live QA
 // for planner/executor/critic. Groq remains selectable, but its shared
@@ -33,6 +41,10 @@ export const MODEL_CATALOG: Array<{ key: ModelKey; provider: string; label: stri
   { key: "mistral:mistral-small-latest", provider: "Mistral", label: "Mistral Small", ctx: "32K", tag: "fast" },
   { key: "google:gemini-2.5-flash", provider: "Google", label: "Gemini 2.5 Flash", ctx: "1M", tag: "balanced" },
   { key: "google:gemini-2.5-pro", provider: "Google", label: "Gemini 2.5 Pro", ctx: "2M", tag: "smart" },
+  { key: "bytez:Qwen/Qwen3-4B", provider: "Bytez", label: "Qwen3 4B (Bytez)", ctx: "32K", tag: "fast" },
+  { key: "bytez:Qwen/Qwen2.5-7B-Instruct", provider: "Bytez", label: "Qwen2.5 7B (Bytez)", ctx: "32K", tag: "balanced" },
+  { key: "bytez:meta-llama/Llama-3.2-3B-Instruct", provider: "Bytez", label: "Llama 3.2 3B (Bytez)", ctx: "8K", tag: "fast" },
+  { key: "bytez:google/gemma-2-9b-it", provider: "Bytez", label: "Gemma 2 9B (Bytez)", ctx: "8K", tag: "smart" },
 ];
 
 export const MODEL_KEYS: ModelKey[] = MODEL_CATALOG.map((m) => m.key);

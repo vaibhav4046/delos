@@ -22,4 +22,12 @@ export const env = {
   ELEVENLABS_MODEL_ID: process.env.ELEVENLABS_MODEL_ID ?? "eleven_turbo_v2_5",
   ANTHROPIC_API_KEY: optional("ANTHROPIC_API_KEY"),
   OPENAI_API_KEY: optional("OPENAI_API_KEY"),
+  // Bytez · unified inference API across 175k+ open + closed-source models.
+  // Used as a TERTIARY fallback when both Mistral and Gemini are exhausted /
+  // rate-limited. Optional — if unset the bytez branch is silently skipped.
+  BYTEZ_API_KEY: optional("BYTEZ_API_KEY"),
+  // Default Bytez chat model. Picked because Qwen3 is fast, ranks well on
+  // chat eval, and is the model id Bytez explicitly references in their
+  // openapi spec for the chat task. Override per-account in Settings.
+  BYTEZ_DEFAULT_MODEL: process.env.BYTEZ_DEFAULT_MODEL ?? "Qwen/Qwen3-4B",
 };

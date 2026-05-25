@@ -23,6 +23,48 @@ export type RunOptions = {
 
 type Role = "planner" | "executor" | "critic" | "appBuilder" | "subagent";
 
+function extractExactFacts(goal: string): Array<{ key: string; value: string }> {
+  if (!/\b(remember|store|save|pin)\b/i.test(goal)) return [];
+  const facts: Array<{ key: string; value: string }> = [];
+  // Split the goal on conjunction-like separators so multiple "k=v"
+  // pairs in a single sentence don't collide into one greedy match.
+  // Before: "remember user_name=Varun and response_style=terse and
+  // project_codename=Foo" produced a single fact where user_name's
+  // value swallowed the rest of the sentence. Now we split first and
+  // match k=v inside each segment.
+  const segments = goal
+    .split(/(?:[;,\.]|\s+(?:and|then|also)\s+)/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const seg of segments) {
+    const m = seg.match(/\b([a-z][a-z0-9_]{1,60})\s*=\s*(.+)$/i);
+    if (m) {
+      const value = m[2].trim().replace(/^["']|["']$/g, "").slice(0, 400);
+      if (value) facts.push({ key: m[1], value });
+    }
+  }
+  const name = goal.match(/\b(?:call me|my name is|name is)\s+([A-Z][a-zA-Z0-9_-]{1,60})/);
+  if (name && !facts.some((f) => f.key === "user_name")) facts.push({ key: "user_name", value: name[1] });
+  const style = goal.match(/\b(?:prefer|use)\s+([^.;]{3,80}?\b(?:answers?|style|bullets?|format))/i);
+  if (style && !facts.some((f) => f.key === "response_style")) facts.push({ key: "response_style", value: style[1].trim() });
+  return facts.filter((f) => f.key && f.value);
+}
+
+function formatPinnedFacts(hits: Array<{ text: string; score: number }>, goal: string): string | null {
+  if (!/\b(recall|using memory|from memory|what are|what should|remembered)\b/i.test(goal)) return null;
+  const facts = new Map<string, string>();
+  for (const h of hits) {
+    // Only parse lines that are explicit user facts — skip run-summary entries
+    // which contain metric k=v pairs (tokens=1247, drift=0.08, ms=520) that
+    // polluted recall output in the QA run 2026-05-25.
+    if (!h.text.includes("User fact")) continue;
+    const pinned = h.text.match(/User fact\s*[·-]\s*([a-z][a-z0-9_]{1,60})\s*=\s*(.+)$/i);
+    if (pinned) facts.set(pinned[1], pinned[2].trim());
+  }
+  if (facts.size === 0) return null;
+  return [...facts.entries()].map(([key, value]) => `${key}: ${value}`).join("\n");
+}
+
 export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   const runId = nanoid(10);
   const startedAt = Date.now();
@@ -55,9 +97,29 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   const tenantId = opts.tenantId ?? env.DELRIO_TENANT_ID;
   await ensureTenant(tenantId);
 
+  const exactFacts = extractExactFacts(goal);
+  if (exactFacts.length > 0) {
+    for (const fact of exactFacts) {
+      const text = `User fact · ${fact.key} = ${fact.value}`;
+      await safeAddMemory({
+        tenantId,
+        text,
+        metadata: { runId, tags: ["pinned", "user-fact"], pinKey: fact.key, pinValue: fact.value },
+      });
+      yield { t: "memory_write", key: fact.key, preview: text, at: Date.now() };
+    }
+    yield { t: "answer", text: exactFacts.map((f) => `${f.key}: ${f.value}`).join("\n"), at: Date.now() };
+    return;
+  }
+
   yield { t: "phase", phase: "recall", note: "querying HydraDB save-state", at: Date.now() };
   const memHits = await safeRecall({ tenantId, query: goal, topK: 4 });
   yield { t: "memory_recall", query: goal, hits: memHits.length, at: Date.now() };
+  const pinnedAnswer = formatPinnedFacts(memHits, goal);
+  if (pinnedAnswer) {
+    yield { t: "answer", text: pinnedAnswer, at: Date.now() };
+    return;
+  }
 
   const registry = buildRegistry();
   if (opts.extraTools) for (const t of opts.extraTools) registry.register(t);
@@ -73,6 +135,11 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   yield { t: "thought", agent: "planner", text: plan.rationale, at: Date.now() };
 
   const scratch: string[] = [];
+  // Pin queue · memory_pin tool emits into this list synchronously, then
+  // we flush each pin into Hydra after the tool returns. Surfaced as
+  // separate events so the user can SEE which facts pinned (vs the old
+  // single "memory_write" line that hid Hydra failures).
+  const pendingPins: Array<{ key: string; value: string }> = [];
 
   // --- Sub-agent fan-out ---
   if (plan.subgoals && plan.subgoals.length > 0) {
@@ -181,6 +248,12 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
         if (e.kind === "final_answer" && typeof (e.data as { text?: string }).text === "string") {
           finalAnswerText = (e.data as { text: string }).text;
         }
+        if (e.kind === "memory_pin") {
+          const d = e.data as { key?: string; value?: string };
+          if (typeof d.key === "string" && typeof d.value === "string") {
+            pendingPins.push({ key: d.key, value: d.value });
+          }
+        }
       },
     };
 
@@ -231,6 +304,33 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
     };
     toolHistory.push({ tool: call.tool, ok: result.ok, summary });
 
+    // Flush any memory_pin emissions from this tool call. We persist
+    // each as a SEPARATE Hydra row tagged "pinned" with the key as
+    // metadata, then yield a discrete event so the user sees whether
+    // the pin landed or Hydra rejected it (the old code silently lost
+    // failed writes inside safeAddMemory).
+    while (pendingPins.length > 0) {
+      const p = pendingPins.shift()!;
+      const pinText = `User fact · ${p.key} = ${p.value}`;
+      let ok = false;
+      let err: string | undefined;
+      try {
+        await safeAddMemory({
+          tenantId,
+          text: pinText,
+          metadata: { runId, tags: ["pinned", "user-fact"], pinKey: p.key, pinValue: p.value },
+        });
+        ok = true;
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e);
+      }
+      yield {
+        t: ok ? "memory_write" : "error",
+        ...(ok ? { key: p.key, preview: pinText } : { message: `memory_pin failed for ${p.key}: ${err}` }),
+        at: Date.now(),
+      } as RunEvent;
+    }
+
     if (result.ok) {
       consecutiveFailures = 0;
       scratch.push(`${call.tool}: ${summary}`);
@@ -263,6 +363,7 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
       originalGoal,
       currentPlanSummary: plan.rationale,
       lastStep: { intent: step.intent, toolResult: summary },
+      memoryHits: memHits.length,
       onUsage: onUsage("critic"),
     });
     for (const e of drain()) yield e;

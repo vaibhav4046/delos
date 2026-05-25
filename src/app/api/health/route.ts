@@ -29,6 +29,11 @@ export async function GET(req: Request) {
       headers: { Authorization: `Bearer ${env.MISTRAL_API_KEY}` },
     }),
     probe("gemini", `https://generativelanguage.googleapis.com/v1beta/models?key=${env.GOOGLE_GENERATIVE_AI_API_KEY}`),
+    env.BYTEZ_API_KEY
+      ? probe("bytez", "https://api.bytez.com/models/v2/list/tasks", {
+          headers: { Authorization: `Key ${env.BYTEZ_API_KEY}` },
+        })
+      : Promise.resolve({ name: "bytez", ok: false, ms: 0, reason: "no_key" } satisfies ProbeResult),
     probe("hydradb", "https://api.hydradb.com/health", {}),
     env.ELEVENLABS_API_KEY
       ? probe("elevenlabs", "https://api.elevenlabs.io/v1/user", {

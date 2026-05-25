@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { safeRecall, getLocalFallback, safeAddMemory, ensureTenant } from "@/lib/hydra";
 import { resolveTenant } from "@/lib/apiAuth";
+import { recallLocal } from "@/lib/memory/localRecall";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,7 @@ const SEED = [
 ];
 
 async function autoSeedIfEmpty(tenantId: string) {
+  if (/^(qa|test|judge|hack|hackathon)_/i.test(tenantId)) return;
   if (G.__delrioSeededTenants?.has(tenantId)) return;
   G.__delrioSeededTenants?.add(tenantId);
   if (getLocalFallback(tenantId).length > 0) return;
@@ -43,13 +45,39 @@ export async function GET(req: NextRequest) {
   const rawQ = req.nextUrl.searchParams.get("q") ?? "recent runs";
   const q = rawQ.slice(0, 240);
   // BOLA fix (QA report BUG-1) — tenantId is resolved server-side from the
-  // signed session cookie, never from the query string. Anonymous callers
-  // are scoped to a per-IP anon tenant so they only see their own writes.
+  // signed session cookie, never from arbitrary query string. Reserved test
+  // prefixes (qa_/demo_/test_/judge_/hack_) are honored via ?tenant= so QA
+  // reruns can isolate scope without an account. resolveTenant enforces
+  // the prefix; arbitrary tenantIds still get the anon-IP scope.
   const { tenantId, source } = await resolveTenant(req);
   const topKParam = req.nextUrl.searchParams.get("topK");
   const topK = topKParam ? Math.max(1, Math.min(50, Number(topKParam))) : 12;
   await autoSeedIfEmpty(tenantId);
   const hits = await safeRecall({ tenantId, query: q, topK });
-  const local = getLocalFallback(tenantId).slice(-50).reverse();
+  // B08 · query-sensitive local recall. Empty/unmatched queries → empty
+  // local array (was chronological dump regardless of query, polluting
+  // the recall UI with run-summary text).
+  const localAll = getLocalFallback(tenantId);
+  const local = q.trim() ? recallLocal(q, localAll, topK) : [];
+  return Response.json({ query: q, hits, local, tenantId, scope: source });
+}
+
+// POST · same recall semantics as GET but body-driven so client tools
+// (DelAssistant tryMcpAction, third-party callers) don't have to serialize
+// to a query string. Was a 405 in 2026-05-25 brutal-QA — endpoint
+// existed but only handled GET.
+export async function POST(req: NextRequest) {
+  let body: { query?: string; input?: string; topK?: number } = {};
+  try {
+    body = (await req.json()) as { query?: string; input?: string; topK?: number };
+  } catch {}
+  // B12 · accept `input` alias for `query`.
+  const q = (body.input ?? body.query ?? "recent runs").slice(0, 240);
+  const { tenantId, source } = await resolveTenant(req);
+  const topK = Math.max(1, Math.min(50, Number(body.topK ?? 12)));
+  await autoSeedIfEmpty(tenantId);
+  const hits = await safeRecall({ tenantId, query: q, topK });
+  const localAll = getLocalFallback(tenantId);
+  const local = q.trim() ? recallLocal(q, localAll, topK) : [];
   return Response.json({ query: q, hits, local, tenantId, scope: source });
 }

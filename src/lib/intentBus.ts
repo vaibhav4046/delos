@@ -7,6 +7,7 @@ export type AppIntent =
   | { kind: "builder.build"; prompt: string }
   | { kind: "codebase.build"; prompt: string }
   | { kind: "cohort.run"; goal: string }
+  | { kind: "assistant.ask"; text: string }
   | { kind: "memory.search"; query: string }
   | { kind: "voice.toast"; text: string };
 

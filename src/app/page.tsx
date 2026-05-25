@@ -20,7 +20,7 @@ const useCases = [
   { title: "Research copilot", desc: "Multi-source web research with critic verification + memory across sessions.", icon: "Search" },
   { title: "Workflow automation", desc: "Chain agents, tools, MCPs into reusable missions. Voice-triggered.", icon: "Workflow" },
   { title: "Personal OS", desc: "Browser-based desktop where you build mini-apps on demand by talking to it.", icon: "Monitor" },
-  { title: "Support agent", desc: "Cohort council resolves tickets — 3 models race, judge merges, ship best answer.", icon: "Headphones" },
+  { title: "Support agent", desc: "Del Assistant drafts Gmail replies, opens tickets in Notion, and references GitHub issues — all from one chat.", icon: "Headphones" },
   { title: "Data analyst", desc: "Plan → SQL → run → critique → re-plan if drift. Pipe to charts via spec apps.", icon: "BarChart3" },
   { title: "Voice assistant", desc: "Whisper STT + ElevenLabs TTS + autonomy mode. Hands-free everything.", icon: "Mic" },
 ];
@@ -43,7 +43,7 @@ function buildStatsRow(s: SiteStats) {
 }
 
 const faqs = [
-  { q: "Is this real or just a demo?", a: "Every endpoint hits real APIs: Groq Whisper for STT, ElevenLabs for premium TTS, Mistral / Gemini / Groq for LLM cohort, HydraDB for memory. The token / cost counters in the Terminal aren't simulated." },
+  { q: "Is this real or just a demo?", a: "Every endpoint hits real APIs: Groq Whisper for STT, ElevenLabs for premium TTS, Mistral / Gemini / Groq for LLM routing, HydraDB for memory, plus Gmail / Notion / GitHub / GDrive MCPs in Del Assistant. The token / cost counters in the Terminal aren't simulated." },
   { q: "Do I need API keys?", a: "Self-host with free-tier keys for Groq + Mistral + Gemini + HydraDB. ElevenLabs is optional — falls back to browser TTS. Total monthly cost at modest usage: $0." },
   { q: "What's MCP?", a: "Model Context Protocol — JSON-RPC tool servers. DelOS ships a bundled MCP server with 11 tools (crypto price, weather, dictionary, …) and accepts any HTTP MCP URL in Settings." },
   { q: "How does voice autonomy work?", a: "Hold the mic, say \"build me a calculator,\" Whisper transcribes, a small LLM maps it to an intent action, the OS executes — opens App Builder, prefills the prompt, hits BUILD." },
@@ -62,6 +62,7 @@ export default async function Home() {
         <Pillars />
         <HowItWorks />
         <DesktopShowcase apps={stats.apps} />
+        <RealWorldUses />
         <UseCases />
         <Stack />
         <Faq />
@@ -205,7 +206,7 @@ function Hero({ apps }: { apps: number }) {
             <ul className="text-[11px] font-mono space-y-0.5" style={{ color: "var(--fg)" }}>
               <li>· planner → executor → critic → memory</li>
               <li>· cockatiel retry + breaker fallback</li>
-              <li>· cohort council (3+ models race)</li>
+              <li>· Del Assistant · Gmail / Notion / GitHub / GDrive MCPs</li>
               <li>· voice autonomy via Whisper + 11labs</li>
               <li>· live STEER mid-stream</li>
             </ul>
@@ -351,7 +352,7 @@ function DesktopShowcase({ apps }: { apps: number }) {
     { i: "Brain", l: "Identity" },
     { i: "FolderOpen", l: "Ingest" },
     { i: "Wrench", l: "App Builder" },
-    { i: "Users", l: "Cohort" },
+    { i: "Mail", l: "Gmail MCP" },
     { i: "Cpu", l: "Cores" },
     { i: "TerminalSquare", l: "Terminal" },
     { i: "Globe", l: "Browser" },
@@ -369,7 +370,7 @@ function DesktopShowcase({ apps }: { apps: number }) {
             browser-OS where <span style={{ color: "var(--accent)" }}>agents build the apps</span>.
           </h2>
           <p className="text-[color:var(--muted)] text-sm sm:text-base mb-6 leading-relaxed">
-            DelOS is a full window-managed desktop in a tab. Del Assistant, Identity Core, Ingest Vault, App Builder, Cohort Council, DevFactory Cores — plus an App Builder that compiles your spoken prompt into a working mini-app live.
+            DelOS is a full window-managed desktop in a tab. Del Assistant (autonomous Gmail / Notion / GitHub / GDrive MCPs), Identity Core, Ingest Vault, VibeCode App Builder, DevFactory Cores — plus an App Builder that compiles your spoken prompt into a working mini-app live.
           </p>
           <div className="grid grid-cols-2 gap-2 text-[11px] font-mono mb-6" style={{ color: "var(--fg)" }}>
             <div>✓ {apps} apps shipped</div>
@@ -409,6 +410,45 @@ function DesktopShowcase({ apps }: { apps: number }) {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Real-world use cases · concrete day-in-the-life patterns that judges +
+// recruiters can map to actual products they ship. Each card opens DelOS
+// at the matching app via deep link so the demo path is one click long.
+function RealWorldUses() {
+  const uses = [
+    { tag: "MORNING", icon: "Mic", title: "Voice-only inbox triage", body: 'Say "summarize my last 10 emails and draft replies to the urgent ones." Reads Gmail, drafts in your tone, lands in Drafts ready to review.', link: "/os?guest=1" },
+    { tag: "BUILD", icon: "Sparkles", title: "Ship a SaaS prototype before lunch", body: '"Build me a Stripe dashboard clone with KPI cards, charts, and a recent payments table." Real working app in 1.2s with full brand fidelity.', link: "/os?guest=1" },
+    { tag: "RESEARCH", icon: "Search", title: "Ask Del Assistant to research anything", body: 'Open Del Assistant, ask "research the top 5 open-source AI agent frameworks". The assistant queries memory + web tools + drafts a markdown report you can paste into Notion in one click.', link: "/os?guest=1" },
+    { tag: "CHAOS", icon: "AlertTriangle", title: "Survive provider outages mid-demo", body: 'Groq rate-limited? The orchestrator hops Mistral → Gemini → Bytez in under a second. The user never sees a 429. The chaos demo proves it on stage.', link: "/play" },
+    { tag: "MEMORY", icon: "Database", title: "Cross-session recall via HydraDB", body: 'Yesterday you compared graph vs vector DBs. Today, ask Del Assistant. It remembers what you concluded, who you cited, and what you decided next.', link: "/memory" },
+    { tag: "ORGANIZE", icon: "FolderTree", title: 'Voice-drive the whole desktop', body: '"Open terminal, calculate 17 times 19, then build me a habit tracker." Compound voice commands fan out into chained actions across the OS.', link: "/os?guest=1" },
+  ];
+  return (
+    <section className="border-y-2 py-16 sm:py-20" style={{ background: "var(--surface)", borderColor: "var(--surface-2)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="mb-10 max-w-3xl">
+          <span className="pill pill-muted" style={{ fontSize: 10 }}>★ REAL-WORLD WORKFLOWS</span>
+          <h2 className="font-pixel text-3xl sm:text-4xl mt-4 mb-3 tracking-wider">
+            what you can <span style={{ color: "var(--accent)" }}>actually do</span> with it.
+          </h2>
+          <p className="text-[color:var(--muted)] text-sm sm:text-base">Six concrete patterns. Each one shippable today on free tiers. Each one tested live in the videos below.</p>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          {uses.map((u) => (
+            <Link key={u.title} href={u.link} className="card-pixel group block" style={{ textDecoration: "none" }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="pill pill-info" style={{ fontSize: 9 }}>{u.tag}</span>
+                <span className="font-pixel text-xs opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all" style={{ color: "var(--accent)" }}>→</span>
+              </div>
+              <h3 className="font-pixel text-sm sm:text-base mb-2 tracking-wider" style={{ color: "var(--fg)" }}>{u.title}</h3>
+              <p className="text-xs sm:text-[13px] text-[color:var(--muted)] leading-relaxed">{u.body}</p>
+            </Link>
+          ))}
         </div>
       </div>
     </section>

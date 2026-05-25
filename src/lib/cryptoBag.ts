@@ -6,9 +6,12 @@
 // actual key material.
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { getSecret } from "./session";
 
 function derivedKey(): Buffer {
-  const s = process.env.DELRIO_SECRET || process.env.AUTH_SECRET || "delos-dev-secret";
+  // DELRIO_SECRET overrides AUTH_SECRET when present (rotation aid). Falls back
+  // to the centralized getSecret(), which throws in production if unset.
+  const s = process.env.DELRIO_SECRET || getSecret();
   // 32 bytes for AES-256.
   return createHash("sha256").update("delos:bag:v1:" + s).digest();
 }

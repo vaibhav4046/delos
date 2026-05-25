@@ -106,8 +106,48 @@ export function AppRuntime({
     [state, update, onNotify, onClose, onAgent, onTool],
   );
 
+  // Per-app theme · spec.theme overrides the DelOS palette inside this
+  // window only. Variables flow down to every NodeR call via inherited
+  // CSS so buttons / pills / cards / inputs all retint without code
+  // changes. Falls back to OS tokens when fields are absent.
+  const themeVars: React.CSSProperties = {};
+  type ThemeBlock = { bg?: string; surface?: string; surface2?: string; fg?: string; muted?: string; accent?: string; onAccent?: string; font?: string; pixelFont?: string; radius?: string | number };
+  const theme = (spec as unknown as { theme?: ThemeBlock }).theme;
+  if (theme) {
+    if (theme.bg) (themeVars as Record<string, string>)["--bg"] = theme.bg;
+    if (theme.surface) (themeVars as Record<string, string>)["--surface"] = theme.surface;
+    if (theme.surface2) (themeVars as Record<string, string>)["--surface-2"] = theme.surface2;
+    if (theme.fg) (themeVars as Record<string, string>)["--fg"] = theme.fg;
+    if (theme.muted) (themeVars as Record<string, string>)["--muted"] = theme.muted;
+    if (theme.accent) (themeVars as Record<string, string>)["--accent"] = theme.accent;
+    if (theme.onAccent) (themeVars as Record<string, string>)["--on-accent"] = theme.onAccent;
+    if (theme.font) (themeVars as Record<string, string>)["--font-sans"] = theme.font;
+    if (theme.pixelFont) (themeVars as Record<string, string>)["--font-pixel"] = theme.pixelFont;
+  }
+  const themed = !!theme;
+  // Detect html-root specs · they manage their own padding so we strip
+  // the default 16px padding to avoid double-margins around the brand
+  // layout. Same for the `space-y-3` and flex `min-height:100%` which
+  // would force a min-height on the wrapper that fights window resize.
+  const rootIsHtml = (spec.root as { kind?: string }).kind === "html";
   return (
-    <div className="p-4 space-y-3 text-[color:var(--fg)]" style={{ opacity: busy ? 0.8 : 1, transition: "opacity 120ms" }}>
+    <div
+      className={`${rootIsHtml ? "" : "p-4 space-y-3"} text-[color:var(--fg)] ${themed ? "app-themed" : ""}`}
+      style={{
+        ...themeVars,
+        opacity: busy ? 0.8 : 1,
+        transition: "opacity 120ms",
+        background: themed ? "var(--bg)" : undefined,
+        // Fill the window — flex column so children with `flex:1` (the
+        // html escape-hatch block, list cards, etc) absorb the available
+        // height and shrink on resize instead of overflowing.
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: rootIsHtml ? "hidden" : "auto",
+        fontFamily: theme?.font ? theme.font : undefined,
+      }}
+    >
       <NodeR node={spec.root} state={state} dispatch={dispatch} update={update} />
       {busy && (
         <div className="flex items-center gap-2 pt-2 text-[color:var(--muted)] font-mono text-xs">
@@ -230,6 +270,60 @@ function NodeR({
       const tone = node.tone ?? "info";
       return <span className={`pill pill-${tone} ${cls}`}>{interpolate(node.text, state)}</span>;
     }
+    case "html": {
+      // Curated escape hatch · clones ship hand-crafted layouts the DSL
+      // can't express. Sanitize aggressively before injecting since AppSpecs
+      // can also come from the LLM path:
+      //   • drop <script>, <iframe>, <object>, <embed>, <link>, <meta>
+      //   • strip on* event-handler attributes
+      //   • strip javascript:/data:text/html URLs in href/src
+      // Keep inline `style` + `class` + `data-*` so brand layouts retain
+      // their typography & spacing. Templated `{{state}}` interpolation
+      // still runs so dynamic values flow through.
+      const interpolated = interpolate(node.html, state);
+      const safe = sanitizeHtml(interpolated);
+      // Render as a flex-fill block so absolute-positioned children (macOS
+      // dock, Snapchat phone bezel) keep their layout when the window is
+      // resized. Was a hardcoded 580px height which clipped/leaked layout
+      // when the user resized the window. Now fills the window height
+      // and scrolls internally when content overflows.
+      return (
+        <div
+          className={`app-html-block ${cls}`}
+          style={{
+            flex: 1,
+            minHeight: 360,
+            width: "100%",
+            overflow: "auto",
+            display: "flex",
+            flexDirection: "column",
+          }}
+          dangerouslySetInnerHTML={{ __html: safe }}
+        />
+      );
+    }
   }
+}
+
+// Lightweight HTML sanitizer · removes the high-risk attack surface for
+// dangerouslySetInnerHTML while keeping the layout primitives a brand
+// clone needs (style, class, data-*, href/src to https URLs).
+function sanitizeHtml(html: string): string {
+  let s = String(html || "");
+  // Strip whole tag bodies for things that should never appear in app
+  // layouts. Script tags + their content go first so onerror-pattern
+  // payloads can't survive in a removed-tag context.
+  s = s.replace(/<\s*script\b[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "");
+  s = s.replace(/<\s*style\b[^>]*>[\s\S]*?<\s*\/\s*style\s*>/gi, "");
+  s = s.replace(/<\s*(iframe|object|embed|link|meta|form|svg|math)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "");
+  s = s.replace(/<\s*(iframe|object|embed|link|meta)\b[^>]*\/?>/gi, "");
+  // Remove on* event-handler attributes (onclick, onerror, onload, ...).
+  s = s.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "");
+  s = s.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "");
+  s = s.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "");
+  // Refuse javascript: / vbscript: / data:text/html URLs.
+  s = s.replace(/\b(href|src)\s*=\s*"\s*(javascript|vbscript|data\s*:\s*text\/html)[^"]*"/gi, '$1="#"');
+  s = s.replace(/\b(href|src)\s*=\s*'\s*(javascript|vbscript|data\s*:\s*text\/html)[^']*'/gi, "$1='#'");
+  return s;
 }
 

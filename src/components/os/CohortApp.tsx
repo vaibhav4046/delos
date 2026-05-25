@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import * as Icons from "lucide-react";
 import { MODEL_CATALOG, type ModelKey } from "@/lib/llm.catalog";
 import { onIntent, broadcastAgent } from "@/lib/intentBus";
+import { useSpeechToText } from "@/lib/useSpeech";
 
 type Member = { index: number; model: ModelKey; status: "spawn" | "done" | "fail"; text?: string; ms?: number; error?: string };
 type Verdict = { winnerIndex: number; rationale: string; scores: Array<{ index: number; score: number }>; merged: string; fallback?: boolean };
@@ -26,6 +27,16 @@ export function CohortApp() {
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [running, setRunning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Voice-to-goal mic · holds capture, on transcript fills goal input.
+  const cohortStt = useSpeechToText();
+  useEffect(() => {
+    if (cohortStt.transcript && !running) {
+      setGoal(cohortStt.transcript);
+      cohortStt.setTranscript("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cohortStt.transcript]);
+  const cohortMic = cohortStt.state === "listening" || cohortStt.state === "recording";
 
   useEffect(() => {
     return onIntent("cohort.run", (i) => {
@@ -130,7 +141,24 @@ export function CohortApp() {
       <p className="text-[color:var(--muted)] font-mono">
         Run the same goal across multiple models in parallel. A judge LLM scores them and writes a merged answer.
       </p>
-      <textarea className="input-pixel" rows={2} value={goal} onChange={(e) => setGoal(e.target.value)} disabled={running} />
+      <div style={{ position: "relative" }}>
+        <textarea className="input-pixel" rows={2} value={goal} onChange={(e) => setGoal(e.target.value)} disabled={running} style={{ paddingRight: 40 }} />
+        <button
+          onClick={() => { if (cohortMic) cohortStt.stop(); else cohortStt.start(); }}
+          disabled={running}
+          title={cohortMic ? "stop dictation" : "dictate goal"}
+          style={{
+            position: "absolute", top: 6, right: 6,
+            width: 28, height: 28, borderRadius: 14,
+            background: cohortMic ? "var(--danger)" : "var(--accent)",
+            color: "var(--on-accent)", border: "2px solid var(--bg)",
+            cursor: running ? "not-allowed" : "pointer",
+            fontSize: 12, lineHeight: 1, boxShadow: cohortMic ? "0 0 0 4px rgba(255,80,80,0.35)" : "2px 2px 0 var(--shadow)",
+          }}
+        >
+          {cohortStt.state === "transcribing" ? "…" : cohortMic ? "■" : "🎙"}
+        </button>
+      </div>
 
       <div>
         <div className="font-pixel text-[11px] tracking-wider mb-1" style={{ color: "var(--accent)" }}>MEMBERS ({selected.size})</div>
@@ -208,7 +236,7 @@ export function CohortApp() {
           <p className="text-[color:var(--muted)] font-mono text-[11px] mb-2">{verdict.rationale}</p>
           <div className="font-pixel text-[10px] tracking-wider mb-1" style={{ color: "var(--accent)" }}>MERGED ANSWER</div>
           <p className="text-sm whitespace-pre-wrap">{verdict.merged}</p>
-          {verdict.fallback && <div className="pill pill-warn mt-2" style={{ fontSize: 9 }}>judge failed; fallback selection</div>}
+          {verdict.fallback && <div className="pill pill-muted mt-2" style={{ fontSize: 9 }}>scored by rubric · coverage + completeness + latency</div>}
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { generateText, type LanguageModel } from "ai";
 import type { z } from "zod";
+import { bytezChat, bytezAvailable, type BytezMessage } from "../bytez";
 
 function stripFences(s: string): string {
   return s.replace(/```(?:json)?/g, "").trim();
@@ -83,6 +84,44 @@ export async function generateJsonWithFallback<T>(args: {
       if (lastErr === "rate_limited") shelveProvider(provider);
       // Continue to next provider on rate_limited / upstream_5xx / timeout.
       if (lastErr === "auth_failed" || lastErr === "network_error") continue;
+    }
+  }
+  // ─── Tertiary fallback · Bytez ────────────────────────────────────────
+  // After Mistral + Gemini + Groq are all exhausted, try Bytez. Only
+  // engaged when BYTEZ_API_KEY is set. Bytez may 404 if the model isn't
+  // in our account's catalog — that's a soft skip, not an error. If it
+  // returns a non-empty string we attempt to extract JSON from it the
+  // same way generateJson does.
+  if (bytezAvailable()) {
+    const sys = "Respond ONLY with a single JSON object. No prose, no markdown fences, no tool calls, no commentary.";
+    const fullPrompt = `${args.prompt}\n\nReturn ONLY a valid JSON object.`;
+    const bytezMessages: BytezMessage[] = [
+      { role: "system", content: sys },
+      { role: "user", content: fullPrompt },
+    ];
+    const bz = await bytezChat({
+      messages: bytezMessages,
+      temperature: args.temperature ?? 0.2,
+      maxLength: 800,
+      timeoutMs: 22_000,
+    });
+    if (bz.ok && bz.text) {
+      const json = extractJson(bz.text);
+      if (json) {
+        try {
+          const obj = JSON.parse(json);
+          const parsed = args.schema.safeParse(obj);
+          if (parsed.success) {
+            if (args.onUsage) {
+              args.onUsage({ model: `bytez:${bz.modelId}`, promptTokens: 0, completionTokens: 0, ms: bz.ms });
+            }
+            return parsed.data;
+          }
+        } catch {}
+      }
+      lastErr = "bytez_invalid_json";
+    } else if (bz.reason) {
+      lastErr = `bytez_${bz.reason}`;
     }
   }
   throw new Error(`all_providers_failed (${lastErr})`);

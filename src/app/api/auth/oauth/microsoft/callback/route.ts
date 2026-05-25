@@ -3,7 +3,7 @@
 
 import { env } from "@/lib/env";
 import { safeAddMemory } from "@/lib/hydra";
-import { deriveTenant } from "@/lib/session";
+import { deriveTenant, getSecret } from "@/lib/session";
 import { NextRequest } from "next/server";
 import { createHmac } from "node:crypto";
 
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 
 function signSession(payload: { sub: string; iat: number; exp: number }): string {
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const sig = createHmac("sha256", process.env.AUTH_SECRET ?? "delos-dev-secret")
+  const sig = createHmac("sha256", getSecret())
     .update(body)
     .digest("base64url")
     .slice(0, 32);

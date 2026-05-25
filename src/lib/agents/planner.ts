@@ -64,6 +64,12 @@ ${recovery}
 
 Produce a 2-5 step plan. Each step picks one tool (or omits tool for pure reasoning).
 
+DURABLE-FACT RULE — when the user STATES a fact they want remembered ("my name is X", "remember my preference is Y", "the project codename is Z", "set response style to terse", etc.):
+  • Insert one memory_pin step per fact (key = snake_case identifier, value = exact user text).
+  • DO NOT just call notes_append or summarize — those don't survive across sessions and recall will return the wrong answer.
+  • DO NOT collapse multiple facts into a single pin; emit one memory_pin per key.
+  • Examples: { tool: "memory_pin", args: { key: "user_name", value: "Varun" } }, { tool: "memory_pin", args: { key: "response_style", value: "terse bullets" } }.
+
 If — and ONLY if — the goal genuinely decomposes into 2-3 independent research/computation chunks, optionally declare a "subgoals" array. Each subgoal will be answered IN PARALLEL by a sub-agent before the main steps run, and the answers will be added to your scratchpad context. Use sparingly; most goals do NOT need this.
 
 Output JSON with exact shape:

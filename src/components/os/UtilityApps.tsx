@@ -7,10 +7,55 @@ export function CalculatorApp() {
   const [expr, setExpr] = useState("");
   const [history, setHistory] = useState<Array<{ q: string; a: string }>>([]);
 
-  function safeEval(e: string): string {
-    if (!/^[\d\s+\-*/().%]+$/.test(e)) return "err";
+  // Pure-JS recursive-descent arithmetic parser. Was Function(...) eval
+  // which CSP-blocked under our strict script-src → always returned
+  // "err" for basic ops (QA report 2026-05-25 P0). Hand-written shunting-
+  // yard handles + - * / % ( ) precedence + decimals without eval.
+  function safeEval(eRaw: string): string {
+    const e = eRaw.replace(/\s+/g, "");
+    if (!/^[\d+\-*/().%]+$/.test(e)) return "err";
+    let i = 0;
+    function peek() { return e[i]; }
+    function consume() { return e[i++]; }
+    function parseNumber(): number {
+      let s = "";
+      while (i < e.length && /[\d.]/.test(e[i])) s += e[i++];
+      const v = Number(s);
+      if (!Number.isFinite(v)) throw new Error("bad number");
+      return v;
+    }
+    function parseFactor(): number {
+      const c = peek();
+      if (c === "(") { consume(); const v = parseExpr(); if (peek() !== ")") throw new Error("missing )"); consume(); return v; }
+      if (c === "-") { consume(); return -parseFactor(); }
+      if (c === "+") { consume(); return parseFactor(); }
+      return parseNumber();
+    }
+    function parseTerm(): number {
+      let v = parseFactor();
+      while (peek() === "*" || peek() === "/" || peek() === "%") {
+        const op = consume();
+        const rhs = parseFactor();
+        if (op === "*") v = v * rhs;
+        else if (op === "/") {
+          if (rhs === 0) throw new Error("div by zero");
+          v = v / rhs;
+        } else v = v * (rhs / 100); // % treated as percentage-of multiplier
+      }
+      return v;
+    }
+    function parseExpr(): number {
+      let v = parseTerm();
+      while (peek() === "+" || peek() === "-") {
+        const op = consume();
+        const rhs = parseTerm();
+        v = op === "+" ? v + rhs : v - rhs;
+      }
+      return v;
+    }
     try {
-      const v = Function(`"use strict"; return (${e.replace(/%/g, "/100")});`)();
+      const v = parseExpr();
+      if (i !== e.length) return "err";
       if (typeof v !== "number" || !Number.isFinite(v)) return "err";
       return String(Number(v.toFixed(10)));
     } catch {

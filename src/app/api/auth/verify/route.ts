@@ -3,17 +3,18 @@
 import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { safeRecall, safeAddMemory } from "@/lib/hydra";
+import { getSecret } from "@/lib/session";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
 
 function hashToken(t: string): string {
-  return createHash("sha256").update(t + (process.env.AUTH_SECRET ?? "delos-dev-secret")).digest("hex").slice(0, 32);
+  return createHash("sha256").update(t + getSecret()).digest("hex").slice(0, 32);
 }
 
 function signSession(payload: { sub: string; iat: number; exp: number }): string {
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const sig = createHmac("sha256", process.env.AUTH_SECRET ?? "delos-dev-secret")
+  const sig = createHmac("sha256", getSecret())
     .update(body)
     .digest("base64url")
     .slice(0, 32);

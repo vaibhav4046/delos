@@ -132,7 +132,12 @@ export async function safeRecall(args: Parameters<typeof recall>[0]): Promise<Re
     }
     // Length-normalize so very long texts don't dominate
     const norm = qWords.length > 0 ? score / qWords.length : 0;
-    return { mem: m, score: norm };
+    // Pinned exact-fact rows (memory_pin tool) boost 1.6x so they
+    // outrank run-summary chatter when both match. Without this,
+    // recall returned "Run completed for goal X" before the actual
+    // "user_name = Varun" fact the user pinned — 2026-05-25 P0.
+    const isPinned = m.tags.includes("pinned") || m.tags.includes("user-fact");
+    return { mem: m, score: isPinned ? norm * 1.6 + 0.15 : norm };
   });
   scored.sort((a, b) => b.score - a.score);
   return scored
@@ -143,4 +148,27 @@ export async function safeRecall(args: Parameters<typeof recall>[0]): Promise<Re
 
 export function getLocalFallback(tenantId?: string): StoredMemory[] {
   return tenantId ? localFallback.filter((m) => m.tenantId === tenantId) : [...localFallback];
+}
+
+// M4 · delete a single local-fallback memory by id, scoped to tenant so
+// one tenant cannot remove another's memories. Returns true if removed.
+export function deleteLocalMemory(args: { tenantId: string; id: string }): boolean {
+  const idx = localFallback.findIndex(
+    (m) => m.id === args.id && m.tenantId === args.tenantId,
+  );
+  if (idx === -1) return false;
+  localFallback.splice(idx, 1);
+  return true;
+}
+
+// M4 · clear all memories for a tenant (e.g. demo reset). Returns count.
+export function clearLocalMemories(tenantId: string): number {
+  let removed = 0;
+  for (let i = localFallback.length - 1; i >= 0; i--) {
+    if (localFallback[i].tenantId === tenantId) {
+      localFallback.splice(i, 1);
+      removed++;
+    }
+  }
+  return removed;
 }

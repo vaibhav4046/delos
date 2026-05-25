@@ -15,8 +15,17 @@ export async function critique(args: {
   originalGoal: string;
   currentPlanSummary: string;
   lastStep: { intent: string; toolResult: string };
+  // Number of memory hits surfaced for this run. When 0, the critic must
+  // refuse to certify any "found in memory / recalled / from previous run"
+  // claim — that closes a QA-found bug where the answer claimed memory
+  // proof while memoryRecall.hits=0.
+  memoryHits?: number;
   onUsage?: import("./jsonGen").LLMUsage extends infer U ? (u: U) => void : never;
 }) {
+  const recallBlock = typeof args.memoryHits === "number"
+    ? `MEMORY RECALL: ${args.memoryHits} hits.
+If the step result CLAIMS memory proof ("from memory", "recalled", "previously", "last run", "i remember") but MEMORY RECALL hit count is 0, that is a hallucinated memory claim — driftScore >= 0.7 and verdict = "replan" with a newGoal that drops the memory claim.`
+    : "";
   const prompt = `You are the CRITIC. You only evaluate whether the LAST STEP satisfied its DECLARED STEP INTENT — not whether the global goal is finished.
 
 ORIGINAL GOAL (for context only — do NOT score against this):
@@ -28,6 +37,8 @@ ${args.currentPlanSummary}
 LAST STEP:
 declared intent: ${args.lastStep.intent}
 result: ${args.lastStep.toolResult}
+
+${recallBlock}
 
 Rules:
 - driftScore is purely about: did the result satisfy the declared step intent? 0 = yes perfectly. 1 = result is unrelated to step intent.
@@ -44,6 +55,20 @@ verdict:
 
 Output JSON:
 { "verdict": "pass|retry|replan", "driftScore": 0.0, "critique": "one sentence about step↔intent match", "fix": "optional one-sentence directive", "newGoal": "if verdict=replan, a clean imperative goal string under 120 chars (e.g. 'Search authoritative sources for X, then summarize.'). Omit if no replan." }`;
+
+  // Pre-LLM hard check: hallucinated-memory claims with 0 recall hits are
+  // always replans. We don't trust the model to consistently catch this.
+  const claimsMemory = /\b(from memory|recalled|previously|last run|i remember|memory recall|recall(?:ed|ing)?\s+from)\b/i.test(args.lastStep.toolResult);
+  const noHits = args.memoryHits === 0;
+  if (claimsMemory && noHits) {
+    return {
+      verdict: "replan" as const,
+      driftScore: 0.85,
+      critique: "Step result claims memory recall but no memory hits were returned for this run.",
+      fix: "Drop the memory claim — either re-query memory or answer from scratch without invoking prior runs.",
+      newGoal: `Re-answer without memory claims: ${args.originalGoal.slice(0, 90)}`,
+    };
+  }
 
   try {
     return await generateJsonWithFallback({

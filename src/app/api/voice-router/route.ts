@@ -41,7 +41,40 @@ export const VoiceIntentSchema: z.ZodType<VoiceIntentT> = z.object({
 });
 
 // ---------- Heuristic local matcher (no LLM call) ----------
-function localMatch(t: string): { intent: IntentName; params?: Record<string, unknown>; speak: string } | null {
+// Payload-verb splitter — for "open browser search hydration errors" we
+// want app=browser AND payload=hydration errors. Was: regex captured the
+// whole tail as the app name, so app became "browsersearchhydrationerrors".
+const PAYLOAD_VERB_RE = /\s+(and\s+search|and\s+show\s+me|and\s+go\s+to|and\s+find|search|show\s+me|find|with|about|for|on)\s+/i;
+
+type LocalMatch = {
+  intent: IntentName;
+  params?: Record<string, unknown>;
+  speak: string;
+  chain?: Array<{ intent: IntentName; params?: Record<string, unknown>; speak: string }>;
+};
+
+function voiceResponse(args: {
+  source: "local" | "llm" | "fallback";
+  surface: "web" | "chrome" | "mobile";
+  tenantId: string;
+  intent: VoiceIntentT;
+  error?: string;
+}) {
+  return {
+    ok: true,
+    source: args.source,
+    surface: args.surface,
+    tenantId: args.tenantId,
+    intent: args.intent.intent,
+    params: args.intent.params,
+    chain: args.intent.chain,
+    speak: args.intent.speak,
+    voiceIntent: args.intent,
+    ...(args.error ? { error: args.error } : {}),
+  };
+}
+
+function localMatch(t: string): LocalMatch | null {
   const s = t.trim().toLowerCase();
   // Read / summarize current tab (chrome surface mostly)
   if (/^(read|tell me) (this( (page|tab))?|what (this )?(page|tab) says?)/.test(s)) {
@@ -50,12 +83,68 @@ function localMatch(t: string): { intent: IntentName; params?: Record<string, un
   if (/^(summari[sz]e|sum up|tl;?dr)/.test(s)) {
     return { intent: "summarize", params: { mode: "summary" }, speak: "Summarizing." };
   }
-  // App open
-  let m = s.match(/^(open|launch|show)\s+(?:the\s+)?(terminal|builder|app builder|cohort|arena|voice|memory|doom|browser|settings|notes|mission|files|calendar|ingest|cores|identity|del assistant|assistant)/);
+  // Focused-window close · was missing from local matcher and the LLM
+  // path mapped "close this window" → close(all:true). Local match keeps
+  // it deterministic and preserves the focused-window scope.
+  if (/^(close|dismiss|exit|kill|hide|x\s+out)(\s+(it|this|window|the\s+window|this\s+window|the\s+focused\s+window|focused\s+window|current\s+window|active\s+window|this\s+app|the\s+app|this\s+one|that))?[.!?]*$/i.test(s)) {
+    return { intent: "close", params: { scope: "focused" }, speak: "Closed." };
+  }
+  if (/^close\s+(all|every|everything)(\s+windows?)?$/i.test(s)) {
+    return { intent: "close", params: { all: true }, speak: "Closing all windows." };
+  }
+  const compoundBuild = s.match(/^(?:open|launch|start|show)\s+(?:the\s+)?(codebase|delcode|del\s+code|builder|vibecode|vibe\s*code)\s+(?:and|then)\s+(?:build|make|create|generate)\s+(?:me\s+)?(?:an?\s+)?(.{3,300})$/i);
+  if (compoundBuild) {
+    const rawApp = compoundBuild[1].replace(/\s+/g, " ").toLowerCase();
+    const app = /code/.test(rawApp) ? "codebase" : "builder";
+    const spec = compoundBuild[2].trim();
+    return {
+      intent: "chain",
+      chain: [
+        { intent: "open", params: { app }, speak: `Opening ${app}.` },
+        { intent: "build", params: { spec }, speak: `Building ${spec.slice(0, 80)}.` },
+      ],
+      speak: `Opening ${app}, then building.`,
+    };
+  }
+  // App open · extended alias list (added codebase, delcode, vibecode,
+  // delassistant variants) + payload splitter so "open browser search X"
+  // keeps app=browser and lifts X into params.query.
+  let m = s.match(/^(open|launch|start|go\s+to|show)\s+(?:the\s+)?(terminal|builder|vibecode|vibe\s*code|app\s+builder|cohort|arena|voice|voice\s+agent|memory|doom|browser|web|settings|notes|mission|files|calendar|ingest|cores|identity|del\s+assistant|delassistant|assistant|codebase|delcode|del\s+code|chat|gmail|notion)(?:\s+(.{2,200}))?$/i);
   if (m) {
-    const APP_ALIAS: Record<string, string> = { "app builder": "builder", "del assistant": "assistant" };
-    const app = APP_ALIAS[m[2]] ?? m[2];
-    return { intent: "open", params: { app }, speak: `Opening ${m[2]}.` };
+    const APP_ALIAS: Record<string, string> = {
+      "app builder": "builder",
+      "vibe code": "builder",
+      "vibecode": "builder",
+      "voice agent": "voice",
+      "del assistant": "assistant",
+      "delassistant": "assistant",
+      "del code": "codebase",
+      "delcode": "codebase",
+      "web": "browser",
+    };
+    const rawApp = m[2].toLowerCase().replace(/\s+/g, " ");
+    const app = APP_ALIAS[rawApp] ?? rawApp;
+    const rest = (m[3] ?? "").trim();
+    // Split the tail on payload verbs so app stays clean and any search
+    // term is lifted into a separate field.
+    let query = "";
+    if (rest) {
+      const split = (" " + rest).match(PAYLOAD_VERB_RE);
+      if (split) {
+        const idx = (" " + rest).indexOf(split[0]);
+        query = rest.slice(idx + split[0].length - 1).trim();
+      } else {
+        // No payload verb · treat tail as direct query if app accepts one
+        if (app === "browser" || app === "memory") query = rest;
+      }
+    }
+    const params: Record<string, unknown> = { app };
+    if (query) params.query = query;
+    return {
+      intent: "open",
+      params,
+      speak: query ? `Opening ${app} for ${query}.` : `Opening ${app}.`,
+    };
   }
   // Tile shortcuts
   m = s.match(/^(tile|arrange|grid)( all| windows)?$/);
@@ -107,8 +196,11 @@ function localMatch(t: string): { intent: IntentName; params?: Record<string, un
   // PDF parse
   m = s.match(/^(?:parse|read|summari[sz]e)\s+(?:the\s+)?pdf\s+(?:at\s+)?(\S+)$/i);
   if (m) return { intent: "pdf_parse", params: { url: m[1] }, speak: "Parsing the PDF." };
-  // Browser actions in chrome surface
-  m = s.match(/^(open|go to|visit) (.+)$/);
+  // Browser actions in chrome surface · restrict the broad "open <X>"
+  // pattern to URL-shaped targets so "open codebase" doesn't try to
+  // navigate the browser to a host named `codebase`. App-name opens are
+  // already handled by the app-open regex above with a closed alias list.
+  m = s.match(/^(open|go to|visit) ([a-z0-9._-]+\.[a-z]{2,}(\/.*)?|https?:\/\/\S+)$/i);
   if (m) return { intent: "browser_action", params: { kind: "navigate", target: m[2].trim() }, speak: `Opening ${m[2]}.` };
   m = s.match(/^(click|press|tap)\s+(?:on\s+)?(.+)$/);
   if (m) return { intent: "browser_action", params: { kind: "click", target: m[2].trim() }, speak: `Clicking ${m[2]}.` };
@@ -156,7 +248,8 @@ export async function POST(req: NextRequest) {
   // 1) Heuristic local match
   const local = localMatch(transcript);
   if (local) {
-    return Response.json({ ok: true, source: "local", surface, tenantId, intent: local });
+    const intent = VoiceIntentSchema.parse(local);
+    return Response.json(voiceResponse({ source: "local", surface, tenantId, intent }));
   }
   // 2) LLM fall-through (Groq scout-17b — fast + free tier).
   try {
@@ -171,10 +264,9 @@ export async function POST(req: NextRequest) {
     });
     const obj = JSON.parse(extractJson(text) ?? text);
     const intent = VoiceIntentSchema.parse(obj);
-    return Response.json({ ok: true, source: "llm", surface, tenantId, intent });
+    return Response.json(voiceResponse({ source: "llm", surface, tenantId, intent }));
   } catch (e) {
-    return Response.json({
-      ok: true,
+    return Response.json(voiceResponse({
       source: "fallback",
       surface,
       tenantId,
@@ -184,7 +276,7 @@ export async function POST(req: NextRequest) {
         speak: "I didn't catch that. Try again.",
       },
       error: (e as Error).message,
-    });
+    }));
   }
 }
 

@@ -48,7 +48,7 @@ export function IdentityApp() {
           ~/IDENTITY.md
         </span>
         <span className="pill pill-muted" style={{ fontSize: 9 }}>
-          JarvisOS · the OS that learns who you are
+          DelOS · the OS that learns who you are
         </span>
       </div>
 

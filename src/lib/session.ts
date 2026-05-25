@@ -16,7 +16,12 @@ export type Session = {
 // NODE_ENV=production without the runtime env vars). At first verify call
 // in production, we still refuse to sign or verify without a real secret —
 // just without taking the whole deploy down at build time.
-function getSecret(): string {
+// Exported so every auth/crypto module derives keys from one source. Without
+// this, six different modules each had their own `process.env.AUTH_SECRET ??
+// "delos-dev-secret"` fallback — meaning a missing AUTH_SECRET in production
+// would silently sign sessions / encrypt connector tokens with a known string.
+// Brutal-QA flagged it as a session-forgery + connector-token-decrypt vector.
+export function getSecret(): string {
   const s = process.env.AUTH_SECRET;
   if (s) return s;
   if (process.env.NODE_ENV === "production") {

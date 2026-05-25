@@ -4,6 +4,7 @@ import * as Icons from "lucide-react";
 import { MODEL_CATALOG, type ModelKey } from "@/lib/llm.catalog";
 import { broadcastAgent } from "@/lib/intentBus";
 import { DelOSIcon } from "@/components/BrandIcons";
+import { useSpeechToText } from "@/lib/useSpeech";
 
 // Del Assistant — single AI app with Chat / Code / Cohort / Research modes,
 // conversation sidebar, model selector, subagent fanout, clarifying-question orchestration.
@@ -20,6 +21,8 @@ type Msg = {
   model?: string;
   mode?: Mode;
   options?: string[]; // for clarify role
+  memRecall?: number; // how many memory hits informed this answer
+  steps?: number;     // tool calls / agent steps taken
 };
 
 type Conversation = {
@@ -99,7 +102,49 @@ export function DelAssistant() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  // Voice mic · Whisper-large-v3 STT for autonomous MCP actions
+  // (Gmail draft / Notion create / GitHub list / GDrive list). On
+  // transcript arrival we drop it into the input and auto-send so the
+  // user can ask "draft email to anna@acme.com about Q3 roadmap" with
+  // their voice and the assistant fires the MCP call.
+  const chatStt = useSpeechToText();
+  useEffect(() => {
+    if (chatStt.transcript && !streaming) {
+      const text = chatStt.transcript.trim();
+      chatStt.setTranscript("");
+      if (text) {
+        setInput(text);
+        // Defer the actual send so React commits the input update first
+        // (otherwise the empty-input guard in send() fires before
+        // controlled state catches up).
+        setTimeout(() => {
+          setInput("");
+          void actuallySend(text);
+        }, 60);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatStt.transcript]);
+  const chatMicActive = chatStt.state === "listening" || chatStt.state === "recording";
   const [streaming, setStreaming] = useState(false);
+  // Voice / OS bus integration · external code (voice handler in os/page,
+  // assistant.ask intent) drops a fully-formed user turn into the chat
+  // via the `delos-intent` event. Skips the input box so the autonomous
+  // MCP path is one hop instead of two. 2026-05-25 judge finding.
+  useEffect(() => {
+    function onIntent(e: Event) {
+      const d = (e as CustomEvent).detail as { kind?: string; text?: string };
+      if (d?.kind === "assistant.ask" && typeof d.text === "string" && d.text.trim()) {
+        // Defer one tick so any concurrent spawn / focus reducer settles.
+        setTimeout(() => {
+          void actuallySend(d.text!.trim());
+        }, 80);
+      }
+    }
+    window.addEventListener("delos-intent", onIntent as EventListener);
+    return () => window.removeEventListener("delos-intent", onIntent as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [showSidebar, setShowSidebar] = useState(true);
   // Autonomous mode: when on, every user turn first hits /api/coordinator. The plan's
   // open_app actions dispatch into the OS intent bus; remaining actions are summarized
@@ -225,6 +270,120 @@ export function DelAssistant() {
     await actuallySend(combined, true);
   }
 
+  // Detect autonomous MCP actions BEFORE hitting the LLM. Lets Del do
+  // Gmail / Notion / GitHub things without the user opening a separate
+  // app. Replaces the dedicated Cowork window (now removed from dock).
+  async function tryMcpAction(text: string): Promise<string | null> {
+    const s = text.trim();
+    // Gmail · DRAFT (safe — saves to user's drafts, never auto-sends)
+    let m = s.match(/^(?:please\s+)?(?:draft|compose|write)\s+(?:an?\s+)?email\s+to\s+([\w._+-]+@[\w.-]+\.\w+)\s+(?:saying|about|with|that|re:?)\s+(.+)$/i);
+    if (m) {
+      const to = m[1];
+      const body = m[2];
+      const subject = body.slice(0, 60);
+      try {
+        const r = await fetch("/api/connectors/gmail/draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to, subject, body }),
+        });
+        const j = (await r.json()) as { ok?: boolean; draftId?: string; error?: string };
+        if (!r.ok || !j.ok) return `Could not draft email — ${j.error ?? `HTTP ${r.status}`}. Connect Gmail in Settings → Connectors.`;
+        return `✓ Gmail draft saved · to: ${to} · subject: "${subject}" · review it in your Drafts folder before sending.`;
+      } catch (e) {
+        return `Gmail draft failed: ${(e as Error).message}`;
+      }
+    }
+    // Gmail · LIST (read-only)
+    m = s.match(/^(?:show|read|check|list)\s+(?:my\s+)?(?:gmail|inbox|emails?)(?:\s+(?:for\s+|about\s+|matching\s+)?(.+))?$/i);
+    if (m) {
+      const q = m[1]?.trim() ?? "";
+      try {
+        const r = await fetch("/api/connectors/gmail/list", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ q, limit: 10 }),
+        });
+        const j = (await r.json()) as { ok?: boolean; messages?: Array<{ subject: string; from: string; snippet?: string }>; error?: string };
+        if (!r.ok || !j.ok) return `Could not read inbox — ${j.error ?? `HTTP ${r.status}`}. Connect Gmail in Settings → Connectors.`;
+        const lines = (j.messages ?? []).slice(0, 10).map((x, i) => `${i + 1}. ${x.subject} — ${x.from}`);
+        return lines.length > 0 ? `★ Inbox (${lines.length})\n${lines.join("\n")}` : "Inbox is empty for that query.";
+      } catch (e) {
+        return `Gmail list failed: ${(e as Error).message}`;
+      }
+    }
+    // Notion · CREATE PAGE
+    m = s.match(/^(?:create|make|add)\s+(?:a\s+)?notion\s+(?:page|doc|note)\s+(?:titled|called|named|about|on)\s+["']?([^"']{2,120}?)["']?(?:\s+(?:with|saying|containing)\s+(.{2,2000}))?$/i);
+    if (m) {
+      const title = m[1].trim();
+      const content = m[2]?.trim() ?? title;
+      try {
+        const r = await fetch("/api/connectors/notion/create-page", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, content }),
+        });
+        const j = (await r.json()) as { ok?: boolean; url?: string; pageId?: string; error?: string };
+        if (!r.ok || !j.ok) return `Could not create Notion page — ${j.error ?? `HTTP ${r.status}`}. Connect Notion in Settings → Connectors.`;
+        return j.url ? `✓ Notion page created · ${title}\n${j.url}` : `✓ Notion page created · ${title}`;
+      } catch (e) {
+        return `Notion create failed: ${(e as Error).message}`;
+      }
+    }
+    // GitHub · LIST REPOS (read-only). Uses an unauthenticated GH search
+    // when no token is configured; with GITHUB_TOKEN it lists the user's
+    // private repos too.
+    m = s.match(/^(?:show|list|what(?:'s| is)?)\s+(?:my\s+)?(?:github\s+)?repos?(?:itories)?(?:\s+for\s+([\w.-]+))?$/i);
+    if (m) {
+      const user = m[1]?.trim();
+      try {
+        const r = await fetch(
+          user
+            ? `https://api.github.com/users/${encodeURIComponent(user)}/repos?per_page=10&sort=updated`
+            : "/api/connectors/github/list",
+          { method: user ? "GET" : "POST", headers: { "Content-Type": "application/json" } },
+        );
+        if (!r.ok) return `Could not list GitHub repos — HTTP ${r.status}.`;
+        const j = (await r.json()) as Array<{ full_name: string; description?: string; updated_at?: string }> | { ok?: boolean; repos?: Array<{ full_name: string; description?: string }>; error?: string };
+        const list = Array.isArray(j) ? j : j.repos ?? [];
+        if (list.length === 0) return "No repos found.";
+        const lines = list.slice(0, 10).map((x, i) => `${i + 1}. ${x.full_name}${x.description ? " — " + x.description.slice(0, 80) : ""}`);
+        return `★ GitHub repos (${lines.length})\n${lines.join("\n")}`;
+      } catch (e) {
+        return `GitHub list failed: ${(e as Error).message}`;
+      }
+    }
+    // GDrive · LIST FILES (read-only). Triggered by "list my drive",
+    // "show my recent drive files", "find my drive doc about X".
+    m = s.match(/^(?:show|list|find|search|open)\s+(?:my\s+)?(?:google\s+)?drive(?:\s+(?:doc(?:s|ument(?:s)?)?|files?))?(?:\s+(?:for|about|matching|named|with|containing)\s+(.+))?$/i);
+    if (m) {
+      const q = m[1]?.trim() ?? "";
+      try {
+        const r = await fetch("/api/connectors/gdrive/list", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ q, limit: 10 }),
+        });
+        const j = (await r.json()) as {
+          ok?: boolean;
+          files?: Array<{ name: string; type: string; modifiedAt?: string | null; url?: string | null }>;
+          error?: string;
+          hint?: string;
+        };
+        if (!r.ok || !j.ok) {
+          return `Could not list Drive — ${j.error ?? `HTTP ${r.status}`}${j.hint ? ` · ${j.hint}` : ""}.`;
+        }
+        const list = j.files ?? [];
+        if (list.length === 0) return q ? `No Drive files match "${q}".` : "Drive is empty.";
+        const lines = list.slice(0, 10).map((x, i) => `${i + 1}. ${x.name}${x.url ? ` · ${x.url}` : ""}`);
+        return `★ Drive files (${lines.length}${q ? ` matching "${q}"` : ""})\n${lines.join("\n")}`;
+      } catch (e) {
+        return `GDrive list failed: ${(e as Error).message}`;
+      }
+    }
+    return null;
+  }
+
   async function actuallySend(text: string, skipUserAppend = false) {
     if (!active) return;
     ctrlRef.current?.abort();
@@ -267,6 +426,20 @@ export function DelAssistant() {
     }, 400);
 
     try {
+      // Autonomous MCP path · Gmail draft / inbox list / Notion create /
+      // GitHub repo list. Short-circuits the LLM when the user asked for
+      // a specific platform action. Replaces the old Cowork window.
+      const mcpReply = await tryMcpAction(text);
+      if (mcpReply !== null) {
+        updateActive((c) => ({
+          ...c,
+          messages: c.messages.map((m) =>
+            m.id === assistId ? { ...m, content: mcpReply } : m,
+          ),
+        }));
+        setSubagentStatus([]);
+        return;
+      }
       // Mode routing — pass assistId so stream readers update the exact message
       // by id, not by "last in array" (which races when new messages get appended).
       if (active.mode === "cohort") {
@@ -288,7 +461,17 @@ export function DelAssistant() {
         setSubagentStatus([]);
       }, 1500);
     } catch (e) {
-      if ((e as Error).name === "AbortError") return;
+      // Aborted stream (user navigated away, sent a new message, or hit
+      // Stop) was leaving an empty assistant bubble in history that
+      // rendered as "no response — agent stream was interrupted" forever.
+      // Drop the placeholder so the conversation history stays clean.
+      if ((e as Error).name === "AbortError") {
+        updateActive((c) => ({
+          ...c,
+          messages: c.messages.filter((m) => !(m.id === assistId && !m.content)),
+        }));
+        return;
+      }
       updateActive((c) => ({
         ...c,
         messages: c.messages.map((m) =>
@@ -301,6 +484,19 @@ export function DelAssistant() {
       setSubagentStatus([]);
     } finally {
       setStreaming(false);
+      // Post-stream cleanup · if the assistant placeholder is STILL empty
+      // here (stream closed without any delta + no error fired — e.g.
+      // server returned 200 but immediately closed) replace it with a
+      // friendly retry message so the UI never strands a blank "no
+      // response" bubble. Was the bug visible in the 2026-05-25 screenshot.
+      updateActive((c) => ({
+        ...c,
+        messages: c.messages.map((m) =>
+          m.id === assistId && !m.content.trim()
+            ? { ...m, content: "(retry — the model returned nothing. Try again or pick a different mode.)" }
+            : m
+        ),
+      }));
     }
   }
 
@@ -495,6 +691,24 @@ export function DelAssistant() {
     }
   }
 
+  // MCP autonomous-pattern detector · returns true for verbs that
+  // tryMcpAction handles (Gmail / Notion / GitHub / GDrive). Used to
+  // short-circuit the needsClarify heuristic which was intercepting
+  // these and showing a "pick one of: quick prototype / production
+  // ready / detailed plan / just explain how" picker for prompts like
+  // "create notion page titled X". 2026-05-25 E2E test bug.
+  function isMcpPattern(text: string): boolean {
+    const s = text.trim().toLowerCase();
+    return (
+      /^(?:please\s+)?(?:draft|compose|write|send)\s+(?:an?\s+)?email\b/i.test(s) ||
+      /^(?:show|read|check|list)\s+(?:my\s+)?(?:gmail|inbox|emails?)\b/i.test(s) ||
+      /^(?:create|make|add)\s+(?:a\s+)?notion\s+(?:page|doc|note)\b/i.test(s) ||
+      /^(?:write|save)\s+(?:this\s+)?to\s+notion\b/i.test(s) ||
+      /^(?:show|list|what(?:'s| is)?)\s+(?:my\s+)?(?:github\s+)?repos?(?:itories)?\b/i.test(s) ||
+      /^(?:show|list|find|search|open)\s+(?:my\s+)?(?:google\s+)?drive\b/i.test(s)
+    );
+  }
+
   function send() {
     const text = input.trim();
     if (!text || streaming) return;
@@ -502,6 +716,15 @@ export function DelAssistant() {
 
     if (autonomous) {
       void sendAutonomous(text);
+      return;
+    }
+
+    // MCP autonomous patterns must reach actuallySend → tryMcpAction
+    // directly, NEVER the clarify picker. Without this short-circuit
+    // "create notion page titled X" got intercepted and showed code-
+    // style clarify options.
+    if (isMcpPattern(text)) {
+      void actuallySend(text);
       return;
     }
 
@@ -761,6 +984,18 @@ export function DelAssistant() {
               style={{ minHeight: 40, fontSize: 12 }}
             />
             <div className="flex flex-col gap-1">
+              <button
+                onClick={() => {
+                  if (chatMicActive) chatStt.stop();
+                  else chatStt.start();
+                }}
+                disabled={streaming}
+                className={`btn-pixel ${chatMicActive ? "danger" : "ghost"}`}
+                title={chatMicActive ? "stop dictation" : "dictate · say 'draft email to X', 'create notion page', 'list my repos', 'list my drive'"}
+                style={{ padding: "6px 10px", fontSize: 11 }}
+              >
+                {chatStt.state === "transcribing" ? "…" : chatMicActive ? "■ MIC" : "🎙 MIC"}
+              </button>
               {streaming ? (
                 <button onClick={stop} className="btn-pixel danger" style={{ padding: "6px 10px", fontSize: 11 }}>
                   ■ STOP
@@ -909,25 +1144,88 @@ function MsgBubble({
         }}
       >
         <MessageContent content={msg.content} />
-        {msg.ms !== undefined && (
-          <div className="mt-1.5 flex gap-2 text-[9px] font-mono" style={{ color: "var(--muted)" }}>
-            <span>{msg.ms}ms</span>
-            {msg.tokens !== undefined && <span>· {msg.tokens} tok</span>}
-            {msg.model && <span>· {msg.model.split(":").pop()}</span>}
-          </div>
+        {!isUser && msg.content.trim() && (
+          <AssistWhyFooter msg={msg} />
         )}
       </div>
     </div>
   );
 }
 
+function AssistWhyFooter({ msg }: { msg: Msg }) {
+  const [open, setOpen] = useState(false);
+  const modeLabel = msg.mode ? { chat: "Chat", code: "Code", cohort: "Cohort race", research: "Research + search" }[msg.mode] : "Chat";
+  const modelShort = msg.model ? msg.model.split(":").pop() ?? msg.model : null;
+  return (
+    <div className="mt-1.5">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="font-mono text-[9px] flex items-center gap-1"
+        style={{ color: "var(--muted)", background: "none", border: "none", padding: 0, cursor: "pointer" }}
+      >
+        {open ? "▾" : "▸"} why this answer
+      </button>
+      {open && (
+        <div
+          className="mt-1 p-2 font-mono text-[9px] space-y-0.5"
+          style={{ background: "var(--bg)", border: "1px solid var(--surface-2)", color: "var(--muted)" }}
+        >
+          <div><span style={{ color: "var(--fg)" }}>mode</span> {modeLabel}</div>
+          {modelShort && <div><span style={{ color: "var(--fg)" }}>model</span> {modelShort}</div>}
+          {msg.ms !== undefined && <div><span style={{ color: "var(--fg)" }}>latency</span> {msg.ms}ms</div>}
+          {msg.tokens !== undefined && <div><span style={{ color: "var(--fg)" }}>tokens</span> {msg.tokens}</div>}
+          {msg.memRecall !== undefined && <div><span style={{ color: "var(--fg)" }}>memory hits</span> {msg.memRecall} prior runs recalled</div>}
+          {msg.steps !== undefined && <div><span style={{ color: "var(--fg)" }}>steps</span> {msg.steps} tool calls</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Render inline [1], [2] etc as styled citation badges (Perplexity-style trust)
+function renderCitations(text: string): React.ReactNode[] {
+  const parts = text.split(/(\[\d+\])/g);
+  return parts.map((p, i) => {
+    const m = p.match(/^\[(\d+)\]$/);
+    if (m) {
+      return (
+        <span
+          key={i}
+          className="inline-flex items-center justify-center"
+          style={{
+            background: "var(--accent)",
+            color: "var(--on-accent)",
+            fontSize: 8,
+            fontWeight: 700,
+            borderRadius: 3,
+            padding: "0 4px",
+            marginInline: 2,
+            verticalAlign: "super",
+            lineHeight: "14px",
+            minWidth: 14,
+            textAlign: "center",
+          }}
+          title={`Source ${m[1]}`}
+        >
+          {m[1]}
+        </span>
+      );
+    }
+    return <span key={i}>{p}</span>;
+  });
+}
+
 function MessageContent({ content }: { content: string }) {
-  // Empty or whitespace-only content means a send failed or was interrupted.
-  // Render a clear hint instead of a blank bubble.
+  // Empty bubble usually means a stream is still warming up (placeholder
+  // inserted before first delta arrives). Render a soft thinking hint —
+  // the post-stream cleanup in actuallySend() replaces the bubble with a
+  // friendly retry message if the model truly returned nothing, so this
+  // path should only flash during the first ~200ms of a normal send.
   if (!content || !content.trim()) {
     return (
-      <p className="font-mono text-[10px] italic" style={{ color: "var(--warn)" }}>
-        ⚠ no response — agent stream was interrupted. tap RUN again or send a new message.
+      <p className="font-mono text-[10px] italic flex items-center gap-1.5" style={{ color: "var(--muted)" }}>
+        <span className="accent-pulse w-2 h-2" style={{ background: "var(--accent)" }} />
+        thinking…
       </p>
     );
   }
@@ -953,7 +1251,8 @@ function MessageContent({ content }: { content: string }) {
             </pre>
           );
         }
-        return <span key={i}>{p}</span>;
+        // Render citation badges [1] [2] etc in plain text segments
+        return <span key={i}>{renderCitations(p)}</span>;
       })}
     </div>
   );

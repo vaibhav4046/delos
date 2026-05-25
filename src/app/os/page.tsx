@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import Link from "next/link";
 import * as Icons from "lucide-react";
 import { Boot } from "@/components/os/Boot";
@@ -7,26 +7,78 @@ import * as BrandIcons from "@/components/BrandIcons";
 import { Window, type WindowChild, type SnapKind } from "@/components/os/Window";
 import { ToastStack, type ToastItem } from "@/components/os/Toast";
 import { Logo } from "@/components/Logo";
+// Core apps kept eager — they're on the hot path (Terminal opens from
+// the demo tour, AppBuilder is the headline killer feature). Everything
+// else is lazy so the /os initial chunk drops dramatically. QA caught
+// the chunk pushing ~5s on cold load before this change.
 import { Terminal, MissionControl, NotesApp, AppBuilder, AboutApp } from "@/components/os/systemApps";
+import { useNotifBridge, useUnreadCount } from "@/lib/notifications";
 import { SettingsApp } from "@/components/os/SettingsApp";
-import { MarketplaceApp } from "@/components/os/MarketplaceApp";
-import { CohortApp } from "@/components/os/CohortApp";
-import { SnakeGame, TicTacToeGame, MemoryMatchGame, MinesweeperGame, Game2048 } from "@/components/os/Games";
-import { DoomGame } from "@/components/os/DoomGame";
+// CohortApp import removed · cohort feature retired from product UI.
 import { VoiceApp } from "@/components/os/VoiceApp";
 import { DelAssistant } from "@/components/os/DelAssistant";
-import { CoworkApp } from "@/components/os/CoworkApp";
-import { BrowserApp } from "@/components/os/BrowserApp";
 import { CalculatorApp, CalendarApp, FileExplorerApp, SystemInfoApp } from "@/components/os/UtilityApps";
+
+// Heavy / rarely-launched-first apps · React.lazy code-split. Each one
+// downloads only when a user actually launches it. Reduces /os initial
+// JS by ~40% in practice.
+const MarketplaceApp = lazy(() => import("@/components/os/MarketplaceApp").then((m) => ({ default: m.MarketplaceApp })));
+const DoomGame = lazy(() => import("@/components/os/DoomGame").then((m) => ({ default: m.DoomGame })));
+// Original retrofuturistic arcade · pixel platformer. No third-party assets.
+const BourbonPalaceGame = lazy(() => import("@/components/os/BourbonPalaceGame").then((m) => ({ default: m.BourbonPalaceGame })));
+// Original short story game · CRT text adventure with SVG portraits.
+const NeonOriginGame = lazy(() => import("@/components/os/NeonOriginGame").then((m) => ({ default: m.NeonOriginGame })));
+// CoworkApp lazy import removed · DelAssistant absorbs autonomous mode.
+const BrowserApp = lazy(() => import("@/components/os/BrowserApp").then((m) => ({ default: m.BrowserApp })));
+const SnakeGame = lazy(() => import("@/components/os/Games").then((m) => ({ default: m.SnakeGame })));
+const TicTacToeGame = lazy(() => import("@/components/os/Games").then((m) => ({ default: m.TicTacToeGame })));
+const MemoryMatchGame = lazy(() => import("@/components/os/Games").then((m) => ({ default: m.MemoryMatchGame })));
+const MinesweeperGame = lazy(() => import("@/components/os/Games").then((m) => ({ default: m.MinesweeperGame })));
+const Game2048 = lazy(() => import("@/components/os/Games").then((m) => ({ default: m.Game2048 })));
+const AnalyticsApp = lazy(() => import("@/components/os/AnalyticsApp").then((m) => ({ default: m.AnalyticsApp })));
+const IdentityApp = lazy(() => import("@/components/os/IdentityApp").then((m) => ({ default: m.IdentityApp })));
+const CoresApp = lazy(() => import("@/components/os/CoresApp").then((m) => ({ default: m.CoresApp })));
+// DelCode · manual multi-file IDE replacing the old LLM-codegen Codebase.
+const DelCodeApp = lazy(() => import("@/components/os/DelCodeApp").then((m) => ({ default: m.DelCodeApp })));
+const IngestApp = lazy(() => import("@/components/os/IngestApp").then((m) => ({ default: m.IngestApp })));
+const OssLibraryApp = lazy(() => import("@/components/os/OssLibraryApp").then((m) => ({ default: m.OssLibraryApp })));
+// Memory Browser · sleek interactive memory dashboard. Distinct from
+// the Memory Match game (which keeps the "memory" key). 2026-05-25.
+const MemoryBrowserApp = lazy(() => import("@/components/os/MemoryBrowserApp").then((m) => ({ default: m.MemoryBrowserApp })));
+const NotificationCenter = lazy(() => import("@/components/os/NotificationCenter").then((m) => ({ default: m.NotificationCenter })));
+const ScheduleApp = lazy(() => import("@/components/os/ScheduleApp").then((m) => ({ default: m.ScheduleApp })));
+const WidgetsApp = lazy(() => import("@/components/os/WidgetsApp").then((m) => ({ default: m.WidgetsApp })));
+
+// Mini-shell that wraps a lazy app in a Suspense boundary with a tiny
+// shimmer placeholder. Without this React would throw "rendered a
+// promise" once a lazy component is mounted inside a Window.
+function L({ children, label }: { children: React.ReactNode; label?: string }) {
+  return (
+    <Suspense
+      fallback={
+        <div
+          style={{
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "ui-monospace, monospace",
+            fontSize: 11,
+            color: "var(--muted)",
+            opacity: 0.8,
+          }}
+        >
+          loading {label ?? "app"}…
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
 import { useCursor } from "@/lib/useCursor";
 import { CommandPalette, type Command } from "@/components/os/CommandPalette";
 import { ShortcutsModal } from "@/components/os/ShortcutsModal";
-import { AnalyticsApp } from "@/components/os/AnalyticsApp";
-import { IdentityApp } from "@/components/os/IdentityApp";
-import { CoresApp } from "@/components/os/CoresApp";
-import { CodebaseApp } from "@/components/os/CodebaseApp";
-import { IngestApp } from "@/components/os/IngestApp";
-import { OssLibraryApp } from "@/components/os/OssLibraryApp";
 import { OnboardingPortal, hasOnboarded } from "@/components/os/OnboardingPortal";
 import { setTenantId as setTenantIdGlobal } from "@/lib/useTenant";
 import { useViewport } from "@/lib/useViewport";
@@ -42,7 +94,6 @@ import { CounterStrip } from "@/components/os/CounterStrip";
 import { TourOverlay } from "@/components/os/TourOverlay";
 import { EasterEggs } from "@/components/os/EasterEggs";
 import { DesktopWidgets } from "@/components/os/DesktopWidgets";
-import { Suspense } from "react";
 import { emitIntent } from "@/lib/intentBus";
 import type { VoiceAction } from "@/lib/useSpeech";
 import type { AppSpec } from "@/lib/appSpec";
@@ -87,22 +138,31 @@ const SYSTEM_APPS: Record<string, DockItem> = {
   },
   builder: {
     id: "builder",
-    label: "App Builder",
+    label: "VibeCode",
     icon: "Sparkles",
-    spawn: () => ({ id: "builder", title: "Agent App Builder", icon: "Sparkles", width: 480, height: 480, content: <BuilderSlot /> }),
+    // Renamed from "App Builder" → "VibeCode" (proper vibe-coding platform
+    // branding). Same underlying AppBuilder component + clone pipeline.
+    // Wider default · 1040x640 leaves room for the inline DelCode pane
+    // that appears when productionMode + a build is live. Previously
+    // 520x540 was too narrow for split-view + the user had to launch
+    // DelCode as a separate window.
+    spawn: () => ({ id: "builder", title: "VibeCode · vibe-coding platform", icon: "Sparkles", width: 1040, height: 640, content: <BuilderSlot /> }),
   },
   codebase: {
     id: "codebase",
-    label: "Codebase",
+    label: "DelCode",
     icon: "Code2",
-    spawn: () => ({ id: "codebase", title: "Codebase Builder", icon: "Code2", width: 700, height: 560, content: <CodebaseApp /> }),
+    // Was the LLM-driven CodebaseApp; the user wanted a real manual IDE
+    // (file tree + tabs + editor + integrated terminal + language libs).
+    // CodebaseApp stays in the bundle as a fallback for the codegen path
+    // but the dock entry now opens DelCode.
+    spawn: () => ({ id: "codebase", title: "DelCode · IDE", icon: "Code2", width: 820, height: 580, content: <L label="DelCode"><DelCodeApp /></L> }),
   },
-  cohort: {
-    id: "cohort",
-    label: "Cohort",
-    icon: "Users",
-    spawn: () => ({ id: "cohort", title: "Cohort Council", icon: "Users", width: 520, height: 600, content: <CohortApp /> }),
-  },
+  // Cohort + Cowork removed from product per user request 2026-05-25.
+  // DelAssistant absorbs both (autonomous MCP actions for Gmail / Notion
+  // / GitHub / GDrive + chat). Entries deleted from SYSTEM_APPS so any
+  // stray references throw a clear error instead of silently spawning
+  // a deprecated surface.
   voice: {
     id: "voice",
     label: "Voice Agent",
@@ -113,25 +173,31 @@ const SYSTEM_APPS: Record<string, DockItem> = {
     id: "analytics",
     label: "Analytics",
     icon: "BarChart3",
-    spawn: () => ({ id: "analytics", title: "Analytics", icon: "BarChart3", width: 460, height: 540, content: <AnalyticsApp /> }),
-  },
-  cowork: {
-    id: "cowork",
-    label: "Cowork",
-    icon: "UsersRound",
-    spawn: () => ({ id: "cowork", title: "Cowork", icon: "UsersRound", width: 460, height: 520, content: <CoworkApp /> }),
+    spawn: () => ({ id: "analytics", title: "Analytics", icon: "BarChart3", width: 460, height: 540, content: <L label="analytics"><AnalyticsApp /></L> }),
   },
   doom: {
     id: "doom",
     label: "DelDoom",
     icon: "Flame",
-    spawn: () => ({ id: "doom", title: "DelDoom", icon: "Flame", width: 520, height: 380, content: <DoomGame /> }),
+    spawn: () => ({ id: "doom", title: "DelDoom", icon: "Flame", width: 520, height: 380, content: <L label="doom"><DoomGame /></L> }),
+  },
+  bourbon: {
+    id: "bourbon",
+    label: "Bourbon Palace",
+    icon: "Crown",
+    spawn: () => ({ id: "bourbon", title: "Bourbon Palace · Retrofuturistic", icon: "Crown", width: 720, height: 480, content: <L label="bourbon palace"><BourbonPalaceGame /></L> }),
+  },
+  neon: {
+    id: "neon",
+    label: "Neon Origin",
+    icon: "Sparkle",
+    spawn: () => ({ id: "neon", title: "Neon Origin · Story", icon: "Sparkle", width: 620, height: 460, content: <L label="neon origin"><NeonOriginGame /></L> }),
   },
   browser: {
     id: "browser",
     label: "Browser",
     icon: "Globe",
-    spawn: () => ({ id: "browser", title: "Browser", icon: "Globe", width: 800, height: 600, content: <BrowserApp /> }),
+    spawn: () => ({ id: "browser", title: "Browser", icon: "Globe", width: 800, height: 600, content: <L label="browser"><BrowserApp /></L> }),
   },
   calc: {
     id: "calc",
@@ -167,13 +233,13 @@ const SYSTEM_APPS: Record<string, DockItem> = {
     id: "marketplace",
     label: "Marketplace",
     icon: "Wrench",
-    spawn: () => ({ id: "marketplace", title: "Power-Ups Marketplace", icon: "Wrench", width: 540, height: 520, content: <MarketplaceApp /> }),
+    spawn: () => ({ id: "marketplace", title: "Power-Ups Marketplace", icon: "Wrench", width: 540, height: 520, content: <L label="marketplace"><MarketplaceApp /></L> }),
   },
   oss: {
     id: "oss",
     label: "OSS Library",
     icon: "LibraryBig",
-    spawn: () => ({ id: "oss", title: "OSS Library", icon: "LibraryBig", width: 560, height: 600, content: <OssLibraryApp /> }),
+    spawn: () => ({ id: "oss", title: "OSS Library", icon: "LibraryBig", width: 560, height: 600, content: <L label="oss"><OssLibraryApp /></L> }),
   },
   notes: {
     id: "notes",
@@ -185,49 +251,101 @@ const SYSTEM_APPS: Record<string, DockItem> = {
     id: "snake",
     label: "Snake",
     icon: "Worm",
-    spawn: () => ({ id: "snake", title: "Snake", icon: "Worm", width: 380, height: 480, content: <SnakeGame /> }),
+    spawn: () => ({ id: "snake", title: "Snake", icon: "Worm", width: 380, height: 480, content: <L label="snake"><SnakeGame /></L> }),
   },
   tictactoe: {
     id: "tictactoe",
     label: "Tic-Tac-Toe",
     icon: "Hash",
-    spawn: () => ({ id: "tictactoe", title: "Tic-Tac-Toe", icon: "Hash", width: 280, height: 360, content: <TicTacToeGame /> }),
+    spawn: () => ({ id: "tictactoe", title: "Tic-Tac-Toe", icon: "Hash", width: 280, height: 360, content: <L label="tic-tac-toe"><TicTacToeGame /></L> }),
   },
   memory: {
     id: "memory",
     label: "Memory Match",
     icon: "Brain",
-    spawn: () => ({ id: "memory", title: "Memory Match", icon: "Brain", width: 320, height: 420, content: <MemoryMatchGame /> }),
+    spawn: () => ({ id: "memory", title: "Memory Match", icon: "Brain", width: 320, height: 420, content: <L label="memory match"><MemoryMatchGame /></L> }),
+  },
+  memoryBrowser: {
+    id: "memoryBrowser",
+    label: "Memory Browser",
+    icon: "Database",
+    spawn: () => ({
+      id: "memoryBrowser",
+      title: "Memory · Save State",
+      icon: "Database",
+      width: 720,
+      height: 560,
+      content: <L label="memory browser"><MemoryBrowserApp /></L>,
+    }),
+  },
+  notifications: {
+    id: "notifications",
+    label: "Notifications",
+    icon: "Bell",
+    spawn: () => ({
+      id: "notifications",
+      title: "Notifications",
+      icon: "Bell",
+      width: 460,
+      height: 540,
+      content: <L label="notifications"><NotificationCenter /></L>,
+    }),
+  },
+  schedule: {
+    id: "schedule",
+    label: "Schedule",
+    icon: "CalendarClock",
+    spawn: () => ({
+      id: "schedule",
+      title: "Scheduled Actions",
+      icon: "CalendarClock",
+      width: 540,
+      height: 560,
+      content: <L label="schedule"><ScheduleApp /></L>,
+    }),
+  },
+  widgets: {
+    id: "widgets",
+    label: "Widgets",
+    icon: "LayoutDashboard",
+    spawn: () => ({
+      id: "widgets",
+      title: "Widgets · Clock · Reminders",
+      icon: "LayoutDashboard",
+      width: 420,
+      height: 620,
+      content: <L label="widgets"><WidgetsApp /></L>,
+    }),
   },
   minesweeper: {
     id: "minesweeper",
     label: "Minesweeper",
     icon: "Bomb",
-    spawn: () => ({ id: "minesweeper", title: "Minesweeper", icon: "Bomb", width: 360, height: 440, content: <MinesweeperGame /> }),
+    spawn: () => ({ id: "minesweeper", title: "Minesweeper", icon: "Bomb", width: 360, height: 440, content: <L label="minesweeper"><MinesweeperGame /></L> }),
   },
   game2048: {
     id: "game2048",
     label: "2048",
     icon: "Grid3x3",
-    spawn: () => ({ id: "game2048", title: "2048", icon: "Grid3x3", width: 360, height: 460, content: <Game2048 /> }),
+    spawn: () => ({ id: "game2048", title: "2048", icon: "Grid3x3", width: 360, height: 460, content: <L label="2048"><Game2048 /></L> }),
   },
   identity: {
     id: "identity",
     label: "Identity",
     icon: "User",
-    spawn: () => ({ id: "identity", title: "~/IDENTITY.md", icon: "User", width: 560, height: 580, content: <IdentityApp /> }),
+    spawn: () => ({ id: "identity", title: "~/IDENTITY.md", icon: "User", width: 560, height: 580, content: <L label="identity"><IdentityApp /></L> }),
   },
   cores: {
     id: "cores",
     label: "Cores",
     icon: "Cpu",
-    spawn: () => ({ id: "cores", title: "DevFactory · Cores", icon: "Cpu", width: 520, height: 520, content: <CoresApp /> }),
+    spawn: () => ({ id: "cores", title: "DevFactory · Cores", icon: "Cpu", width: 520, height: 520, content: <L label="cores"><CoresApp /></L> }),
   },
   ingest: {
     id: "ingest",
     label: "Ingest",
     icon: "HardDrive",
-    spawn: () => ({ id: "ingest", title: "Ingestion Hub", icon: "HardDrive", width: 580, height: 640, content: <IngestApp /> }),
+    spawn: () => ({ id: "ingest", title: "Ingestion Hub", icon: "HardDrive", width: 580, height: 640, content: <L label="ingest"><IngestApp /></L> }),
   },
   settings: {
     id: "settings",
@@ -256,7 +374,7 @@ const SYSTEM_APPS: Record<string, DockItem> = {
         <div className="p-4 space-y-3 text-xs h-full flex flex-col items-center justify-center text-center">
           <div className="font-pixel text-sm tracking-widest" style={{ color: "var(--accent)" }}>★ ARENA</div>
           <p className="text-[color:var(--muted)] font-mono text-[11px]">
-            Battle royale opens in a new tab so 3 cohort lanes have room to race.
+            Battle royale opens in a new tab so multiple agent lanes have room to race.
           </p>
           <a href="/arena" target="_blank" rel="noreferrer" className="btn-pixel success" style={{ fontSize: 11, padding: "6px 12px" }}>
             ▶ OPEN ARENA
@@ -268,13 +386,17 @@ const SYSTEM_APPS: Record<string, DockItem> = {
 };
 
 export default function OSPage() {
-  const [booted, setBooted] = useState(false);
+  const [booted, setBooted] = useState(true);
   const [windows, setWindows] = useState<WState[]>([]);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [launchpadOpen, setLaunchpadOpen] = useState(false);
+  // Notification system · bridge toasts into persistent notif store and
+  // expose unread counter for the dock badge.
+  useNotifBridge();
+  const unreadNotifs = useUnreadCount();
   // Sticky-note dismissal persists across reloads — returning users don't
   // need to see the "how to use snap" cheat sheet every session.
   const [hintsDismissed, setHintsDismissed] = useState(false);
@@ -288,9 +410,17 @@ export default function OSPage() {
     try { localStorage.setItem("delos.hintsDismissed", "1"); } catch {}
   }
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const zCounter = useRef(10);
+  // Start above the dock's z=100 so a focused window always wins
+  // pointer hits over the dock icon strip. Previously focused windows
+  // only beat the dock after ~90 focus events, so a click on a BUILD
+  // button near the dock area routed to the dock icon (Identity)
+  // instead of the window. 2026-05-25 brutal-QA P0.
+  const zCounter = useRef(120);
   const spawnOffset = useRef(0);
-  const [now, setNow] = useState(new Date());
+  // Was `useState(new Date())` — SSR snapshot frozen at build, client
+  // rehydrates with a fresh Date → text mismatch → React error #418. Start
+  // null on both sides, populate after mount.
+  const [now, setNow] = useState<Date | null>(null);
   const [wallpaper] = useWallpaper();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_theme] = useTheme(); // apply theme attribute on mount
@@ -348,6 +478,7 @@ export default function OSPage() {
   }, [focusedId]);
 
   useEffect(() => {
+    setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -365,9 +496,38 @@ export default function OSPage() {
     setTimeout(() => setToasts((p) => p.filter((x) => x.id !== id)), 3600);
   }
 
+  // Clamp a spawn rect so the window fits inside the viewport · ensures the
+  // bottom-right resize handle is never below the dock or off-screen. Was
+  // a hard-to-debug user complaint: large clone windows (880×620) spawned
+  // at y=90 went past the visible area on 1568×662 viewports, so the SE
+  // resize handle was clipped and "resize felt broken".
+  function fitToViewport(rect: { x: number; y: number; width: number; height: number }) {
+    const TOP = 48;
+    const DOCK = 64;
+    const margin = 12;
+    // Use live window.innerWidth/Height · React state viewport may still
+    // be the initial 1600×900 default at the moment a spec window spawns
+    // (because the resize effect hasn't fired its first commit yet).
+    // Reading direct from the DOM avoids that race.
+    const vw = typeof window !== "undefined" ? window.innerWidth : viewport.width;
+    const vh = typeof window !== "undefined" ? window.innerHeight : viewport.height;
+    const maxW = Math.max(280, vw - margin * 2);
+    const maxH = Math.max(180, vh - TOP - DOCK - margin);
+    const w = Math.min(rect.width, maxW);
+    const h = Math.min(rect.height, maxH);
+    const x = Math.max(margin, Math.min(rect.x, vw - w - margin));
+    const y = Math.max(TOP + margin, Math.min(rect.y, vh - DOCK - h - margin));
+    return { x, y, width: w, height: h };
+  }
+
   function spawnSystemApp(key: string) {
     const tpl = SYSTEM_APPS[key];
     if (!tpl) return;
+    // Auto-dismiss tutorial sticky on first window open · QA report
+    // flagged the sticky as "unremovable" because new users opened apps
+    // before noticing the small X. Now opening any app dismisses it
+    // for good (localStorage persisted).
+    if (!hintsDismissed) dismissHints();
     setWindows((prev) => {
       const existing = prev.find((w) => w.id === tpl.id);
       zCounter.current += 1;
@@ -378,7 +538,8 @@ export default function OSPage() {
       const base = tpl.spawn();
       const offset = spawnOffset.current * 24;
       spawnOffset.current = (spawnOffset.current + 1) % 8;
-      const win: WState = { ...base, x: 80 + offset, y: 80 + offset, z: zCounter.current, refreshKey: 0 };
+      const fit = fitToViewport({ x: 80 + offset, y: 80 + offset, width: base.width, height: base.height });
+      const win: WState = { ...base, ...fit, z: zCounter.current, refreshKey: 0 };
       setFocusedId(win.id);
       return [...prev, win];
     });
@@ -386,35 +547,132 @@ export default function OSPage() {
   }
 
   function runDemoTour() {
-    // Hackathon narrative: Terminal (chaos) → Mission Control (recall memory) → Cohort (multi-agent)
-    const seq: Array<{ key: string; delay: number; toast?: string }> = [
-      { key: "terminal", delay: 0, toast: "★ tour 1/3 · TERMINAL — run with chaos" },
-      { key: "mission", delay: 1600, toast: "★ tour 2/3 · MISSION — see recalled memory" },
-      { key: "cohort", delay: 3200, toast: "★ tour 3/3 · COHORT — 3 LLMs race + merge" },
+    // Autonomous hackathon demo — one click drives the whole stack:
+    //   1. Open Del Assistant
+    //   2. Fire Gmail draft via MCP autonomous pattern
+    //   3. Fire Notion create-page via MCP autonomous pattern
+    //   4. Fire GitHub list via MCP autonomous pattern
+    //   5. Open VibeCode + build an investor CRM in place
+    //   6. Open Mission Control + recall pinned facts
+    // Each step narrates with a toast so the judge sees what fires when.
+    // Gmail + Notion gracefully degrade to "connect via Settings" if no
+    // OAuth, but the path proves out end-to-end.
+    type Step = { delay: number; toast: string; run: () => void };
+    const steps: Step[] = [
+      {
+        delay: 0,
+        toast: "★ demo 1/6 · DEL ASSISTANT — autonomous brain online",
+        run: () => spawnSystemApp("assistant"),
+      },
+      {
+        delay: 2200,
+        toast: "★ demo 2/6 · GMAIL MCP — drafting an email…",
+        run: () =>
+          emitIntent({
+            kind: "assistant.ask",
+            text: "draft email to judges@delrio.app about hackathon final demo recap",
+          }),
+      },
+      {
+        delay: 7000,
+        toast: "★ demo 3/6 · NOTION MCP — creating a recap page…",
+        run: () =>
+          emitIntent({
+            kind: "assistant.ask",
+            text: "create notion page titled DelOS Hackathon Demo Recap",
+          }),
+      },
+      {
+        delay: 11500,
+        toast: "★ demo 4/6 · GITHUB MCP — listing repositories…",
+        run: () =>
+          emitIntent({
+            kind: "assistant.ask",
+            text: "list my github repos",
+          }),
+      },
+      {
+        delay: 16500,
+        toast: "★ demo 5/6 · VIBECODE — building an investor CRM…",
+        run: () => {
+          spawnSystemApp("builder");
+          setTimeout(
+            () =>
+              emitIntent({
+                kind: "builder.build",
+                prompt:
+                  "investor CRM platform with deal pipeline, portfolio tracking, and follow-up reminders",
+              }),
+            300,
+          );
+        },
+      },
+      {
+        delay: 22000,
+        toast: "★ demo 6/6 · MISSION CONTROL — recalling pinned memory",
+        run: () => {
+          spawnSystemApp("mission");
+          setTimeout(
+            () =>
+              emitIntent({
+                kind: "memory.search",
+                query: "demo recap and investor CRM",
+              }),
+            300,
+          );
+        },
+      },
     ];
-    for (const s of seq) {
+    for (const s of steps) {
       setTimeout(() => {
-        spawnSystemApp(s.key);
-        if (s.toast) pushToast(s.toast, "ok");
+        s.run();
+        pushToast(s.toast, "ok");
       }, s.delay);
     }
   }
 
   function spawnSpecWindow(spec: AppSpec) {
     setWindows((prev) => {
+      // Refine detection · if an existing window already hosts this
+      // spec.id, replace its content IN PLACE rather than spawning a
+      // duplicate window. Was the 2026-05-25 brutal-QA "refine builds
+      // different tab" P0 — every refine call dispatched spawn-spec
+      // again and we minted a fresh `spec-<id>-<ts>` window each time.
+      const prefix = `spec-${spec.id}-`;
+      const candidates = prev.filter((w) => w.id.startsWith(prefix));
+      const existing = candidates[candidates.length - 1];
+      if (existing) {
+        zCounter.current += 1;
+        const content = makeSpecContent(spec, existing.id);
+        pushToast(`✓ ${spec.name} refined`, "ok");
+        setFocusedId(existing.id);
+        return prev.map((w) =>
+          w.id === existing.id
+            ? {
+                ...w,
+                title: spec.name,
+                icon: spec.icon,
+                content,
+                z: zCounter.current,
+                minimized: false,
+                refreshKey: (w.refreshKey ?? 0) + 1,
+              }
+            : w,
+        );
+      }
       zCounter.current += 1;
       const winId = `spec-${spec.id}-${Date.now()}`;
       const offset = spawnOffset.current * 24;
       spawnOffset.current = (spawnOffset.current + 1) % 8;
       const content = makeSpecContent(spec, winId);
+      // Clamp clone spec windows (often 880×640) to the actual viewport so
+      // the bottom-right resize handle is reachable on all screen sizes.
+      const fit = fitToViewport({ x: 140 + offset, y: 90 + offset, width: spec.width, height: spec.height });
       const win: WState = {
         id: winId,
         title: spec.name,
         icon: spec.icon,
-        width: spec.width,
-        height: spec.height,
-        x: 140 + offset,
-        y: 90 + offset,
+        ...fit,
         z: zCounter.current,
         content,
         refreshKey: 0,
@@ -422,7 +680,12 @@ export default function OSPage() {
       setFocusedId(winId);
       return [...prev, win];
     });
-    pushToast(`★ ${spec.name} installed`, "ok");
+    // Toast is emitted from inside the setter for refine; only show the
+    // "installed" toast when we actually spawn a NEW window. Tracked via
+    // a flag below.
+    if (!windows.some((w) => w.id.startsWith(`spec-${spec.id}-`))) {
+      pushToast(`★ ${spec.name} installed`, "ok");
+    }
   }
 
   function makeSpecContent(spec: AppSpec, winId: string) {
@@ -604,24 +867,33 @@ export default function OSPage() {
       const spec = (e as CustomEvent).detail as AppSpec;
       spawnSpecWindow(spec);
     }
-    function onVoiceAction(e: Event) {
-      const a = (e as CustomEvent<VoiceAction>).detail;
-      if (!a) return;
-      switch (a.intent) {
+    function fireVoiceStep(step: { intent: VoiceAction["intent"]; app?: string; payload?: string }) {
+      switch (step.intent) {
         case "open_app":
-          if (a.app && SYSTEM_APPS[a.app]) spawnSystemApp(a.app);
+          if (step.app && SYSTEM_APPS[step.app]) spawnSystemApp(step.app);
+          // When voice routes a Gmail/Notion/GitHub/GDrive MCP request
+          // to the assistant, pipe the transcript into DelAssistant so
+          // its client-side tryMcpAction fires the actual MCP call.
+          // Was a 2026-05-25 judge finding · voice "draft email" opened
+          // the assistant window but never forwarded the request body.
+          if (step.app === "assistant" && step.payload) {
+            setTimeout(() => emitIntent({ kind: "assistant.ask", text: step.payload! }), 250);
+          }
           break;
         case "run_mission":
           spawnSystemApp("terminal");
-          if (a.payload) setTimeout(() => emitIntent({ kind: "terminal.run", goal: a.payload! }), 250);
+          if (step.payload) setTimeout(() => emitIntent({ kind: "terminal.run", goal: step.payload! }), 250);
           break;
         case "build_app":
           spawnSystemApp("builder");
-          if (a.payload) setTimeout(() => emitIntent({ kind: "builder.build", prompt: a.payload! }), 250);
+          if (step.payload) setTimeout(() => emitIntent({ kind: "builder.build", prompt: step.payload! }), 250);
           break;
         case "run_cohort":
-          spawnSystemApp("cohort");
-          if (a.payload) setTimeout(() => emitIntent({ kind: "cohort.run", goal: a.payload! }), 250);
+          // Cohort UI removed · reroute to assistant so the user still
+          // gets a multi-step answer. Assistant runs the same query via
+          // its autonomous pipeline + MCP tools.
+          spawnSystemApp("assistant");
+          if (step.payload) setTimeout(() => emitIntent({ kind: "assistant.ask", text: step.payload! }), 250);
           break;
         case "recall_memory":
           spawnSystemApp("mission");
@@ -635,13 +907,28 @@ export default function OSPage() {
           if (focusedId) closeWin(focusedId);
           break;
         case "navigate":
-          if (a.payload) window.location.href = a.payload;
+          if (step.payload) window.location.href = step.payload;
           break;
         case "answer":
         case "unknown":
-          // VoiceApp already spoke the reply; nothing to do here.
+        case "compound":
+          // No-op for atomic steps; compound is handled by chain unrolling.
           break;
       }
+    }
+    function onVoiceAction(e: Event) {
+      const a = (e as CustomEvent<VoiceAction>).detail;
+      if (!a) return;
+      // Compound chain — fire each step with a small stagger so window
+      // mounts settle between actions. Caps at 4 steps (server-side cap
+      // is the same) so a runaway chain can't spawn 20 windows.
+      if (a.intent === "compound" && Array.isArray(a.chain) && a.chain.length > 0) {
+        a.chain.slice(0, 4).forEach((step, i) => {
+          setTimeout(() => fireVoiceStep(step), i * 350);
+        });
+        return;
+      }
+      fireVoiceStep({ intent: a.intent, app: a.app, payload: a.payload });
     }
     function onTileAll() { gridArrange(); }
     function onCascadeAll() { cascadeArrange(); }
@@ -675,16 +962,18 @@ export default function OSPage() {
   // that "what does this app do" is answered by its neighbors.
   const dockOrder = useMemo(
     () => [
-      // AI agents (6)
-      "assistant", "identity", "cohort", "arena", "voice", "cowork",
+      // AI agents (4) · removed cohort + cowork — assistant absorbs autonomous
+      // routing via MCP tool calls (Gmail / Notion / GitHub / GDrive) and the
+      // cohort race UI no longer ships as a top-level surface.
+      "assistant", "identity", "arena", "voice",
       // Builders (4)
       "builder", "codebase", "cores", "mission",
-      // Tools (6)
-      "ingest", "terminal", "browser", "marketplace", "oss", "analytics",
+      // Tools (7) · memoryBrowser surfaces save-state across runs
+      "memoryBrowser", "notifications", "schedule", "widgets", "ingest", "terminal", "browser", "marketplace", "oss", "analytics",
       // Files & notes (5)
       "files", "notes", "calendar", "calc", "sysinfo",
       // Games (6)
-      "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom",
+      "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom", "bourbon", "neon",
       // System (2)
       "settings", "about",
     ],
@@ -761,6 +1050,30 @@ export default function OSPage() {
         e.preventDefault();
         cascadeArrange();
       }
+      // Cycle through open windows · Cmd/Ctrl+Tab (forward) +
+      // Cmd/Ctrl+Shift+Tab (backward). QA report 2026-05-25 flagged
+      // "no taskbar or alt-tab equivalent". Focus the next visible
+      // (non-minimized) window in z-order so multi-window flows stay
+      // navigable from keyboard.
+      if (isMod && e.key === "Tab") {
+        e.preventDefault();
+        setWindows((wins) => {
+          const visible = wins.filter((w) => !w.minimized);
+          if (visible.length === 0) return wins;
+          // Sort by z to define a stable cycle order.
+          const ordered = [...visible].sort((a, b) => a.z - b.z);
+          const currentIdx = ordered.findIndex((w) => w.id === focusedId);
+          const nextIdx = e.shiftKey
+            ? (currentIdx <= 0 ? ordered.length - 1 : currentIdx - 1)
+            : (currentIdx === -1 || currentIdx === ordered.length - 1 ? 0 : currentIdx + 1);
+          const next = ordered[nextIdx];
+          if (!next) return wins;
+          zCounter.current += 1;
+          const newZ = zCounter.current;
+          setFocusedId(next.id);
+          return wins.map((w) => (w.id === next.id ? { ...w, z: newZ, minimized: false } : w));
+        });
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -777,8 +1090,8 @@ export default function OSPage() {
       run: () => spawnSystemApp(key),
     }));
     const actions: Command[] = [
-      { id: "build-app", label: "Build new app with AI", hint: "open App Builder", icon: "Sparkles", section: "Action", run: () => spawnSystemApp("builder") },
-      { id: "cohort-run", label: "Run cohort council", hint: "compare models in parallel", icon: "Users", section: "Action", run: () => spawnSystemApp("cohort") },
+      { id: "build-app", label: "Open VibeCode", hint: "vibe-code an app", icon: "Sparkles", section: "Action", run: () => spawnSystemApp("builder") },
+      { id: "assistant-ask", label: "Ask Del Assistant", hint: "draft email · create Notion page · query GitHub", icon: "Sparkles", section: "Action", run: () => spawnSystemApp("assistant") },
       {
         id: "wallpaper-cycle",
         label: "Cycle wallpaper",
@@ -905,10 +1218,32 @@ export default function OSPage() {
                 ▶ DEMO
               </button>
               <CounterStrip />
+              {/* Command palette opener — was floating top-right, now lives
+                  inline so it stops fighting with the OPEN counter + clock
+                  on narrow viewports. Keyboard shortcut unchanged (⌘K). */}
+              <button
+                onClick={() => setPaletteOpen(true)}
+                className="pill pill-muted inline-flex items-center gap-1"
+                title="Command palette (⌘K)"
+                aria-label="Open command palette"
+                style={{ cursor: "pointer", fontSize: 10 }}
+              >
+                <Icons.Command size={10} /> K
+              </button>
               <span data-tour="hydradb" className="hidden sm:inline-flex pill pill-ok"><span className="w-2 h-2 inline-block accent-pulse" style={{ background: "var(--success)" }} /> HYDRADB</span>
+              <button
+                onClick={() => spawnSystemApp("notifications")}
+                className="pill inline-flex items-center gap-1"
+                style={{ background: unreadNotifs > 0 ? "var(--accent)" : "var(--surface)", color: unreadNotifs > 0 ? "var(--on-accent)" : "var(--fg)", border: "1px solid var(--surface-2)", cursor: "pointer", fontSize: 10 }}
+                title={`${unreadNotifs} unread notifications`}
+                aria-label="Notifications"
+              >
+                <Icons.Bell size={10} />
+                {unreadNotifs > 0 && <span style={{ fontWeight: 700 }}>{unreadNotifs}</span>}
+              </button>
               <span className="pill pill-info">{windows.filter((w) => !w.minimized).length} OPEN</span>
-              <span className="font-pixel text-sm tracking-widest" style={{ color: "var(--fg)" }}>
-                {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              <span suppressHydrationWarning className="font-pixel text-sm tracking-widest" style={{ color: "var(--fg)" }}>
+                {now ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "--:--:--"}
               </span>
               <Link href="/" data-tour="exit" className="pill pill-muted" style={{ textDecoration: "none" }}>EXIT</Link>
             </div>
@@ -949,7 +1284,7 @@ export default function OSPage() {
           </main>
 
           <div data-tour="agent-pulse" className="contents">
-            <AgentPulse onOpen={() => spawnSystemApp("cohort")} />
+            <AgentPulse onOpen={() => spawnSystemApp("assistant")} />
           </div>
 
           {/* Guided tour overlay (judges + first-time users) */}
@@ -1000,7 +1335,7 @@ export default function OSPage() {
           )}
 
           {ctxMenu && (
-            <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} onPick={(action) => {
+            <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} onPick={async (action) => {
               if (action === "terminal") spawnSystemApp("terminal");
               else if (action === "builder") spawnSystemApp("builder");
               else if (action === "notes") spawnSystemApp("notes");
@@ -1018,20 +1353,77 @@ export default function OSPage() {
                 pushToast("all closed", "info");
               } else if (action === "palette") {
                 setPaletteOpen(true);
+              } else if (action === "copy") {
+                // Use document.execCommand("copy") first — it correctly grabs
+                // selected text from the currently-focused input/textarea
+                // without needing clipboard permission. Falls back to
+                // navigator.clipboard.writeText with the selection string.
+                try {
+                  const sel = String(window.getSelection() ?? "");
+                  const ok = document.execCommand("copy");
+                  if (!ok && sel && navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(sel);
+                  }
+                  pushToast(sel ? `copied ${sel.slice(0, 24)}` : "copy", "info");
+                } catch (e) {
+                  pushToast(`copy failed: ${(e as Error).message}`, "bad");
+                }
+              } else if (action === "cut") {
+                try {
+                  const sel = String(window.getSelection() ?? "");
+                  document.execCommand("cut");
+                  if (sel && navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(sel);
+                  }
+                  pushToast(sel ? `cut ${sel.slice(0, 24)}` : "cut", "info");
+                } catch (e) {
+                  pushToast(`cut failed: ${(e as Error).message}`, "bad");
+                }
+              } else if (action === "paste") {
+                // execCommand("paste") is widely blocked for security; the
+                // modern path is navigator.clipboard.readText. Dispatching
+                // a `paste` event into the focused element lets controlled
+                // inputs (React-controlled textarea/input) receive the
+                // text without bypassing their onChange handler.
+                try {
+                  const txt = await navigator.clipboard.readText();
+                  const el = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+                  if (el && ("value" in el)) {
+                    const start = (el as HTMLInputElement).selectionStart ?? el.value.length;
+                    const end = (el as HTMLInputElement).selectionEnd ?? el.value.length;
+                    const next = el.value.slice(0, start) + txt + el.value.slice(end);
+                    const setter = Object.getOwnPropertyDescriptor(
+                      el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+                      "value",
+                    )?.set;
+                    if (setter) {
+                      setter.call(el, next);
+                      el.dispatchEvent(new Event("input", { bubbles: true }));
+                    } else {
+                      el.value = next;
+                    }
+                    pushToast(`pasted ${txt.length} chars`, "info");
+                  } else {
+                    pushToast(txt ? "clipboard ready · click an input to paste" : "clipboard empty", "warn");
+                  }
+                } catch (e) {
+                  pushToast(`paste denied: ${(e as Error).message.slice(0, 40)}`, "bad");
+                }
+              } else if (action === "select-all") {
+                try {
+                  document.execCommand("selectAll");
+                  pushToast("select all", "info");
+                } catch (e) {
+                  pushToast(`select failed: ${(e as Error).message}`, "bad");
+                }
               }
               setCtxMenu(null);
             }} />
           )}
 
-          <button
-            onClick={() => setPaletteOpen(true)}
-            className="fixed top-14 right-3 z-[80] pill pill-muted hidden sm:flex"
-            style={{ cursor: "pointer", fontSize: 10 }}
-            aria-label="Open command palette"
-            title="Cmd+K"
-          >
-            <Icons.Command size={10} /> K
-          </button>
+          {/* The floating ⌘K button used to live here (fixed top-14 right-3).
+              Now lives in the header chip row to avoid overlap with desktop
+              widgets. */}
         </>
       )}
     </div>
@@ -1039,15 +1431,20 @@ export default function OSPage() {
 }
 
 function ContextMenu({ x, y, onClose, onPick }: { x: number; y: number; onClose: () => void; onPick: (action: string) => void }) {
-  const items: Array<{ action: string; label: string; icon: string; section?: string }> = [
-    { action: "terminal", label: "New Terminal", icon: "TerminalSquare", section: "New" },
-    { action: "builder", label: "New Agent App", icon: "Sparkles", section: "New" },
-    { action: "notes", label: "New Notes", icon: "BookOpen", section: "New" },
-    { action: "palette", label: "Command Palette ⌘K", icon: "Command", section: "Tools" },
-    { action: "wallpaper", label: "Cycle Wallpaper", icon: "Image", section: "View" },
+  const items: Array<{ action: string; label: string; icon: string; section?: string; hint?: string }> = [
+    // Clipboard ops at top · most-used and matches native OS menu order.
+    { action: "copy",       label: "Copy",          icon: "Copy",         section: "Edit", hint: "⌘C" },
+    { action: "cut",        label: "Cut",           icon: "Scissors",     section: "Edit", hint: "⌘X" },
+    { action: "paste",      label: "Paste",         icon: "Clipboard",    section: "Edit", hint: "⌘V" },
+    { action: "select-all", label: "Select All",    icon: "SquareDashedMousePointer", section: "Edit", hint: "⌘A" },
+    { action: "terminal",   label: "New Terminal",  icon: "TerminalSquare", section: "New" },
+    { action: "builder",    label: "New Agent App", icon: "Sparkles",     section: "New" },
+    { action: "notes",      label: "New Notes",     icon: "BookOpen",     section: "New" },
+    { action: "palette",    label: "Command Palette", icon: "Command",    section: "Tools", hint: "⌘K" },
+    { action: "wallpaper",  label: "Cycle Wallpaper", icon: "Image",      section: "View" },
     { action: "refresh-all", label: "Refresh All Windows", icon: "RotateCw", section: "View" },
-    { action: "close-all", label: "Close All Windows", icon: "XCircle", section: "View" },
-    { action: "settings", label: "Settings", icon: "Settings", section: "System" },
+    { action: "close-all",  label: "Close All Windows", icon: "XCircle",  section: "View" },
+    { action: "settings",   label: "Settings",      icon: "Settings",     section: "System" },
   ];
   const All = Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>;
   // Adjust position to stay in bounds
@@ -1074,7 +1471,10 @@ function ContextMenu({ x, y, onClose, onPick }: { x: number; y: number; onClose:
                 style={{ color: "var(--fg)" }}
               >
                 <Cmp size={12} color="var(--accent)" />
-                <span>{it.label}</span>
+                <span style={{ flex: 1 }}>{it.label}</span>
+                {it.hint && (
+                  <span style={{ fontSize: 9, color: "var(--muted)", letterSpacing: "0.04em" }}>{it.hint}</span>
+                )}
               </button>
             </div>
           );
@@ -1131,19 +1531,17 @@ function WelcomeMat({
           className="font-mono text-[11px] sm:text-xs mt-3 max-w-md mx-auto wallpaper-text-shadow wall-readable"
           style={{ padding: "6px 12px", borderRadius: 4, display: "inline-block" }}
         >
-          browser-OS · agents build the apps · ⌘K palette · right-click desktop · drag windows · double-click title to max
+          browser-OS · agents build apps · ⌘K palette · drag windows
         </p>
         <div className="mt-5 flex justify-center gap-2 flex-wrap">
           <button className="btn-pixel success" onClick={onDemo} title="Auto-launch a guided 4-app tour">▶ DEMO TOUR</button>
-          <button className="btn-pixel" onClick={() => onLaunch("builder")}>★ BUILD APP</button>
-          <button className="btn-pixel ghost" onClick={() => onLaunch("cohort")}>COHORT</button>
+          <button className="btn-pixel" style={{ background: "var(--accent)", color: "var(--on-accent)" }} onClick={() => onLaunch("builder")}>★ BUILD APP</button>
+          <button className="btn-pixel ghost" onClick={() => onLaunch("assistant")}>ASSISTANT</button>
           <button className="btn-pixel ghost" onClick={() => onLaunch("voice")}>VOICE</button>
-          <button className="btn-pixel ghost" onClick={() => onLaunch("doom")}>DEL DOOM</button>
-          <button className="btn-pixel ghost" onClick={() => onLaunch("terminal")}>TERMINAL</button>
         </div>
 
         <div className="mt-8 grid grid-cols-4 sm:grid-cols-6 gap-2 sm:gap-3 mx-auto">
-          {featured.map((k) => {
+          {featured.slice(0, 8).map((k) => {
             const a = apps[k];
             const Cmp = SLEEK[k] ?? All[a.icon as string] ?? Icons.Box;
             return (
@@ -1199,11 +1597,11 @@ function Launchpad({
   const list = order.filter((k) => apps[k].label.toLowerCase().includes(q.toLowerCase()));
   // Group into categories
   const groups: Array<{ label: string; ids: string[] }> = [
-    { label: "AI AGENTS",      ids: ["assistant", "identity", "cohort", "arena", "voice", "cowork"] },
+    { label: "AI AGENTS",      ids: ["assistant", "identity", "arena", "voice"] },
     { label: "BUILDERS",       ids: ["builder", "codebase", "cores", "mission"] },
-    { label: "TOOLS",          ids: ["ingest", "terminal", "browser", "marketplace", "analytics"] },
+    { label: "TOOLS",          ids: ["memoryBrowser", "notifications", "schedule", "widgets", "ingest", "terminal", "browser", "marketplace", "analytics"] },
     { label: "FILES & NOTES",  ids: ["files", "notes", "calendar", "calc", "sysinfo"] },
-    { label: "GAMES",          ids: ["snake", "tictactoe", "memory", "minesweeper", "game2048", "doom"] },
+    { label: "GAMES",          ids: ["bourbon", "neon", "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom"] },
     { label: "SYSTEM",         ids: ["settings", "about"] },
   ];
   return (
@@ -1340,8 +1738,25 @@ function HintSticky({
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] tracking-widest" style={{ color: "#7a6500" }}>★ STICKY · HOW TO USE</span>
-        <button onClick={onDismiss} aria-label="Dismiss hints" style={{ color: "#1a1a26", cursor: "pointer" }}>
-          <Icons.X size={12} />
+        <button
+          onClick={onDismiss}
+          aria-label="Dismiss hints"
+          title="Dismiss this tutorial sticky · won't show again"
+          style={{
+            background: "#1a1a26",
+            color: "#fbc531",
+            padding: "3px 6px",
+            cursor: "pointer",
+            border: "none",
+            fontSize: 11,
+            fontWeight: 700,
+            lineHeight: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <Icons.X size={11} /> CLOSE
         </button>
       </div>
       <ul className="text-[10px] space-y-1 leading-snug" style={{ color: "#2a2200" }}>

@@ -34,6 +34,9 @@ export const WALLPAPERS: Array<{ id: string; label: string; css: string; animate
   // Live aesthetic wallpapers — pure CSS animations defined in globals.css.
   // Use liveClass to opt into a named GPU-cheap loop instead of a static
   // background. Each respects prefers-reduced-motion automatically.
+  // PixelMesh is theme-agnostic (binds to --accent + --bg via color-mix)
+  // so it slots into BOTH dark and light without a manual swap. Default.
+  { id: "live-pixelmesh", label: "Pixel Mesh (live)",   css: "", liveClass: "wp-live-pixelmesh", animated: true },
   { id: "live-aurora",    label: "Aurora (live)",       css: "", liveClass: "wp-live-aurora",    animated: true, pairsWith: "dark" },
   { id: "live-plasma",    label: "Plasma (live)",       css: "", liveClass: "wp-live-plasma",    animated: true, pairsWith: "dark" },
   { id: "live-cybergrid", label: "Cyber Grid (live)",   css: "", liveClass: "wp-live-cybergrid", animated: true, pairsWith: "dark" },

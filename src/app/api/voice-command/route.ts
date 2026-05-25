@@ -4,6 +4,7 @@ import { generateJsonWithFallback } from "@/lib/agents/jsonGen";
 import { models, withModels, type ModelOverrides, type ModelKey } from "@/lib/llm";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { parseVoiceLocal } from "@/lib/voiceParser";
+import { chunkVoice } from "@/lib/voice/chunker";
 
 import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
@@ -31,39 +32,51 @@ const modelKey = z
   ])
   .optional();
 
-// Accept both `transcript` (canonical) and `text` (alias for raw STT/ASR pipelines).
+// B12 · accept canonical `input`, plus legacy `transcript` and `text`.
 const bodySchema = z
   .object({
+    input: z.string().min(1).max(800).optional(),
     transcript: z.string().min(1).max(800).optional(),
     text: z.string().min(1).max(800).optional(),
+    tenantId: z.string().min(1).max(120).optional(),
     models: z.object({ planner: modelKey, executor: modelKey, critic: modelKey }).partial().optional(),
   })
-  .refine((d) => !!(d.transcript || d.text), {
-    message: "either 'transcript' or 'text' is required",
+  .refine((d) => !!(d.input || d.transcript || d.text), {
+    message: "either 'input', 'transcript', or 'text' is required",
   });
 
+const intentEnum = z.enum([
+  "open_app",
+  "run_mission",
+  "build_app",
+  "run_cohort",
+  "recall_memory",
+  "change_wallpaper",
+  "close_window",
+  "navigate",
+  "answer",
+  "compound",
+  "unknown",
+]);
+const appEnum = z.enum([
+  "assistant", "identity", "ingest", "terminal", "browser", "builder",
+  "cohort", "cores", "arena", "voice", "cowork", "mission", "marketplace",
+  "oss", "analytics", "files", "notes", "calendar", "calc", "sysinfo",
+  "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom",
+  "settings", "about", "claude", "chatgpt", "perplexity",
+]);
 const actionSchema = z.object({
-  intent: z.enum([
-    "open_app",
-    "run_mission",
-    "build_app",
-    "run_cohort",
-    "recall_memory",
-    "change_wallpaper",
-    "close_window",
-    "navigate",
-    "answer",
-    "unknown",
-  ]),
-  app: z.enum([
-    "assistant", "identity", "ingest", "terminal", "browser", "builder",
-    "cohort", "cores", "arena", "voice", "cowork", "mission", "marketplace",
-    "oss", "analytics", "files", "notes", "calendar", "calc", "sysinfo",
-    "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom",
-    "settings", "about", "claude", "chatgpt", "perplexity",
-  ]).optional(),
+  intent: intentEnum,
+  app: appEnum.optional(),
   payload: z.string().max(800).optional(),
   reply: z.string().min(1).max(400),
+  // Optional chain for compound intents — emitted by the deterministic
+  // parser when the user joins two actions with "and"/"then". Each step
+  // is fired in order client-side.
+  chain: z
+    .array(z.object({ intent: intentEnum, app: appEnum.optional(), payload: z.string().max(800).optional() }))
+    .max(4)
+    .optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -79,7 +92,13 @@ export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return zodErr(parsed.error);
 
-  const transcript = parsed.data.transcript ?? parsed.data.text!;
+  const transcript = parsed.data.input ?? parsed.data.transcript ?? parsed.data.text!;
+
+  // B11 · multi-intent chunker. If the transcript splits into ≥2 chunks,
+  // expose them as `intents[]` alongside the primary action so the executor
+  // (or external caller) can fan out across compound voice commands.
+  const intents = chunkVoice(transcript);
+  const compound = intents.length >= 2;
 
   // ─── Fast path · deterministic regex parser ──────────────────────────────
   // Covers ~90% of voice intents (open / build / cohort / math / greetings /
@@ -90,7 +109,7 @@ export async function POST(req: NextRequest) {
   if (!forceLLM) {
     const local = parseVoiceLocal(transcript);
     if (local) {
-      return Response.json({ ...local, source: "local" });
+      return Response.json({ ...local, source: "local", intents, compound });
     }
   }
 
@@ -107,7 +126,7 @@ Map this to ONE action. Available intents:
 - open_app: launch a system app. payload = goal/prompt to pre-fill if user gave one.
   app catalog (match phonetically + by purpose):
    • assistant — Del Assistant chat ("ask the assistant", "open del", "open chat")
-   • identity — JarvisOS profile ("identity", "my profile", "who am I")
+   • identity — DelOS profile ("identity", "my profile", "who am I")
    • ingest — Desktop ingest ("ingest", "upload knowledge", "add to memory")
    • terminal — DelOS terminal ("terminal", "run command")
    • browser — mini browser ("browser", "browse")
@@ -191,7 +210,7 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
         setTimeout(() => reject(new Error("voice_command_timeout")), 8_000),
       ),
     ]);
-    return Response.json({ ...(obj as object), source: "llm" });
+    return Response.json({ ...(obj as object), source: "llm", intents, compound });
   } catch (e) {
     // Voice mis-classification should NEVER 500 the client — the mic loop
     // depends on a sane fallback every time. Always return a 200 with an
@@ -206,6 +225,8 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
         ? "Slow down — voice agent is rate-limited. Try again in a minute."
         : "I didn't catch that — try again with a clearer command.",
       hint: msg.slice(0, 80),
+      intents,
+      compound,
     });
   }
 }

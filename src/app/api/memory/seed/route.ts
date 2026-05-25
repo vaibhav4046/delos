@@ -61,8 +61,31 @@ export async function POST(req: NextRequest) {
     );
   }
   // BOLA fix (QA report BUG-1) — tenantId comes from session, never body.
-  // Previously any caller could seed memory under any tenantId.
-  const { tenantId } = await resolveTenant(req);
+  // Exception: reserved test prefixes (qa_/demo_/test_/judge_/hack_) are
+  // honored from body so QA reruns can isolate scope without an account.
+  // resolveTenant enforces the regex; arbitrary tenantIds are rejected.
+  let bodyTenantId: string | undefined;
+  try {
+    const body = await req.clone().json().catch(() => null);
+    if (body && typeof body.tenantId === "string") bodyTenantId = body.tenantId;
+  } catch {}
+  const { tenantId } = await resolveTenant(req, { bodyTenantId });
+  // Hard-block seeding into a regular user tenant. Was polluting
+  // anon_*/account tenants with the demo graph so the user's actual
+  // pinned facts got drowned in seed text (2026-05-25 brutal-QA P0:
+  // "Memory not trustworthy — recall returned seeded demo memories,
+  // not my facts"). Only demo/QA/judge/hack/test scopes accept seeds.
+  if (!/^(demo|qa|test|judge|hack)_/i.test(tenantId)) {
+    return Response.json(
+      {
+        ok: false,
+        error:
+          "Seed endpoint refuses to write into a user tenant. Pass tenantId starting with demo_/qa_/test_/judge_/hack_ to scope the seeds.",
+        tenantId,
+      },
+      { status: 403 },
+    );
+  }
   await ensureTenant(tenantId);
   const added: string[] = [];
   const failed: string[] = [];

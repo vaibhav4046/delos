@@ -44,7 +44,14 @@ export async function POST(req: NextRequest) {
       { status: 429, headers: lim.headers },
     );
   }
-  const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
+  // B12 · accept `input` (canonical) or legacy `prompt`.
+  const rawBody = await req.json().catch(() => ({}));
+  const normalized = (() => {
+    const obj = rawBody && typeof rawBody === "object" ? (rawBody as Record<string, unknown>) : {};
+    if (typeof obj.input === "string" && !obj.prompt) obj.prompt = obj.input;
+    return obj;
+  })();
+  const parsed = bodySchema.safeParse(normalized);
   if (!parsed.success) {
     return zodErr(parsed.error);
   }
@@ -56,8 +63,25 @@ export async function POST(req: NextRequest) {
       ? `You are DelOS Quick Agent. Apply the user identity profile to EVERY output (tone, format, banned terms).\n\n${parsed.data.identity}\n\nReply in 1-4 sentences. No filler. No 'I think', no caveats.`
       : undefined;
     const text = await withModels(overrides, () => withTemperature(parsed.data.temperature, () => runQuickAgent({ prompt: parsed.data.prompt, systemOverride: sysOverride })));
-    return Response.json({ text });
+    // B16 · truthful counter headers. Approximate from char-counts since
+    // runQuickAgent doesn't surface model usage directly. Conservative
+    // tokens-per-char of 4. Better than zero so the top bar advances.
+    const tokIn = Math.max(1, Math.ceil(parsed.data.prompt.length / 4));
+    const tokOut = Math.max(1, Math.ceil((text ?? "").length / 4));
+    return new Response(JSON.stringify({ text }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tok-In": String(tokIn),
+        "X-Tok-Out": String(tokOut),
+        "X-Cost-Usd": String((tokIn + tokOut) * 0.000001),
+      },
+    });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
+}
+
+export async function GET() {
+  return Response.json({ error: "method_not_allowed" }, { status: 405 });
 }

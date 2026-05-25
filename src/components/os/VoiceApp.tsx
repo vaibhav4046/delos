@@ -17,6 +17,7 @@ import { getModelOverrides } from "@/lib/useModelOverrides";
 import { getTenantId } from "@/lib/useTenant";
 import { requiresApproval } from "@/lib/skillManifest";
 import { requestApproval } from "@/components/os/ApprovalGate";
+import { enhanceBuildPrompt } from "@/lib/appPromptEnhancer";
 
 // Voice agent — Claude-style premium voice mode.
 //   - Big circular mic at the bottom; tap once to start, tap to stop
@@ -214,16 +215,22 @@ export function VoiceApp() {
   async function executeVoiceIntent(action: VoiceAction) {
     const payload = action.payload ?? "";
     switch (action.intent) {
+      case "compound":
+        if (Array.isArray(action.chain)) {
+          for (const step of action.chain.slice(0, 4)) {
+            await executeVoiceIntent({ ...step, reply: "" } as VoiceAction);
+            await new Promise((r) => setTimeout(r, 350));
+          }
+        }
+        break;
       case "build_app": {
-        // "Clone", "real", "full", "saas", "multi-page" → real multi-file
-        // codegen (Codebase app). Otherwise AppSpec mini-app (App Builder).
-        const isComplex = /(clone|real app|full app|saas|multi[- ]page|production|web app|next\.?js|landing page|dashboard|with .* and .* and)/i.test(payload);
-        const targetApp = isComplex ? "codebase" : "builder";
-        const intentKind = isComplex ? "codebase.build" : "builder.build";
-        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: targetApp } }));
+        // Route every spoken build through VibeCode. VibeCode then auto-promotes
+        // serious prompts to the streamed multi-file DelCode path.
+        const enhanced = enhanceBuildPrompt(payload).slice(0, 1500);
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "builder" } }));
         // Wait so the window mounts + onIntent listener is alive before firing.
         await new Promise((r) => setTimeout(r, 400));
-        window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: intentKind, prompt: payload } }));
+        window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "builder.build", prompt: enhanced } }));
         break;
       }
       case "run_cohort":
@@ -265,6 +272,85 @@ export function VoiceApp() {
         break;
       case "navigate":
         if (payload) window.location.href = payload;
+        break;
+      // N5 · voice-driven reminders + schedules + PDF + connector flows
+      case "set_reminder": {
+        // payload is JSON { text, minutes } from voice parser
+        let text = "";
+        let minutes = 30;
+        try {
+          const parsed = JSON.parse(payload);
+          text = typeof parsed.text === "string" ? parsed.text : payload;
+          minutes = typeof parsed.minutes === "number" ? parsed.minutes : 30;
+        } catch {
+          text = payload;
+        }
+        // Persist via localStorage (same shape WidgetsApp reads)
+        try {
+          const raw = localStorage.getItem("delos.reminders.v1");
+          const list = raw ? JSON.parse(raw) : [];
+          const r = { id: `rm-${Date.now()}`, text, dueAt: Date.now() + minutes * 60_000, done: false };
+          localStorage.setItem("delos.reminders.v1", JSON.stringify([r, ...list]));
+        } catch {}
+        // Surface as a notification immediately so the user sees feedback
+        window.dispatchEvent(new CustomEvent("toast", { detail: { text: `Reminder set · ${text} in ${minutes}m`, tone: "ok" } }));
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "widgets" } }));
+        break;
+      }
+      case "create_event": {
+        // Call /api/calendar/events with the spoken text · server parses time.
+        try {
+          const r = await fetch("/api/calendar/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: payload.slice(0, 120), when: payload, source: "voice" }),
+          });
+          const j = (await r.json().catch(() => ({}))) as { event?: { startAt?: number; title?: string } };
+          const when = j.event?.startAt ? new Date(j.event.startAt).toLocaleString() : "later";
+          window.dispatchEvent(new CustomEvent("toast", { detail: { text: `📅 ${j.event?.title ?? "Event"} · ${when}`, tone: "ok" } }));
+        } catch {
+          window.dispatchEvent(new CustomEvent("toast", { detail: { text: "Calendar create failed", tone: "bad" } }));
+        }
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "calendar" } }));
+        break;
+      }
+      case "schedule_action": {
+        // Pop the schedule app; user picks template. Future: parse "daily X" → auto-create.
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "schedule" } }));
+        // Auto-create best-fit template if voice mentioned one
+        const lower = payload.toLowerCase();
+        let kind: "draft_email" | "read_email" | "notion_page" | "notify" | "run_mission" | "cohort" = "notify";
+        let everyMs = 86_400_000; // daily default
+        if (/email|inbox|gmail/.test(lower)) kind = "read_email";
+        else if (/notion|note/.test(lower)) kind = "notion_page";
+        else if (/cohort|model|race/.test(lower)) { kind = "cohort"; everyMs = 604_800_000; }
+        else if (/mission|research|brief/.test(lower)) kind = "run_mission";
+        else if (/hourly/.test(lower)) everyMs = 3_600_000;
+        try {
+          await fetch("/api/schedule", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              kind,
+              label: payload.slice(0, 80),
+              payload: kind === "cohort" ? { question: payload } : kind === "run_mission" ? { goal: payload } : { text: payload },
+              everyMs,
+            }),
+          });
+          window.dispatchEvent(new CustomEvent("toast", { detail: { text: `Schedule created · ${kind}`, tone: "ok" } }));
+        } catch {}
+        break;
+      }
+      case "parse_pdf":
+      case "draft_email":
+      case "read_email":
+      case "create_note":
+      case "open_gdrive":
+        // Route to Del Assistant — its tryMcpAction handler dispatches to the
+        // right connector route. Voice payload becomes the user's chat message.
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "assistant" } }));
+        await new Promise((r) => setTimeout(r, 400));
+        window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "assistant.ask", prompt: payload } }));
         break;
     }
   }
@@ -552,6 +638,56 @@ export function VoiceApp() {
       </div>
 
       {stt.error && <div className="pill pill-bad self-center">{stt.error}</div>}
+
+      {/* Text fallback · always available so the agent is usable when the
+          mic is blocked / unavailable / locked behind a browser permission
+          prompt. QA report 2026-05-25 flagged Voice Agent as "unusable
+          without microphone". Same submit() path the STT pipeline uses. */}
+      <VoiceTextFallback busy={busy} onSubmit={(t) => submit(t)} />
+    </div>
+  );
+}
+
+// Text-input fallback for Voice Agent · always-on type box so users can
+// drive the agent without mic permissions / on browsers where Web Speech
+// is unavailable. Submits via the same submit() the STT pipeline uses.
+function VoiceTextFallback({ busy, onSubmit }: { busy: boolean; onSubmit: (text: string) => void }) {
+  const [draft, setDraft] = useState("");
+  function send() {
+    const t = draft.trim();
+    if (!t || busy) return;
+    setDraft("");
+    onSubmit(t);
+  }
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="font-pixel text-[9px] tracking-widest text-center" style={{ color: "var(--muted)" }}>
+        — OR TYPE —
+      </div>
+      <div className="flex gap-2">
+        <input
+          className="input-pixel flex-1"
+          placeholder="type a task… (e.g. 'open browser and search hydration errors')"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.slice(0, 800))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              send();
+            }
+          }}
+          disabled={busy}
+          style={{ fontSize: 11 }}
+        />
+        <button
+          onClick={send}
+          disabled={!draft.trim() || busy}
+          className="btn-pixel success"
+          style={{ padding: "6px 12px", fontSize: 11 }}
+        >
+          ▶ RUN
+        </button>
+      </div>
     </div>
   );
 }

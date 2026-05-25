@@ -88,7 +88,14 @@ export function HeroTerminal() {
           {idx >= SCRIPT.length ? "done" : "running"}
         </span>
       </div>
-      <div className="p-4 min-h-[260px]" style={{ color: "var(--fg)" }}>
+      <div
+        className="p-4 min-h-[260px]"
+        style={{
+          color: "var(--fg)",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere",
+        }}
+      >
         {lines.map((l, i) => (
           <div key={i} style={{ color: toneColor(l.tone) }}>{l.text}</div>
         ))}

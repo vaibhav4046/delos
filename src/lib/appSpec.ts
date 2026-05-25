@@ -64,7 +64,12 @@ export type AppNode =
   | { kind: "divider"; if?: string; className?: string }
   | { kind: "image"; icon: string; size?: number; if?: string; className?: string }
   | { kind: "spacer"; size?: number; if?: string; className?: string }
-  | { kind: "pill"; text: string; tone?: "info" | "ok" | "warn" | "bad" | "muted"; if?: string; className?: string };
+  | { kind: "pill"; text: string; tone?: "info" | "ok" | "warn" | "bad" | "muted"; if?: string; className?: string }
+  // Hand-crafted HTML escape hatch — used by curated clones to ship pixel-
+  // fidelity layouts the DSL can't express (sidebars, floating composer,
+  // multi-column source cards). Server-built templates only; sanitized at
+  // render time (no script tags, no on* handlers, no javascript: URLs).
+  | { kind: "html"; html: string; if?: string; className?: string };
 
 const nodeSchema: NodeSchema = z.lazy(() =>
   z.union([
@@ -79,8 +84,28 @@ const nodeSchema: NodeSchema = z.lazy(() =>
     z.object({ ...baseNode, kind: z.literal("image"), icon: z.string().max(40), size: z.number().int().min(8).max(80).optional() }),
     z.object({ ...baseNode, kind: z.literal("spacer"), size: z.number().int().min(0).max(64).optional() }),
     z.object({ ...baseNode, kind: z.literal("pill"), text: z.string().max(80), tone: z.enum(["info", "ok", "warn", "bad", "muted"]).optional() }),
+    z.object({ ...baseNode, kind: z.literal("html"), html: z.string().max(40000) }),
   ]),
 );
+
+// Optional per-app theme · lets a clone override the retro OS palette so
+// brand-accurate apps (Claude orange, OpenAI green, Snapchat yellow…)
+// render true to source instead of inheriting the DelOS pixel-yellow.
+// Colors must be hex / rgb / hsl strings; fontFamily a CSS font stack.
+// AppRuntime applies these as CSS variables on a wrapper div.
+const themeSchema = z.object({
+  bg: z.string().max(60).optional(),
+  surface: z.string().max(60).optional(),
+  surface2: z.string().max(60).optional(),
+  fg: z.string().max(60).optional(),
+  muted: z.string().max(60).optional(),
+  accent: z.string().max(60).optional(),
+  onAccent: z.string().max(60).optional(),
+  font: z.string().max(80).optional(),
+  pixelFont: z.string().max(80).optional(),
+  // Force rounded corners (modern look) instead of pixel-square cards.
+  radius: z.union([z.string(), z.number()]).optional(),
+}).optional();
 
 export const appSpecSchema = z.object({
   id: z.string().min(1).max(60),
@@ -89,6 +114,7 @@ export const appSpecSchema = z.object({
   width: z.number().int().min(240).max(900).default(420),
   height: z.number().int().min(180).max(700).default(360),
   initialState: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])).default({}),
+  theme: themeSchema,
   root: nodeSchema,
 });
 

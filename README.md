@@ -1,8 +1,35 @@
-# Del Rio — agents that flow under pressure
+# DelOS — agents that flow under pressure
 
 Built for **Agents Under Pressure** (HydraDB 48h hackathon, May 2026).
 
-Multi-agent orchestration that survives real-world chaos — and a browser-OS (**DelOS**) where agents *build the apps live*. Four pillars, retro-arcade UI, one job: keep agents moving when tools fail, goals shift, context floods, and the user interrupts.
+**Live:** https://delrio.vercel.app
+**Demo video:** see `outputs/LOOM_SCRIPT.md` for the 4–5 min walkthrough
+**Hackathon submission:** see `outputs/HACKATHON_FORM.md`
+**Deploy your own:** see `outputs/DEPLOY.md`
+
+Multi-agent orchestration that survives real-world chaos — and a browser-OS where agents *build the apps live*. Four pillars, retro-arcade UI, one job: keep agents moving when tools fail, goals shift, context floods, and the user interrupts.
+
+## What is shipped
+
+| Pillar | Surface | Where in the OS |
+|--------|---------|-----------------|
+| **Memory** · save state | HydraDB graph + vector + 72h-recency lexical fallback, write-guard against pollution | Memory Browser app · `/memory` route |
+| **Tools** · power-ups | Typed registry, MCP shapes, sibling fallback on failure, 6 domain playbooks with coverage scoring | App Builder · DelCode · Marketplace |
+| **Recovery** · 1-up | Provider cascade (Cerebras → Groq → DeepSeek → OpenRouter → Gemini → Together → Mistral), cockatiel retry + circuit breakers, critic-driven replan on drift > 0.3 | Chaos lab · `/play` |
+| **Adaptation** · warp zone | Multi-intent voice chunker, mid-stream STEER endpoint, goal-drift detection, context-flood compression | Voice agent · Terminal |
+
+11 of 11 acceptance gates passing — see `scripts/judge-regression.mjs`.
+
+## Project docs
+
+- `docs/ARCHITECTURE.md` — agent loop state machine, component map, mermaid diagrams
+- `docs/SCHEMA.md` — HydraDB collections, API surface, run-event union, risk tiers
+- `docs/SECURITY.md` — threat model, defense layers, write-guard, approval-tap policy
+- `docs/DEMO_SCRIPT.md` — deterministic 60-second judge demo specification
+- `outputs/LOOM_SCRIPT.md` — beat-by-beat 4–5 min recording script
+- `outputs/HACKATHON_FORM.md` — paste-ready submission answers
+- `outputs/SETUP.md` — env var checklist + where to get each key
+- `outputs/DEPLOY.md` — full operator runbook for Vercel + GitHub
 
 ## DelOS — the headline demo
 

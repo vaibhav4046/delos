@@ -13,19 +13,26 @@ type Counters = {
 
 const STORE_KEY = "delos.counters.live.v1";
 
-function loadInit(): Counters {
-  if (typeof window === "undefined") return { agents: 0, requests: 0, tokens: 0, usd: 0 };
+const ZERO: Counters = { agents: 0, requests: 0, tokens: 0, usd: 0 };
+
+function loadFromStorage(): Counters {
+  if (typeof window === "undefined") return ZERO;
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) return JSON.parse(raw) as Counters;
   } catch {}
-  return { agents: 0, requests: 0, tokens: 0, usd: 0 };
+  return ZERO;
 }
 
 export function CounterStrip() {
-  const [c, setC] = useState<Counters>(loadInit);
+  // Was `useState(loadInit)` — lazy init read localStorage on client and
+  // returned 0s on server, so the SSR HTML didn't match the first client
+  // paint → React error #418. Start with ZERO on both sides, hydrate in
+  // an effect that only runs after mount.
+  const [c, setC] = useState<Counters>(ZERO);
 
   useEffect(() => {
+    setC(loadFromStorage());
     function onInc(e: Event) {
       const d = (e as CustomEvent).detail as Partial<Counters>;
       setC((prev) => {

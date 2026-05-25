@@ -151,6 +151,8 @@
 html, body {
   background: var(--bg);
   color: var(--fg);
+  max-width: 100%;
+  overflow-x: clip;
   font-family: var(--font-sans);
   font-feature-settings: "ss01", "cv01";
   transition: background 220ms cubic-bezier(0.4, 0, 0.2, 1), color 220ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -364,6 +366,20 @@ img[src$=".svg"] { image-rendering: pixelated; }
   .card-pixel { padding: 12px; }
   .input-pixel { padding: 8px 10px; font-size: 13px; }
   .pill { font-size: 10px; padding: 1px 6px; }
+  /* Stop long monospace strings (commit hashes, tool output, JSON
+     blobs) from pushing the page wider than the viewport. Reported
+     scroll width 714 on a 390px device — culprit was long .font-mono
+     lines without an overflow-wrap rule. */
+  .font-mono, code, pre, .mono {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  /* Defensive max-width clamp on cards so embedded SVG/canvas can't
+     blow out the column. */
+  .card-pixel {
+    max-width: 100%;
+    min-width: 0;
+  }
 }
 
 @media (max-width: 640px) {
@@ -606,9 +622,35 @@ html[data-cursor="system"] .delos-root textarea {
   animation: wp-tokyo 8s linear infinite;
 }
 
+/* Pixel Mesh · low-opacity blurred pixel-grid that auto-adapts to the
+   current theme by binding fills to --accent + --bg + --surface-2.
+   Looks natural under BOTH the dark + light palettes — no manual swap
+   needed. The radial vignette + soft blur keeps foreground OS chrome
+   readable. 2026-05-25 user ask: "live pixel-style wallpaper fitted in
+   every theme · light, dark, the best · blurred + low opacity". */
+@keyframes wp-pixelmesh {
+  0%,100% { background-position: 0 0, 0 0, 0 0, 50% 50%; opacity: 0.92; }
+  50%     { background-position: 8px 8px, 4px 4px, 12px -8px, 50% 50%; opacity: 1; }
+}
+.wp-live-pixelmesh {
+  background:
+    /* Pulsing accent dots on a 32px grid */
+    radial-gradient(2px 2px at 16px 16px, color-mix(in srgb, var(--accent) 65%, transparent) 100%, transparent 100%) 0 0 / 32px 32px,
+    /* Half-offset secondary dots for depth */
+    radial-gradient(1.5px 1.5px at 8px 8px, color-mix(in srgb, var(--accent) 30%, transparent) 100%, transparent 100%) 0 0 / 48px 48px,
+    /* Faint pixel hatch */
+    linear-gradient(45deg, color-mix(in srgb, var(--surface-2) 35%, transparent) 0%, transparent 1px) 0 0 / 16px 16px,
+    /* Soft radial vignette in --bg so light + dark both look right */
+    radial-gradient(ellipse at center, color-mix(in srgb, var(--bg) 80%, var(--surface)) 0%, var(--bg) 75%);
+  background-blend-mode: normal;
+  animation: wp-pixelmesh 14s ease-in-out infinite;
+  filter: blur(0.4px);
+  image-rendering: pixelated;
+}
+
 /* Honor prefers-reduced-motion across all live wallpapers. */
 @media (prefers-reduced-motion: reduce) {
-  .wp-live-aurora, .wp-live-plasma, .wp-live-cybergrid, .wp-live-liquid, .wp-live-tokyo {
+  .wp-live-aurora, .wp-live-plasma, .wp-live-cybergrid, .wp-live-liquid, .wp-live-tokyo, .wp-live-pixelmesh {
     animation: none !important;
   }
 }
@@ -848,10 +890,100 @@ header.glass-header {
   border-bottom: 1px solid rgba(var(--fg-rgb), 0.12) !important;
 }
 
-/* Text legibility over busy wallpapers — apply to text rendered directly on body bg */
+/* Text legibility over busy wallpapers — apply to text rendered directly on body bg.
+   Default halo is dark for white-ish text on dark wallpapers. */
+/* hmr-bump: 2026-05-25T01 */
 .wallpaper-text-shadow {
   text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 8px rgba(0,0,0,0.35);
 }
+/* On LIGHT wallpapers, --wp-fg flips to near-black. A dark shadow under
+   dark text becomes invisible and the wordmark loses contrast over any
+   busy gradient (mint, mac-aqua, winxp-bliss, paper, vapor-horizon). Use
+   a bright halo + tighter blur so dark text stays crisp + readable. */
+.delos-root[data-wall-tone="light"] .wallpaper-text-shadow {
+  text-shadow:
+    0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 8px rgba(255, 255, 255, 0.85),
+    0 1px 2px rgba(255, 255, 255, 0.75);
+}
+/* Belt-and-suspenders: when DelOS wordmark sits over a light wallpaper,
+   nudge the accent ("OS") slightly darker so it doesn't blow out on the
+   light halo. Pure-CSS — no JS handoff needed. */
+.delos-root[data-wall-tone="light"] .wallpaper-text-shadow [style*="--accent"],
+.delos-root[data-wall-tone="light"] .welcome-mat .font-pixel {
+  filter: brightness(0.85) saturate(1.1);
+}
+
+/* ─── App-themed clones ─────────────────────────────────────────────────
+   When an AppSpec ships a `theme` block, AppRuntime wraps the tree in
+   `.app-themed`. Inside that scope we replace the retro pixel chrome
+   (sharp box-shadows, square cards, pixel font headlines) with a soft,
+   modern look so brand-coherent clones (Claude orange, OpenAI green,
+   Perplexity teal, macOS aqua, Snapchat yellow) read as themselves
+   rather than as another DelOS-yellow window.
+*/
+.app-themed {
+  font-family: var(--font-sans, "Inter", "Söhne", system-ui, sans-serif);
+}
+.app-themed h1 { font-family: var(--font-sans, inherit) !important; letter-spacing: -0.02em !important; font-weight: 700 !important; font-size: 22px !important; color: var(--fg) !important; }
+.app-themed h2 { font-family: var(--font-sans, inherit) !important; letter-spacing: -0.01em !important; font-weight: 600 !important; }
+.app-themed h3 { font-family: var(--font-sans, inherit) !important; letter-spacing: 0  !important; font-weight: 600 !important; text-transform: none !important; font-size: 14px !important; }
+.app-themed .card-pixel,
+.app-themed [class*="card"] {
+  background: var(--surface) !important;
+  border: 1px solid var(--surface-2) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.08) !important;
+  padding: 14px !important;
+}
+.app-themed .btn-pixel {
+  font-family: var(--font-sans, inherit) !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 500 !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--surface-2) !important;
+  box-shadow: none !important;
+  padding: 8px 14px !important;
+  background: var(--accent) !important;
+  color: var(--on-accent) !important;
+}
+.app-themed .btn-pixel.ghost {
+  background: transparent !important;
+  color: var(--fg) !important;
+  border-color: var(--surface-2) !important;
+}
+.app-themed .btn-pixel.success { background: var(--accent) !important; filter: brightness(1.06); }
+.app-themed .btn-pixel.danger  { background: rgba(255,80,80,0.15) !important; color: #ff6b6b !important; border-color: rgba(255,80,80,0.3) !important; }
+.app-themed .btn-pixel:hover { transform: none !important; filter: brightness(1.08); }
+.app-themed .pill {
+  font-family: var(--font-sans, inherit) !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 500 !important;
+  font-size: 11px !important;
+  border-radius: 999px !important;
+  padding: 3px 10px !important;
+  background: var(--surface-2) !important;
+  color: var(--fg) !important;
+  border: none !important;
+}
+.app-themed input,
+.app-themed textarea {
+  background: var(--surface) !important;
+  color: var(--fg) !important;
+  border: 1px solid var(--surface-2) !important;
+  border-radius: 8px !important;
+  padding: 10px 12px !important;
+  font-family: var(--font-sans, inherit) !important;
+  outline: none !important;
+}
+.app-themed input:focus,
+.app-themed textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent) !important;
+}
+.app-themed code { font-family: ui-monospace, "JetBrains Mono", monospace !important; color: var(--muted) !important; }
 
 /* Dock + windows must remain opaque enough to read against any wallpaper */
 [data-app-dock], footer.dock-glass {

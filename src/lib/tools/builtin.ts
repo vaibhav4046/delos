@@ -171,6 +171,28 @@ const finalAnswerTool: Tool<{ text: string }, { ok: true; text: string }> = {
   },
 };
 
+// Exact-fact pinning · agent calls this when the user says something
+// like "remember my name is Varun" or "set project codename to X".
+// Was: only generic run-summaries got written, so recall returned
+// "Run completed for goal X" instead of "user_name=Varun" — 2026-05-25
+// brutal-QA "Memory not trustworthy" P0. Orchestrator listens for the
+// emitted memory_pin event and calls safeAddMemory with pinned=true so
+// recall ranks these above run summaries.
+const memoryPin: Tool<{ key: string; value: string }, { ok: true; pinned: string }> = {
+  name: "memory_pin",
+  description:
+    "Pin an exact user fact (key=value) so future runs recall it verbatim. Use for names, preferences, project codenames, instructions, dates, configs — anything the user states as a durable fact. Examples: { key: 'user_name', value: 'Varun' }, { key: 'response_style', value: 'terse bullets' }.",
+  tags: ["memory", "pin", "exact-fact"],
+  schema: z.object({
+    key: z.string().min(1).max(80).regex(/^[a-z][a-z0-9_]*$/i, "key must be snake_case identifier"),
+    value: z.string().min(1).max(400),
+  }),
+  async run({ key, value }, ctx) {
+    ctx.emit({ kind: "memory_pin", data: { key, value } });
+    return { ok: true as const, pinned: `${key}=${value}` };
+  },
+};
+
 export function buildRegistry(): ToolRegistry {
   return new ToolRegistry()
     .register(webSearch)
@@ -179,5 +201,6 @@ export function buildRegistry(): ToolRegistry {
     .register(notes)
     .register(sleep)
     .register(summarize)
+    .register(memoryPin)
     .register(finalAnswerTool);
 }

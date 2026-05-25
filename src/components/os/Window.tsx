@@ -81,8 +81,10 @@ export function Window({
     const startX = e.clientX;
     const startY = e.clientY;
     const startRect = { x: win.x, y: win.y, width: win.width, height: win.height };
-    const minW = 280;
-    const minH = 200;
+    // Smaller floor so users can shrink complex clones (Slack/macOS/Stripe
+    // ship at 880×620) down to a sidebar size without snapping back.
+    const minW = 240;
+    const minH = 180;
     const target = e.currentTarget as HTMLElement;
     target.setPointerCapture?.(e.pointerId);
     setResizing(true);
@@ -244,7 +246,21 @@ export function Window({
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto" style={{ background: "var(--surface)" }}>
+        <div
+          className="flex-1 overflow-auto"
+          style={{
+            background: "var(--surface)",
+            // flex column + minHeight:0 lets the AppRuntime wrapper (which
+            // uses height:100% + display:flex) properly chain down to the
+            // html escape-hatch block. Without minHeight:0 the inner content
+            // pushes the flex item past its parent, breaking resize.
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            minWidth: 0,
+            position: "relative",
+          }}
+        >
           <AppErrorBoundary appName={win.title}>{win.content}</AppErrorBoundary>
         </div>
 
@@ -291,7 +307,12 @@ function ResizeHandle({
       style={{
         position: "absolute",
         cursor: CURSORS[edge],
-        zIndex: 5,
+        // Lifted above app content (which can include absolute-positioned
+        // children like phone bezels and floating composers). Previous
+        // z=5 was below themed clones, so edge drags missed the handle
+        // and grabbed app content instead → resize felt broken.
+        zIndex: 50,
+        touchAction: "none",
         ...style,
       }}
       aria-label={`Resize ${edge}`}

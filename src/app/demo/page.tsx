@@ -50,18 +50,58 @@ const CANNED: RunEvent[] = [
   { t: "metric", key: "wall_time_ms", value: 4260, at: BASE + 4280 },
 ];
 
+// Hackathon 5-step scripted trace:
+// voice command → investor CRM build → memory recall → cohort race → export
+const HK_BASE = 1700010000000;
+const HACKATHON: RunEvent[] = [
+  // Step 1: Voice command → app build intent
+  { t: "meta", runId: "hk-demo-voice-01", at: HK_BASE + 0 },
+  { t: "phase", phase: "boot", note: "voice command received — Whisper transcription", at: HK_BASE + 80 },
+  { t: "thought", agent: "planner", text: "Voice: 'build me an investor CRM with commitment scoring and warm intro graph'. Intent=build_app. Routing to AppBuilder.", at: HK_BASE + 340 },
+  { t: "tool_call", name: "codegen_app", args: { prompt: "investor CRM — commitment score, warm intro graph, risk flags, diligence checklist, portfolio board" }, at: HK_BASE + 600 },
+  // Step 2: Domain playbook fires — investor CRM
+  { t: "phase", phase: "act", note: "step 1/5: domain playbook — investor-crm detected", at: HK_BASE + 900 },
+  { t: "thought", agent: "executor", text: "Matched domain: investor-crm. Scaffold: CommitmentScore + WarmIntroGraph + RiskFlags + DiligenceChecklist + PortfolioBoard. Coverage check: 8/8 required terms present (100%).", at: HK_BASE + 1200 },
+  { t: "tool_result", name: "codegen_app", ok: true, result: { files: 8, domain: "investor-crm", coveragePct: 100 }, at: HK_BASE + 2800 },
+  { t: "metric", key: "build_ms", value: 1900, at: HK_BASE + 2820 },
+  { t: "thought", agent: "critic", text: "pass (drift=0.03): investor CRM produced CommitmentScore, WarmIntroGraph, RiskFlags — all domain-critical surfaces present.", at: HK_BASE + 3000 },
+  { t: "metric", key: "drift", value: 0.03, at: HK_BASE + 3020 },
+  // Step 3: Memory recall — cross-session learning
+  { t: "phase", phase: "recall", note: "step 2/5: HydraDB cross-session recall", at: HK_BASE + 3200 },
+  { t: "memory_recall", query: "investor CRM prior runs and user preferences", hits: 4, at: HK_BASE + 3500 },
+  { t: "thought", agent: "executor", text: "Recalled: User fact · preferred_export = csv. User fact · risk_threshold = high. Applied to portfolio board defaults.", at: HK_BASE + 3800 },
+  { t: "metric", key: "recall_hits", value: 4, at: HK_BASE + 3820 },
+  // Step 4: Cohort race — 3 models judge the output
+  { t: "phase", phase: "act", note: "step 3/5: cohort race — 3 models evaluate CRM quality", at: HK_BASE + 4000 },
+  { t: "thought", agent: "planner", text: "Spawning 3 sub-agents: kimi-k2, gemini-2.5-flash, gpt-oss-120b. Each scores CRM output on domain fidelity.", at: HK_BASE + 4200 },
+  { t: "tool_call", name: "cohort_race", args: { models: ["kimi-k2", "gemini-2.5-flash", "gpt-oss-120b"], task: "score investor CRM domain fidelity" }, at: HK_BASE + 4400 },
+  { t: "tool_result", name: "cohort_race", ok: true, result: { winner: "kimi-k2", score: "9.1/10", verdict: "CommitmentScore algorithm is sound; WarmIntroGraph edge traversal is the key differentiator vs generic CRM" }, at: HK_BASE + 6200 },
+  { t: "thought", agent: "critic", text: "Cohort consensus: 9.1/10. kimi-k2 named WarmIntroGraph traversal as the domain differentiator. Merged into answer.", at: HK_BASE + 6500 },
+  { t: "metric", key: "cohort_score", value: 9.1, at: HK_BASE + 6520 },
+  // Step 5: Memory write + export
+  { t: "phase", phase: "store", note: "step 4/5: pinning facts + export", at: HK_BASE + 6700 },
+  { t: "memory_write", key: "hk-demo-voice-01", preview: "Investor CRM built — 8 files, CommitmentScore + WarmIntroGraph + RiskFlags. Cohort score 9.1/10. Export CSV ready.", at: HK_BASE + 7000 },
+  { t: "phase", phase: "done", at: HK_BASE + 7200 },
+  { t: "answer", text: "✓ Investor CRM built in 1.9s\n\n• 8 files — CommitmentScore, WarmIntroGraph, RiskFlags, DiligenceChecklist, PortfolioBoard, PartnerFollowUp\n• Coverage: 100% (8/8 domain terms)\n• Cohort score: 9.1/10 — kimi-k2 winner\n• Cross-session memory applied: export=csv, risk_threshold=high\n• CSV export surface mounted — ready for download", at: HK_BASE + 7240 },
+  { t: "metric", key: "elapsed_ms", value: 7240, at: HK_BASE + 7260 },
+  { t: "metric", key: "tool_calls", value: 5, at: HK_BASE + 7280 },
+  { t: "metric", key: "successes", value: 5, at: HK_BASE + 7300 },
+];
+
+type DemoTrack = "research" | "hackathon";
+
 export default function DemoPage() {
   const [played, setPlayed] = useState<RunEvent[]>([]);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(4);
+  const [track, setTrack] = useState<DemoTrack>("research");
   const stopRef = useRef(false);
 
-  async function play() {
+  async function play(events: RunEvent[] = track === "hackathon" ? HACKATHON : CANNED) {
     if (playing) return;
     setPlaying(true);
     stopRef.current = false;
     setPlayed([]);
-    const events = CANNED;
     for (let i = 0; i < events.length; i++) {
       if (stopRef.current) break;
       const ev = events[i];
@@ -80,9 +120,15 @@ export default function DemoPage() {
     setPlaying(false);
   }
 
+  function switchAndPlay(t: DemoTrack) {
+    stop();
+    setTrack(t);
+    setTimeout(() => play(t === "hackathon" ? HACKATHON : CANNED), 80);
+  }
+
   useEffect(() => {
     // Auto-play on first mount
-    const t = setTimeout(() => play(), 600);
+    const t = setTimeout(() => play(CANNED), 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -108,13 +154,45 @@ export default function DemoPage() {
             canned <span style={{ color: "var(--accent)" }}>demo</span>.
           </h1>
           <p className="text-[color:var(--muted)] text-sm max-w-2xl">
-            90-second pre-recorded trace. Plays back the full planner→executor→critic→memory loop, including a tool-failure recovery and the final-answer tool call. Zero network calls after first paint — survives bad conference Wi-Fi.
+            Pre-recorded traces. Zero network calls — survives bad conference Wi-Fi.
           </p>
+        </section>
+
+        {/* Track selector */}
+        <section className="flex flex-wrap gap-2">
+          <button
+            onClick={() => switchAndPlay("research")}
+            className="btn-pixel"
+            style={{
+              background: track === "research" ? "var(--accent)" : "var(--surface)",
+              color: track === "research" ? "var(--on-accent)" : "var(--fg)",
+              border: "1px solid var(--surface-2)",
+            }}
+          >
+            ◉ Research loop
+          </button>
+          <button
+            onClick={() => switchAndPlay("hackathon")}
+            className="btn-pixel"
+            style={{
+              background: track === "hackathon" ? "#f59e0b" : "var(--surface)",
+              color: track === "hackathon" ? "#0f172a" : "var(--fg)",
+              border: track === "hackathon" ? "1px solid #f59e0b" : "1px solid var(--surface-2)",
+              fontWeight: track === "hackathon" ? 700 : undefined,
+            }}
+          >
+            ★ HACKATHON DEMO
+          </button>
+          {track === "hackathon" && (
+            <span className="pill" style={{ fontSize: 9, background: "#422006", color: "#fde68a", border: "1px solid #92400e" }}>
+              voice → investor CRM → memory → cohort → export
+            </span>
+          )}
         </section>
 
         <section className="flex flex-wrap items-center gap-2">
           {!playing ? (
-            <button onClick={play} className="btn-pixel success">▶ REPLAY</button>
+            <button onClick={() => play()} className="btn-pixel success">▶ REPLAY</button>
           ) : (
             <button onClick={stop} className="btn-pixel danger">■ STOP</button>
           )}
@@ -135,7 +213,7 @@ export default function DemoPage() {
               {s}×
             </button>
           ))}
-          <span className="pill pill-info" style={{ fontSize: 9 }}>{played.length}/{CANNED.length} events</span>
+          <span className="pill pill-info" style={{ fontSize: 9 }}>{played.length}/{(track === "hackathon" ? HACKATHON : CANNED).length} events</span>
         </section>
 
         <section className="grid lg:grid-cols-5 gap-4">
@@ -144,7 +222,7 @@ export default function DemoPage() {
             <AgentConstellation events={played} />
           </div>
           <div className="lg:col-span-3">
-            <AgentLog events={played} base={BASE} />
+            <AgentLog events={played} base={track === "hackathon" ? HK_BASE : BASE} />
           </div>
         </section>
       </main>

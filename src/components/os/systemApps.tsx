@@ -14,6 +14,7 @@ import { processEventsForAchievements, awardAppBuilt } from "@/lib/achievements"
 import { useSpeechToText, speak, getVoicePrefs, speechSupported } from "@/lib/useSpeech";
 import { onIntent, broadcastAgent } from "@/lib/intentBus";
 import { bumpCounters } from "@/components/os/CounterStrip";
+import { enhanceBuildPrompt } from "@/lib/appPromptEnhancer";
 
 function totals(events: RunEvent[]) {
   let pin = 0;
@@ -80,7 +81,7 @@ const NEOFETCH = [
   "       ╚═════╝ ╚══════╝╚══════╝ ╚═════╝ ╚══════╝",
   "",
   "  os:      DelOS v2.1 (agents under pressure)",
-  "  shell:   del-terminal",
+  "  shell:   delos-terminal",
   "  kernel:  Next.js 16 / React 19",
   "  cpu:     multi-agent loop · planner→executor→critic→memory",
   "  memory:  HydraDB (tenant-scoped)",
@@ -101,7 +102,7 @@ const APP_IDS = [
 export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
   const [lines, setLines] = useState<TermOut[]>(() => [
     { kind: "ascii", text: NEOFETCH.join("\n") },
-    { kind: "stdout", text: "Welcome to del-terminal. Type `help` for commands. `ai hello` to query agents." },
+    { kind: "stdout", text: "Welcome to DelOS Terminal. Type `help` for commands. `ai hello` to query agents." },
   ]);
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
@@ -429,7 +430,7 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
       >
         <div className="flex items-center gap-2">
           <Icons.TerminalSquare size={11} color="#7fff8a" />
-          <span style={{ fontWeight: 600 }}>del-terminal</span>
+          <span style={{ fontWeight: 600 }}>delos-terminal</span>
           <span style={{ color: "#3a6a45" }}>·</span>
           <span>{tenant}@delos</span>
           {running && (<>
@@ -627,17 +628,51 @@ function TermLine({ ev, base }: { ev: RunEvent; base: number }) {
   }
 }
 
+// Strip run-log metric metadata from displayed text.
+// Removes lines like "tokens=1247 drift=0.08 ms=520" that polluted
+// MissionControl display in QA run 2026-05-25.
+function cleanRunText(text: string): string {
+  // If it's a User fact, format it cleanly
+  const factMatch = text.match(/User fact\s*[·-]\s*(.+)$/i);
+  if (factMatch) return `✓ ${factMatch[1].trim()}`;
+  // For run summaries, keep up to first sentence-boundary before metric noise
+  const clean = text
+    .replace(/\b(tokens|drift|ms|wall_time_ms|replans|tool_calls|successes|elapsed_ms)\s*=\s*[\d.]+/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  // Truncate at 120 chars
+  return clean.length > 120 ? clean.slice(0, 117) + "…" : clean;
+}
+
+// Extract domain tag from text for citation badge
+function extractDomainTag(text: string): string | null {
+  if (/investor|crm|commitment|portfolio/i.test(text)) return "investor-crm";
+  if (/sanctions|sar|aml|fincen|kyc|regulatory/i.test(text)) return "regulatory-fintech";
+  if (/clinical|adverse|dosing|protocol|patient/i.test(text)) return "clinical-trial";
+  if (/legal|contract|clause|redline|counsel/i.test(text)) return "legal-contracts";
+  if (/tutor|lesson|curriculum|mastery|quiz/i.test(text)) return "ai-tutor";
+  if (/incident|runbook|oncall|postmortem|severity/i.test(text)) return "ops-incident";
+  return null;
+}
+
 export function MissionControl() {
-  const [runs, setRuns] = useState<Array<{ text: string; createdAt: number }>>([]);
+  const [runs, setRuns] = useState<Array<{ text: string; createdAt?: number }>>([]);
   const [osbRunning, setOsbRunning] = useState(false);
   const [osbProgress, setOsbProgress] = useState<{ materialized: number; agents: number; tokens: number; usd: number; lastEvent: string } | null>(null);
 
   useEffect(() => {
     const tid = getTenantId();
-    const url = `/api/memory?q=${encodeURIComponent("Run completed")}${tid ? `&tenantId=${encodeURIComponent(tid)}` : ""}`;
+    const url = `/api/memory?q=${encodeURIComponent("recent missions goals results")}${tid ? `&tenantId=${encodeURIComponent(tid)}` : ""}`;
     fetch(url)
       .then((r) => r.json())
-      .then((j: { local?: Array<{ text: string; createdAt: number }> }) => setRuns(j.local ?? []))
+      .then((j: { hits?: Array<{ text: string; score?: number }>; local?: Array<{ text: string; createdAt?: number }> }) => {
+        // Prefer HydraDB hits (semantic recall) over raw local log
+        if (j.hits && j.hits.length > 0) {
+          setRuns(j.hits.map((h) => ({ text: h.text })));
+        } else {
+          setRuns((j.local ?? []).slice(-12).reverse());
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -735,15 +770,26 @@ export function MissionControl() {
         <div className="text-[color:var(--muted)] font-mono">no missions yet — open the terminal and run one.</div>
       )}
       <ul className="space-y-2">
-        {runs.slice().reverse().map((r, i) => (
-          <li key={i} className="card-pixel">
-            <div className="flex items-center justify-between mb-1">
-              <span className="pill pill-info">#{runs.length - i}</span>
-              <span className="text-[color:var(--muted)] font-mono">{new Date(r.createdAt).toLocaleTimeString()}</span>
-            </div>
-            <div className="font-mono text-xs leading-relaxed">{r.text}</div>
-          </li>
-        ))}
+        {runs.slice(0, 8).map((r, i) => {
+          const display = cleanRunText(r.text);
+          const domain = extractDomainTag(r.text);
+          return (
+            <li key={i} className="card-pixel">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="pill pill-info" style={{ fontSize: 9 }}>#{i + 1}</span>
+                {domain && (
+                  <span className="pill pill-muted" style={{ fontSize: 9, color: "var(--accent)" }} title="Domain detected from memory recall">
+                    {domain}
+                  </span>
+                )}
+                {r.createdAt && (
+                  <span className="text-[color:var(--muted)] font-mono" style={{ fontSize: 9 }}>{new Date(r.createdAt).toLocaleTimeString()}</span>
+                )}
+              </div>
+              <div className="font-mono text-xs leading-relaxed">{display}</div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -795,6 +841,27 @@ export function NotesApp() {
   );
 }
 
+// 5 UI-style presets · user picks one before build. Pixel keeps the DelOS
+// retro look. Modern is brand-neutral clean Material-ish. Glass is frosted
+// neon. Console is terminal green. Brand uses whatever theme the clone
+// template ships (Claude orange, ChatGPT green, etc — falls through).
+const UI_STYLES: Array<{ id: string; label: string; icon: string; desc: string; theme: Partial<{ bg: string; surface: string; surface2: string; fg: string; muted: string; accent: string; onAccent: string; font: string }> | null }> = [
+  { id: "pixel",   label: "Pixel",   icon: "Gamepad2", desc: "DelOS retro · pixel font, square cards, CRT yellow", theme: null },
+  { id: "modern",  label: "Modern",  icon: "Square",   desc: "Clean cards, Inter, rounded 12px, subtle shadows", theme: {
+    bg: "#fafafa", surface: "#ffffff", surface2: "#e5e5e5", fg: "#0a0a0a", muted: "#737373", accent: "#2563eb", onAccent: "#ffffff",
+    font: "'Inter', ui-sans-serif, system-ui, sans-serif",
+  }},
+  { id: "brand",   label: "Brand",   icon: "Palette",  desc: "Whatever the clone ships · keeps native brand palette", theme: null },
+  { id: "glass",   label: "Glass",   icon: "Layers",   desc: "Frosted dark, neon cyan accent, ultra-modern", theme: {
+    bg: "#0a0a0f", surface: "#13131c", surface2: "#1f1f2e", fg: "#f0f0ff", muted: "#7a7a99", accent: "#22d3ee", onAccent: "#0a0a0f",
+    font: "'Inter', ui-sans-serif, system-ui, sans-serif",
+  }},
+  { id: "console", label: "Console", icon: "TerminalSquare", desc: "Phosphor green on black, JetBrains Mono, hacker vibe", theme: {
+    bg: "#0d0d0d", surface: "#151515", surface2: "#1f1f1f", fg: "#33ff66", muted: "#449944", accent: "#00ffaa", onAccent: "#0d0d0d",
+    font: "'JetBrains Mono', 'Fira Code', ui-monospace, monospace",
+  }},
+];
+
 export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
   const [prompt, setPrompt] = useState("Build me a stopwatch with start/stop/reset.");
   const [busy, setBusy] = useState(false);
@@ -802,6 +869,67 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
   const [stage, setStage] = useState<"idle" | "plan" | "spec" | "validate" | "mount" | "done">("idle");
   const [builtins, setBuiltins] = useState<Array<{ id: string; name: string; icon: string }>>([]);
   const [installingId, setInstallingId] = useState<string | null>(null);
+  // Last built spec — surfaced to user via schema viewer + refine textarea.
+  const [lastSpec, setLastSpec] = useState<AppSpec | null>(null);
+  const [showSchema, setShowSchema] = useState(false);
+  const [refinePrompt, setRefinePrompt] = useState("");
+  // Selected UI style · drives the theme override applied post-build.
+  // Default "brand" preserves clone palettes (Claude orange etc); user
+  // can flip to Modern/Glass/Console if they want a different look.
+  const [uiStyle, setUiStyle] = useState<string>("brand");
+  // Production mode · when on, ambitious prompts get routed to
+  // /api/codegen-app-stream for a real multi-file React/Next project
+  // streamed file-by-file into DelCode (user watches the agent code).
+  // Off = legacy DSL widget. Matches the 2026-05-25 ask for "same-to-
+  // same Claude-level production output + visible coding".
+  const [productionMode, setProductionMode] = useState<boolean>(false);
+  // Codegen wizard · UI style + scaffolding tier picked BEFORE build so
+  // the same prompt can be rendered Modern SaaS, Editorial, Glass,
+  // Brutalist, Linear-clean, Pixel-retro, or Minimal-mono. Tier drives
+  // file count + complexity floor (prototype 5-7 / production 8-12 /
+  // same-to-same 10-14).
+  const [codeStyle, setCodeStyle] = useState<
+    "modern-saas" | "editorial" | "glassmorphism" | "brutalist" | "linear-clean" | "pixel-retro" | "minimal-mono"
+  >("modern-saas");
+  // Default tier · "production" (6-8 files) was tripping Vercel's 90s
+  // function ceiling on warehouse / notion clones. Prototype (4-6 files)
+  // finishes reliably under deadline · user can manually upgrade to
+  // production or same-to-same via wizard for richer output.
+  const [codeTier, setCodeTier] = useState<"prototype" | "production" | "same-to-same">("prototype");
+  // Last codegen project (for the follow-up error loop).
+  const [lastProject, setLastProject] = useState<{ name: string; files: Array<{ path: string; content: string }> } | null>(null);
+  // Follow-up error textarea content.
+  const [errorFeedback, setErrorFeedback] = useState("");
+  // Live coding progress · file index / total / current path for the
+  // visible "agent is coding" UI between plan_done and project_done.
+  const [codeProgress, setCodeProgress] = useState<{ index: number; total: number; path: string; status: string } | null>(null);
+  // Per-file checklist rendered in the VibeCode panel · updated by SSE
+  // events as the stream emits file_start / file_done / file_skip.
+  // Lets the user see exactly which files landed and which retried/
+  // failed, instead of just the current cursor.
+  const [fileChecklist, setFileChecklist] = useState<Array<{ path: string; status: "queued" | "writing" | "done" | "retried" | "skipped"; bytes?: number; reason?: string }>>([]);
+  // Active path in the inline DelCode preview pane · auto-tracks the
+  // most recently landed file but the user can click a row in the
+  // checklist to lock onto a specific file. 2026-05-25 ask: "DelCode
+  // to be added in the route of VibeCode" → embed the IDE inline.
+  const [activePreviewPath, setActivePreviewPath] = useState<string | null>(null);
+  // Live mirror of accFiles · drives the inline preview pane during
+  // streams. Persists after build done so the split-view stays useful.
+  const [streamingFiles, setStreamingFiles] = useState<Array<{ path: string; content: string }>>([]);
+
+  // ─── Voice-to-build mic ────────────────────────────────────────────────
+  // User holds 🎙 → Whisper STT → transcript fills prompt textarea. Reuses
+  // the same Whisper pipeline as the global Voice agent so far-field
+  // capture + phonetic correction also work here.
+  const builderStt = useSpeechToText();
+  useEffect(() => {
+    if (builderStt.transcript && !busy) {
+      setPrompt(enhanceBuildPrompt(builderStt.transcript).slice(0, 1500));
+      builderStt.setTranscript("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builderStt.transcript]);
+  const micActive = builderStt.state === "listening" || builderStt.state === "recording";
   // BUG-1 fix · only overwrite the textarea when it's empty, still on the
   // default seed, OR the user has explicitly tapped Apply on a confirm.
   // Was: chip clicks silently wiped a typed-out spec mid-scroll.
@@ -855,40 +983,101 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
 
   useEffect(() => {
     return onIntent("builder.build", (i) => {
-      setPrompt(i.prompt);
+      const enhanced = enhanceBuildPrompt(i.prompt).slice(0, 1500);
+      setPrompt(enhanced);
       // Pass prompt EXPLICITLY — React state update is async, build() reading
       // from closure would race and pick up the stale default ("stopwatch").
       // Was: setTimeout(() => build(), 50)
-      setTimeout(() => build(i.prompt), 50);
+      setTimeout(() => build(enhanced), 50);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Replaces the generic stopwatch/tip-calc presets. These prompts route
+  // through the clone matcher → curated multi-card HTML templates with
+  // sidebars, message lists, dashboards, payment flows. Each ships in
+  // under 1s with brand-coherent palette + working state.
   const presets = [
-    "Build me a stopwatch with start/stop/reset.",
-    "Build a sticky-note board where I can add and remove notes.",
-    "Build a haiku generator that uses the agent to write a haiku about a topic.",
-    "Build a calculator that does +,-,*,/ using the calc tool.",
-    "Build a habit tracker for the week with checkboxes.",
-    "Build a tip calculator: bill amount + tip % → total per person.",
+    "Build me a Claude clone with sidebar, model picker, chat thread, and live compose",
+    "Build a full GitHub repo dashboard with file tree, commits, stars, and language stats",
+    "Build a Notion workspace with sidebar tree, page heading, status pills, and a database table",
+    "Build a Linear issue tracker with cycles, projects, priorities, and assignees",
+    "Build a Stripe billing dashboard with KPI cards, line chart, and recent payments table",
+    "Build a Slack workspace with channels, DMs, threaded messages, and composer",
+    "Build a YouTube clone with search bar, category chips, and a 6-video grid",
+    "Build an AirBnB clone with search bar, category icons, and 8 listings",
+    "Build me an Amazon clone with cart, checkout flow, and live total",
+    "Build a Spotify clone with discover row, queue, and player controls",
+    "Build a Tinder swipe app with profile card and like/dislike buttons",
+    "Build a Discord server with channel sidebar, threaded chat, and voice rooms",
   ];
 
-  // Curated production-grade templates — picked by judges/users for polish
+  // Curated production-grade templates — every entry maps to a curated
+  // multi-card HTML clone via the clone matcher in appBuilder.ts. Mixed
+  // categories so judges see a complete app gallery.
   const TEMPLATES: Array<{ id: string; label: string; icon: string; prompt: string; tag: string }> = [
-    { id: "dashboard", label: "Analytics Dashboard", icon: "BarChart3", tag: "BUSINESS", prompt: "Build an analytics dashboard with 4 KPI cards (revenue, users, conversion, churn), a line chart placeholder, and a top-5 sortable list. Each KPI fetches from /api/stats. Use the calc tool for derived metrics." },
-    { id: "landing", label: "Product Landing Page", icon: "Globe", tag: "MARKETING", prompt: "Build a product landing page with hero, 3-feature grid, pricing table (3 tiers), and a CTA email-capture form that uses notes_append to save submissions. Bold typography, glassmorphism." },
-    { id: "blog", label: "Markdown Blog", icon: "BookOpen", tag: "CONTENT", prompt: "Build a markdown blog reader with sidebar post list, main content pane that renders markdown via summarize tool, and a 'new post' button that uses the agent to draft 3 paragraphs on a topic." },
-    { id: "saas-billing", label: "SaaS Billing Console", icon: "CreditCard", tag: "BUSINESS", prompt: "Build a SaaS billing console with current-plan card, usage meter (tokens this month), 5 recent invoice rows, upgrade button, and a downgrade-confirm modal. Persist plan choice." },
-    { id: "kanban", label: "Kanban Board", icon: "Columns", tag: "PRODUCTIVITY", prompt: "Build a kanban board with 3 columns (Todo, Doing, Done), drag-free flow via buttons that move a card between columns. Each card has title + 2 tags. Persist to state." },
-    { id: "ai-chat", label: "Multi-LLM Chat", icon: "MessageSquare", tag: "AI", prompt: "Build a multi-LLM chat where the same prompt fires the agent tool 3 times with different model overrides, and displays answers side-by-side in a 3-col grid with model labels and timing." },
-    { id: "form-builder", label: "Form Builder", icon: "FileText", tag: "PRODUCTIVITY", prompt: "Build a no-code form builder: add text/number/textarea fields with labels, preview the form live, submit captures all field values into a submissions list. Export-to-JSON button." },
-    { id: "recipe", label: "AI Recipe Card", icon: "Utensils", tag: "LIFESTYLE", prompt: "Build a recipe card generator: enter ingredient list + cuisine, agent returns a 3-step recipe + ingredient quantities. Save favorites locally. Toggle metric/imperial units." },
-    { id: "timer", label: "Pomodoro Timer", icon: "Timer", tag: "PRODUCTIVITY", prompt: "Build a pomodoro timer with 25min work / 5min break cycles, start/pause/skip, session count, daily streak counter. Notification on cycle end." },
-    { id: "search", label: "Web Search Console", icon: "Search", tag: "AI", prompt: "Build a web search console: input query, fire web_search tool, render top 5 results as cards with title/url/snippet, click-to-open. History sidebar." },
-    { id: "polls", label: "Poll Booth", icon: "BarChartHorizontal", tag: "SOCIAL", prompt: "Build a poll booth: question input + 4 options, voters click an option, live bar chart of vote counts. 'New poll' resets. Persist active poll across reloads." },
-    { id: "habit", label: "Habit Tracker", icon: "Calendar", tag: "LIFESTYLE", prompt: "Build a 7-day habit tracker grid: 5 habits × 7 days. Click cell to toggle done/not-done. Show weekly completion %. Add new habit button." },
+    { id: "claude", label: "Claude Chat", icon: "Sparkles", tag: "AI", prompt: "Build me a Claude clone — sidebar with Recents, model picker (Opus/Sonnet/Haiku), conversation thread with user + assistant bubbles, compose with Send button, footer disclaimer." },
+    { id: "chatgpt", label: "ChatGPT Console", icon: "MessageSquare", tag: "AI", prompt: "Build a ChatGPT clone — left sidebar (New chat / Search / Library / GPTs / Today / Previous 7 days), model dropdown header, chat thread, rounded composer with +/mic/Send." },
+    { id: "perplexity", label: "Perplexity Search", icon: "Search", tag: "AI", prompt: "Build a Perplexity clone — left icon rail, hero 'Where knowledge begins', search bar with focus chips (Web/Academic/YouTube/Reddit), Answer block with [1][2][3] citations, source cards grid." },
+    { id: "github", label: "GitHub Repo", icon: "Github", tag: "DEV", prompt: "Build a GitHub repo dashboard — top nav with search + tabs (Code/Issues/PRs/Actions/Security/Insights), file tree with last-commit messages, About sidebar with stars/forks/languages." },
+    { id: "notion", label: "Notion Workspace", icon: "FileText", tag: "PRODUCTIVITY", prompt: "Build a Notion workspace — left sidebar with favorites + workspace pages, main page with emoji icon + title + status/owner/due cards, milestone checklist, database table with name/status/owner/updated columns." },
+    { id: "linear", label: "Linear Tracker", icon: "CircleDot", tag: "DEV", prompt: "Build a Linear issue tracker — left sidebar with workspace + cycles + projects, header with cycle name + New issue button, filter chips (All/Active/Backlog/Done), issue list with ID/status/title/priority/assignee/date." },
+    { id: "slack", label: "Slack Workspace", icon: "Hash", tag: "TEAM", prompt: "Build a Slack workspace — workspace rail + channel/DM sidebar with sections, channel header with member count, threaded messages with avatars, composer with formatting buttons." },
+    { id: "stripe", label: "Stripe Dashboard", icon: "CreditCard", tag: "BUSINESS", prompt: "Build a Stripe billing dashboard — left nav (Home/Payments/Invoices/Customers/Products), 4 KPI cards (volume/payments/customers/churn), gross-volume SVG line chart, recent payments table with status badges." },
+    { id: "youtube", label: "YouTube Clone", icon: "Youtube", tag: "MEDIA", prompt: "Build a YouTube clone — search bar with mic, category chips (All/Music/Hackathon/Coding/etc), 6-video grid with thumbnail gradients, durations, channel + view counts." },
+    { id: "airbnb", label: "AirBnB Clone", icon: "Home", tag: "TRAVEL", prompt: "Build an AirBnB clone — Stays/Experiences nav, pill-shaped search bar (where/check in/check out/guests + search circle), category icons row (Beach/Mountains/etc), 8-listing grid with photos/title/rating/price." },
+    { id: "tinder", label: "Tinder Swipe", icon: "Heart", tag: "SOCIAL", prompt: "Build a Tinder clone — phone-bezel card with profile gradient, name/age/bio/interests overlay, action button row (rewind/dislike/superlike/like/boost)." },
+    { id: "discord", label: "Discord Server", icon: "MessageSquare", tag: "SOCIAL", prompt: "Build a Discord server — left server rail, channel sidebar (text + voice sections), main chat with avatars + bot tag, message composer with gift/GIF/emoji buttons." },
+    { id: "snapchat", label: "Snapchat", icon: "Ghost", tag: "SOCIAL", prompt: "Build a Snapchat clone — phone bezel with status bar, camera viewfinder + streak pill, filter chips, big shutter button, 5-tab bottom nav (Map/Chat/Camera/Stories/Spotlight), side panel Stories feed." },
+    { id: "uber", label: "Uber Ride", icon: "Car", tag: "TRAVEL", prompt: "Build an Uber clone — pickup + dropoff inputs, ride class picker (UberX/Comfort/Black) with live fare, surge/ETA pills, Request ride button, status card." },
+    { id: "ubereats", label: "UberEats", icon: "UtensilsCrossed", tag: "FOOD", prompt: "Build an UberEats clone — restaurant picker, menu cards with add buttons, live cart total, Place order action." },
+    { id: "amazon", label: "Amazon Shop", icon: "ShoppingCart", tag: "ECOM", prompt: "Build an Amazon clone — search bar, featured products grid (4 items) with ratings + add-to-cart, live cart list + subtotal, Place order + Clear cart actions." },
+    { id: "netflix", label: "Netflix Stream", icon: "PlayCircle", tag: "MEDIA", prompt: "Build a Netflix clone — genre pill, Trending row, Documentaries row, My List with add/clear, now-playing pill." },
+    { id: "spotify", label: "Spotify Music", icon: "Music", tag: "MEDIA", prompt: "Build a Spotify clone — Discover button row (tracks), Play/Pause/+Queue controls, current track pill, queue list." },
+    { id: "macos", label: "macOS Desktop", icon: "Monitor", tag: "OS", prompt: "Build a macOS clone — top menu bar with apple + app menus + status icons + clock, aqua wallpaper, Finder window with traffic lights + Favorites sidebar + icon grid, glassy bottom dock with 10 app icons." },
+    { id: "bookmyshow", label: "Movie Tickets", icon: "Ticket", tag: "TRAVEL", prompt: "Build a BookMyShow clone — Now Showing button row, Showtimes row, Seats row + selection list with ₹ total, Confirm booking action." },
+    { id: "instagram", label: "Instagram Feed", icon: "Camera", tag: "SOCIAL", prompt: "Build an Instagram clone — caption textarea, Post action, scrollable feed with handle/caption/likes." },
+    { id: "snake-pro", label: "Snake Pro", icon: "Worm", tag: "GAMES", prompt: "Build a Snake Pro launcher — hi-score / last-score pills, how-to-play card, score tracker with Save + Reset actions." },
   ];
-  async function build(overridePrompt?: string) {
-    const usePrompt = overridePrompt ?? prompt;
+  // Apply the selected UI style as a theme override on a freshly-built spec.
+  // For "brand" we keep whatever the template ships. For "pixel" we strip
+  // the theme so the OS retro look returns. For the others we set the
+  // theme block which AppRuntime turns into CSS variables on the wrapper.
+  function applyUiStyle(spec: AppSpec, styleId: string): AppSpec {
+    if (styleId === "brand") return spec;
+    if (styleId === "pixel") {
+      const next = { ...(spec as unknown as Record<string, unknown>) } as AppSpec;
+      delete (next as unknown as { theme?: unknown }).theme;
+      return next;
+    }
+    const style = UI_STYLES.find((s) => s.id === styleId);
+    if (!style?.theme) return spec;
+    return { ...(spec as unknown as Record<string, unknown>), theme: style.theme } as unknown as AppSpec;
+  }
+
+  // Auto-detect production-worthy prompts. Returns true when the user
+  // asked for something ambitious enough to deserve a real multi-file
+  // React/Next project (codegen-app-stream) instead of the DSL widget
+  // path. Triggers:
+  //   • explicit "clone" / "same-to-same" keyword
+  //   • named brand (ChatGPT, Notion, Linear, etc.)
+  //   • ambition word (production-grade / complete / full / complex /
+  //     comprehensive / operating system / real app / SaaS / platform)
+  //   • prompt length ≥ 12 words (long prompts ≈ serious asks)
+  // Light prompts ("build me a stopwatch") still hit the DSL fast path.
+  // 2026-05-25 ask · "should auto build apps from scratch to give
+  // production level result".
+  function shouldAutoProduction(p: string): boolean {
+    const s = p.toLowerCase();
+    if (/\bclone\b|\bsame[-\s]*to[-\s]*same\b/i.test(s)) return true;
+    if (/\b(chatgpt|claude|anthropic|notion|linear|slack|stripe|figma|github|gmail|youtube|spotify|airbnb|tinder|discord|amazon|uber|netflix|perplexity|bookmyshow|reddit|twitter|x\.com)\b/i.test(s)) return true;
+    if (/\b(production[-\s]*(?:ready|grade|level|quality)|complete\s+(?:app|system|platform)|full[-\s]*(?:stack|featured)|complex|comprehensive|operating\s+system|real\s+(?:app|platform|system|website|saas)|saas\s+(?:app|dashboard|platform)|enterprise|production)\b/i.test(s)) return true;
+    const words = s.split(/\s+/).filter(Boolean);
+    if (words.length >= 12) return true;
+    return false;
+  }
+
+  async function build(overridePrompt?: string, opts?: { refineFromSpec?: AppSpec }) {
+    const usePrompt = (overridePrompt ?? prompt).slice(0, 1500);
     setBusy(true);
     setErr(null);
     setStage("plan");
@@ -897,17 +1086,184 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
     // Tick stages on a soft timer so user sees progress before real fetch resolves
     const tStage1 = setTimeout(() => setStage("spec"), 700);
     const tStage2 = setTimeout(() => setStage("validate"), 1600);
+    // Auto-promote ambitious prompts to production mode so the user
+    // gets real multi-file output without having to flip the toggle.
+    // The explicit toggle still wins when on.
+    const auto = !productionMode && !opts?.refineFromSpec && shouldAutoProduction(usePrompt);
+    const useProduction = productionMode || auto;
+    const cloneish = /\b(clone|same[-\s]*to[-\s]*same|chatgpt|claude|perplexity|notion|linear|slack|stripe|github|youtube|spotify|airbnb|tinder|discord|amazon|uber|netflix)\b/i.test(usePrompt);
+    const effectiveTier = useProduction && codeTier === "prototype" ? (cloneish ? "same-to-same" : "production") : codeTier;
+    if (auto) {
+      window.dispatchEvent(
+        new CustomEvent("toast", {
+          detail: { text: "★ Production mode auto-enabled · ambitious prompt → multi-file build", tone: "ok" },
+        }),
+      );
+    }
     try {
+      // Production mode path · routes to /api/codegen-app-stream for a
+      // real multi-file React/Next project streamed FILE-BY-FILE into
+      // DelCode (the user watches the agent code live, like Cursor /
+      // Claude Code). Refine flows stay on /api/build-app (DSL spec)
+      // because they patch a known spec in place. New ambitious builds
+      // with productionMode on get the same-to-same fidelity output.
+      if (useProduction && !opts?.refineFromSpec) {
+        // Open DelCode FIRST so the user sees files materialize one
+        // by one. Then start the SSE stream.
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "codebase" } }));
+        const accFiles: Array<{ path: string; content: string }> = [];
+        let projectName = "Generated project";
+        const r = await fetch("/api/codegen-app-stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: usePrompt,
+            stack: "nextjs",
+            uiStyle: codeStyle,
+            tier: effectiveTier,
+            previousProject: lastProject ?? undefined,
+            errorContext: errorFeedback || undefined,
+          }),
+        });
+        if (!r.body) throw new Error("no stream");
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        let streamErr: string | null = null;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() ?? "";
+          for (const p of parts) {
+            const line = p.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            try {
+              const ev = JSON.parse(line.slice(6)) as { t: string;[k: string]: unknown };
+              if (ev.t === "plan_done") {
+                const proj = ev.project as { name?: string; files?: Array<{ path: string; purpose?: string }> };
+                projectName = proj.name ?? projectName;
+                setCodeProgress({ index: 0, total: proj.files?.length ?? 0, path: "(plan)", status: "planning done · writing files" });
+                // Seed the checklist with every planned file so the
+                // user sees the full file tree before any writes land.
+                setFileChecklist(
+                  (proj.files ?? []).map((f) => ({ path: f.path, status: "queued" as const })),
+                );
+              } else if (ev.t === "file_start") {
+                const path = ev.path as string;
+                setCodeProgress({
+                  index: (ev.index as number) + 1,
+                  total: ev.total as number,
+                  path,
+                  status: "writing",
+                });
+                setFileChecklist((prev) =>
+                  prev.map((row) => (row.path === path ? { ...row, status: "writing" as const } : row)),
+                );
+              } else if (ev.t === "file_done") {
+                const path = ev.path as string;
+                const content = ev.content as string;
+                const retried = Boolean(ev.retried);
+                accFiles.push({ path, content });
+                // Push incremental files into DelCode so the user
+                // SEES the IDE populate as the agent writes.
+                window.dispatchEvent(
+                  new CustomEvent("delos-codegen-load", {
+                    detail: { files: accFiles, name: projectName },
+                  }),
+                );
+                setCodeProgress({
+                  index: (ev.index as number) + 1,
+                  total: ev.total as number,
+                  path,
+                  status: retried ? "✓ written (retried)" : "✓ written",
+                });
+                setFileChecklist((prev) =>
+                  prev.map((row) =>
+                    row.path === path
+                      ? { ...row, status: (retried ? "retried" : "done") as "done" | "retried", bytes: content.length }
+                      : row,
+                  ),
+                );
+                // Auto-focus the inline preview onto the freshest file
+                // so the user watches the latest code drop in.
+                setActivePreviewPath(path);
+                setStreamingFiles((prev) => {
+                  const next = prev.filter((r) => r.path !== path);
+                  next.push({ path, content });
+                  return next;
+                });
+              } else if (ev.t === "file_skip") {
+                const path = ev.path as string;
+                const reason = String(ev.reason ?? "");
+                setFileChecklist((prev) =>
+                  prev.map((row) => (row.path === path ? { ...row, status: "skipped" as const, reason } : row)),
+                );
+              } else if (ev.t === "error") {
+                streamErr = String(ev.message ?? "stream error");
+              }
+            } catch {}
+          }
+        }
+        if (streamErr && accFiles.length === 0) throw new Error(streamErr);
+        if (accFiles.length === 0) throw new Error("codegen stream returned no files");
+        setLastProject({ name: projectName, files: accFiles });
+        setErrorFeedback("");
+        setStage("done");
+        broadcastAgent("planner", "done");
+        broadcastAgent("executor", "done");
+        broadcastAgent("critic", "done");
+        broadcastAgent("memory", "done");
+        window.dispatchEvent(
+          new CustomEvent("toast", {
+            detail: { text: `★ ${projectName} · ${accFiles.length} files`, tone: "ok" },
+          }),
+        );
+        setTimeout(() => {
+          setStage("idle");
+          setCodeProgress(null);
+          broadcastAgent("planner", "idle");
+          broadcastAgent("executor", "idle");
+          broadcastAgent("critic", "idle");
+          broadcastAgent("memory", "idle");
+        }, 1500);
+        clearTimeout(tStage1);
+        clearTimeout(tStage2);
+        setBusy(false);
+        return;
+      }
+      // Refine path · send the user's change verbatim. The "Refine the
+      // existing app X. Apply this change: …" wrapper was leaking into
+      // downstream LLM title generation (LLM took the prefix as the new
+      // name → "Refine the existing app 'ChatGPT · OpenA…'"). The
+      // server-side refineBlock already injects the previous-spec JSON
+      // so the LLM has full context without the prompt prefix.
+      const finalPrompt = usePrompt;
       const r = await fetch("/api/build-app", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: usePrompt, models: getModelOverrides(), tenantId: getTenantId(), temperature: getTemperature(), identity: renderIdentityPreamble(getIdentity()) || undefined }),
+        body: JSON.stringify({
+          prompt: finalPrompt,
+          models: getModelOverrides(),
+          tenantId: getTenantId(),
+          temperature: getTemperature(),
+          identity: renderIdentityPreamble(getIdentity()) || undefined,
+          // Refine path · backend skips matchBuiltin / clone templates and
+          // injects this spec into the LLM context so the result mutates
+          // the existing app in place. Without this the LLM saw only the
+          // change-request text and frequently rebuilt as a different
+          // domain (Investor CRM → DQ War Room regression).
+          previousSpec: opts?.refineFromSpec,
+        }),
       });
       const j = (await r.json()) as { spec?: AppSpec; error?: string };
       if (!r.ok || !j.spec) throw new Error(j.error ?? `HTTP ${r.status}`);
       setStage("mount");
       broadcastAgent("critic", "thinking");
-      onBuilt(j.spec);
+      const finalSpec = applyUiStyle(j.spec, uiStyle);
+      setLastSpec(finalSpec);
+      onBuilt(finalSpec);
       setStage("done");
       broadcastAgent("planner", "done");
       broadcastAgent("executor", "done");
@@ -949,18 +1305,87 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
     { key: "done", label: "done" },
   ];
   return (
-    <div className="p-3 space-y-3 text-xs">
-      <div className="font-pixel text-sm tracking-wider" style={{ color: "var(--accent)" }}>★ AGENT APP BUILDER</div>
+    <div className="flex h-full" style={{ minHeight: 480 }}>
+      {/* Left pane · existing VibeCode wizard / prompt / checklist. Width
+          constrained when split-view is on so DelCode inline preview
+          gets room. */}
+    <div
+      className="p-3 space-y-3 text-xs overflow-y-auto"
+      style={{
+        paddingBottom: 96,
+        flex: productionMode && (streamingFiles.length > 0 || lastProject) ? "0 0 440px" : "1 1 100%",
+        borderRight:
+          productionMode && (streamingFiles.length > 0 || lastProject)
+            ? "1px solid var(--surface-2)"
+            : "none",
+      }}
+    >
+      {/* paddingBottom keeps the BUILD APP / REFINE controls clear of the
+          dock magnification region (~104px). Was an exact-overlap zone
+          where forced clicks landed on dock icons (Identity) instead of
+          the BUILD button — 2026-05-25 brutal-QA P0. */}
+      <div className="font-pixel text-sm tracking-wider" style={{ color: "var(--accent)" }}>★ VIBECODE · VIBE-CODING PLATFORM</div>
       <p className="text-[color:var(--muted)] font-mono">
-        Describe an app. DelOS agents will generate the spec, validate it, mount it as a window. Saves to HydraDB so judges can recall it.
+        Speak it, type it, ship it. VibeCode generates the spec, validates it, mounts a working app in a window. Pick a UI style + refine after build. HydraDB remembers everything.
       </p>
-      <textarea
-        className="input-pixel"
-        rows={3}
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        disabled={busy}
-      />
+      <div style={{ position: "relative" }}>
+        <textarea
+          className="input-pixel"
+          rows={3}
+          value={prompt}
+          // Hard cap at 1500 chars on input · prompt slice(0, 1500) prevents
+          // 5000+ char DOS prompts that QA reported as causing partial output
+          // / timeouts. Server-side cap is 800 (sanitizePrompt) but textarea
+          // gives the user EARLY visual feedback before they hit BUILD.
+          onChange={(e) => setPrompt(e.target.value.slice(0, 1500))}
+          maxLength={1500}
+          disabled={busy}
+          style={{ paddingRight: 44 }}
+        />
+        {/* Length counter · turns warn at 80%, danger at 100% */}
+        <div
+          className="font-mono"
+          style={{
+            position: "absolute",
+            right: 50,
+            bottom: 4,
+            fontSize: 9,
+            color: prompt.length >= 1500 ? "var(--danger)" : prompt.length >= 1200 ? "var(--warn)" : "var(--muted)",
+            pointerEvents: "none",
+          }}
+        >
+          {prompt.length}/1500
+        </div>
+        <button
+          onClick={() => {
+            if (micActive) builderStt.stop();
+            else builderStt.start();
+          }}
+          disabled={busy}
+          title={micActive ? "stop dictation" : "dictate prompt"}
+          style={{
+            position: "absolute",
+            top: 6,
+            right: 6,
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            background: micActive ? "var(--danger)" : "var(--accent)",
+            color: "var(--on-accent)",
+            border: "2px solid var(--bg)",
+            cursor: busy ? "not-allowed" : "pointer",
+            fontSize: 14,
+            lineHeight: 1,
+            boxShadow: micActive ? "0 0 0 4px rgba(255,80,80,0.35)" : "2px 2px 0 var(--shadow)",
+            animation: micActive ? "delos-mic-pulse 0.9s ease-in-out infinite" : undefined,
+          }}
+        >
+          {builderStt.state === "transcribing" ? "…" : micActive ? "■" : "🎙"}
+        </button>
+        {builderStt.state === "transcribing" && (
+          <div className="text-[10px] font-mono mt-1" style={{ color: "var(--accent)" }}>transcribing your voice…</div>
+        )}
+      </div>
       <div className="flex flex-wrap gap-1">
         {presets.map((p) => (
           <button
@@ -1045,8 +1470,283 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
           </div>
         </div>
       )}
-      <div className="flex gap-2 items-center">
-        <button className="btn-pixel success" onClick={() => build()} disabled={busy} style={{ padding: "8px 14px", fontSize: 12 }}>
+      {/* UI style picker · 5 presets. Selected style is applied as a theme
+          override on the spec post-build, so the same prompt can be styled
+          5 different ways without re-running the LLM. */}
+      <div className="space-y-1.5">
+        <div className="font-pixel text-[10px] tracking-widest" style={{ color: "var(--accent)" }}>★ UI STYLE</div>
+        <div className="grid grid-cols-5 gap-1">
+          {UI_STYLES.map((s) => {
+            const SIcon = (Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>)[s.icon] ?? Icons.Box;
+            const active = uiStyle === s.id;
+            return (
+              <button
+                key={s.id}
+                disabled={busy}
+                onClick={() => setUiStyle(s.id)}
+                title={s.desc}
+                className="card-pixel flex flex-col items-center gap-0.5"
+                style={{
+                  padding: "6px 4px",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  background: active ? "var(--surface-2)" : "var(--surface)",
+                  borderColor: active ? "var(--accent)" : "var(--surface-2)",
+                  borderWidth: active ? 2 : 1,
+                }}
+              >
+                <SIcon size={14} color={active ? "var(--accent)" : "var(--muted)"} />
+                <span className="font-pixel text-[9px] tracking-wider" style={{ color: active ? "var(--accent)" : "var(--fg)" }}>
+                  {s.label.toUpperCase()}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Production mode toggle · flips builds onto /api/codegen-app for
+          full multi-file React/Next output rendered in DelCode IDE.
+          Default off · keeps the lightweight DSL path for quick widgets.
+          Refine flows are unaffected (always DSL spec patches). */}
+      <div className="flex items-center gap-2 mt-2 flex-wrap">
+        <button
+          onClick={() => setProductionMode((v) => !v)}
+          className={`pill cursor-pointer ${productionMode ? "pill-ok" : "pill-muted"}`}
+          style={{ fontSize: 9, padding: "3px 9px" }}
+          title="On = real React project streamed file-by-file into DelCode · Off = DelOS widget"
+        >
+          {productionMode ? "● PRODUCTION · ON" : "○ production · off"}
+        </button>
+        <span className="font-mono" style={{ fontSize: 9, color: "var(--muted)" }}>
+          {productionMode ? "→ DelCode IDE · streamed multi-file build" : "→ DelOS widget · single-file DSL spec"}
+        </span>
+      </div>
+
+      {/* Pre-build wizard · only visible when productionMode is on. Lets the
+          user pick a UI style + scaffolding tier BEFORE the agent starts
+          coding. Threads through to /api/codegen-app-stream as uiStyle +
+          tier params. 2026-05-25 ask: "ask me the question initially —
+          what type of UI you want · give me the categories of it · I can
+          select · do you need prototype scaffolding type of things". */}
+      {productionMode && (
+        <div className="space-y-2 mt-2">
+          <div>
+            <div className="font-pixel text-[10px] tracking-widest mb-1" style={{ color: "var(--accent)" }}>★ UI CATEGORY</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
+              {([
+                { id: "modern-saas", label: "Modern SaaS", desc: "Inter · indigo · soft shadow · Linear / Stripe vibe" },
+                { id: "editorial", label: "Editorial", desc: "Serif · prose · NYT / Stripe Press" },
+                { id: "glassmorphism", label: "Glassmorph", desc: "Frosted blur · neon · Vision Pro vibe" },
+                { id: "brutalist", label: "Brutalist", desc: "Hard shadows · 2px borders · mono uppercase" },
+                { id: "linear-clean", label: "Linear-clean", desc: "Dense rows · neutral · single accent" },
+                { id: "pixel-retro", label: "Pixel Retro", desc: "DelOS native · Pixelify Sans · CRT" },
+                { id: "minimal-mono", label: "Minimal Mono", desc: "JetBrains Mono · monochrome" },
+              ] as const).map((s) => {
+                const active = codeStyle === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => setCodeStyle(s.id)}
+                    className="card-pixel flex flex-col items-start"
+                    title={s.desc}
+                    style={{
+                      padding: "5px 7px",
+                      cursor: "pointer",
+                      background: active ? "var(--surface-2)" : "var(--surface)",
+                      borderColor: active ? "var(--accent)" : "var(--surface-2)",
+                      borderWidth: active ? 2 : 1,
+                    }}
+                  >
+                    <span className="font-pixel text-[9px] tracking-wider" style={{ color: active ? "var(--accent)" : "var(--fg)" }}>{s.label}</span>
+                    <span className="font-mono text-[8px]" style={{ color: "var(--muted)" }}>{s.desc.slice(0, 40)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <div className="font-pixel text-[10px] tracking-widest mb-1" style={{ color: "var(--accent)" }}>★ SCAFFOLDING TIER</div>
+            <div className="grid grid-cols-3 gap-1">
+              {([
+                { id: "prototype", label: "Prototype", desc: "5-7 files · happy path · demo-grade" },
+                { id: "production", label: "Production", desc: "8-12 files · routes · settings · states" },
+                { id: "same-to-same", label: "Same-to-same", desc: "10-14 files · clone fidelity · brand colors" },
+              ] as const).map((t) => {
+                const active = codeTier === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setCodeTier(t.id)}
+                    className="card-pixel flex flex-col items-start"
+                    title={t.desc}
+                    style={{
+                      padding: "5px 7px",
+                      cursor: "pointer",
+                      background: active ? "var(--surface-2)" : "var(--surface)",
+                      borderColor: active ? "var(--accent)" : "var(--surface-2)",
+                      borderWidth: active ? 2 : 1,
+                    }}
+                  >
+                    <span className="font-pixel text-[9px] tracking-wider" style={{ color: active ? "var(--accent)" : "var(--fg)" }}>{t.label}</span>
+                    <span className="font-mono text-[8px]" style={{ color: "var(--muted)" }}>{t.desc.slice(0, 42)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {/* Live coding progress · shown while the SSE stream emits files.
+              Each file_done event updates this strip + lands the file in
+              DelCode so the user watches the build happen. */}
+          {codeProgress && (
+            <div className="card-pixel" style={{ padding: "6px 8px", borderColor: "var(--accent)" }}>
+              <div className="font-pixel text-[10px] tracking-wider" style={{ color: "var(--accent)" }}>
+                ★ AGENT CODING · {codeProgress.index}/{codeProgress.total}
+              </div>
+              <div className="font-mono text-[10px] mt-1" style={{ color: "var(--fg)" }}>
+                {codeProgress.status} · <span style={{ color: "var(--muted)" }}>{codeProgress.path}</span>
+              </div>
+            </div>
+          )}
+          {/* File checklist · per-file status with icons. Was a single
+              "current file" line · users couldn't tell how far the build
+              was or which files failed. Now: see every file in the plan
+              + watch them flip queued → writing → ✓ done / ↻ retried /
+              ✗ skipped in real time. */}
+          {fileChecklist.length > 0 && (
+            <div className="card-pixel" style={{ padding: "6px 8px", borderColor: "var(--surface-2)" }}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="font-pixel text-[10px] tracking-wider" style={{ color: "var(--accent)" }}>
+                  ★ PROJECT FILES · {fileChecklist.filter((r) => r.status === "done" || r.status === "retried").length}/{fileChecklist.length}
+                </div>
+                <button
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("delos-launch-app", { detail: { id: "codebase" } }),
+                    )
+                  }
+                  className="pill pill-info cursor-pointer"
+                  style={{ fontSize: 9, padding: "2px 8px" }}
+                  title="Jump to DelCode IDE to read the generated source"
+                >
+                  ▶ OPEN DELCODE
+                </button>
+              </div>
+              <div
+                className="font-mono text-[10px] space-y-0.5"
+                style={{ maxHeight: 160, overflowY: "auto" }}
+              >
+                {fileChecklist.map((row) => {
+                  const icon =
+                    row.status === "done"
+                      ? "✓"
+                      : row.status === "retried"
+                        ? "↻"
+                        : row.status === "skipped"
+                          ? "✗"
+                          : row.status === "writing"
+                            ? "▸"
+                            : "·";
+                  const color =
+                    row.status === "done"
+                      ? "var(--success)"
+                      : row.status === "retried"
+                        ? "var(--warn)"
+                        : row.status === "skipped"
+                          ? "var(--danger)"
+                          : row.status === "writing"
+                            ? "var(--accent)"
+                            : "var(--muted)";
+                  return (
+                    <div key={row.path} className="flex items-baseline gap-2" title={row.reason || row.path}>
+                      <span style={{ color, width: 10, display: "inline-block" }}>{icon}</span>
+                      <span style={{ color: "var(--fg)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.path}</span>
+                      {row.bytes != null && (
+                        <span style={{ color: "var(--muted)" }}>{row.bytes >= 1024 ? `${(row.bytes / 1024).toFixed(1)}K` : `${row.bytes}b`}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {/* Follow-up error loop · appears after a successful build. User
+              types the issue they noticed (UI bug, missing feature, error
+              text) and clicks REBUILD → server gets previousProject +
+              errorContext and patches the affected files. */}
+          {lastProject && !busy && (
+            <div className="space-y-1">
+              <div className="font-pixel text-[10px] tracking-widest" style={{ color: "var(--accent)" }}>
+                ★ REPORT AN ISSUE · agent will fix and rebuild
+              </div>
+              <textarea
+                className="input-pixel"
+                rows={2}
+                value={errorFeedback}
+                onChange={(e) => setErrorFeedback(e.target.value.slice(0, 1800))}
+                placeholder={`e.g. "Sidebar overflows on mobile" · "Modal close button missing" · "Header copy says 'undefined'"`}
+                style={{ fontSize: 11 }}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    if (!errorFeedback.trim()) return;
+                    void build(prompt);
+                  }}
+                  disabled={!errorFeedback.trim()}
+                  className="btn-pixel"
+                  style={{ fontSize: 10, padding: "5px 10px" }}
+                >
+                  ↻ REBUILD WITH FIX
+                </button>
+                <span className="font-mono text-[9px]" style={{ color: "var(--muted)" }}>
+                  prior project + your feedback → patched files
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Sticky footer · keeps BUILD APP visible above the dock when the
+          panel scrolls past it. Was a regular flex row that scrolled off
+          screen on short heights, and forced clicks at the bottom
+          landed on dock icons. position:sticky pins it to the bottom
+          of THIS scroll context, not the viewport, so it always reaches
+          the user above the safe area. 2026-05-25 brutal-QA P0. */}
+      <div
+        className="flex gap-2 items-center"
+        style={{
+          position: "sticky",
+          bottom: 8,
+          background: "var(--surface)",
+          padding: "8px",
+          borderTop: "1px solid var(--surface-2)",
+          marginLeft: -12,
+          marginRight: -12,
+          paddingLeft: 12,
+          paddingRight: 12,
+          zIndex: 5,
+        }}
+      >
+        <button
+          className="btn-pixel success"
+          onClick={() => {
+            if (busy) return; // defensive · disabled already guards but
+                              // QA reported "deploy twice quickly" race.
+            if (!prompt.trim()) {
+              window.dispatchEvent(
+                new CustomEvent("toast", { detail: { text: "Enter a prompt first", tone: "warn" } }),
+              );
+              return;
+            }
+            void build();
+          }}
+          disabled={busy || !prompt.trim()}
+          aria-label={busy ? "Building app (in progress)" : "Build app from prompt"}
+          aria-busy={busy}
+          title={busy ? "Build in progress — please wait" : "Generate the app from the prompt above"}
+          style={{ padding: "8px 14px", fontSize: 12, cursor: busy ? "not-allowed" : "pointer" }}
+        >
           {busy ? "BUILDING…" : "▶ BUILD APP"}
         </button>
         {busy && (
@@ -1086,6 +1786,180 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
         </div>
       )}
       {err && <div className="pill pill-bad">err: {err}</div>}
+
+      {/* Last-built spec · refine + schema viewer + debug. Hidden until a
+          successful build lands so the panel doesn't clutter empty state. */}
+      {lastSpec && !busy && (
+        <div className="space-y-2 mt-3" style={{ borderTop: "1px dashed var(--surface-2)", paddingTop: 10 }}>
+          <div className="flex items-center justify-between">
+            <span className="font-pixel text-[10px] tracking-widest" style={{ color: "var(--success)" }}>
+              ✓ LAST BUILD · {lastSpec.name}
+            </span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setShowSchema((v) => !v)}
+                className="pill pill-muted"
+                style={{ cursor: "pointer", fontSize: 9 }}
+              >
+                {showSchema ? "↑ HIDE SCHEMA" : "▾ SHOW SCHEMA"}
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(JSON.stringify(lastSpec, null, 2));
+                    window.dispatchEvent(new CustomEvent("toast", { detail: { text: "schema copied", tone: "ok" } }));
+                  } catch (e) {
+                    window.dispatchEvent(new CustomEvent("toast", { detail: { text: `copy failed: ${(e as Error).message.slice(0, 30)}`, tone: "bad" } }));
+                  }
+                }}
+                className="pill pill-muted"
+                style={{ cursor: "pointer", fontSize: 9 }}
+              >
+                ⧉ COPY JSON
+              </button>
+            </div>
+          </div>
+          {showSchema && (
+            <pre
+              style={{
+                background: "var(--surface)",
+                border: "1px solid var(--surface-2)",
+                padding: 8,
+                maxHeight: 240,
+                overflow: "auto",
+                fontSize: 10,
+                fontFamily: "ui-monospace, 'JetBrains Mono', monospace",
+                color: "var(--muted)",
+                whiteSpace: "pre",
+              }}
+            >
+              {JSON.stringify(lastSpec, null, 2)}
+            </pre>
+          )}
+          <div className="space-y-1">
+            <div className="font-pixel text-[10px] tracking-widest" style={{ color: "var(--accent)" }}>↻ REFINE / DEBUG</div>
+            <textarea
+              className="input-pixel"
+              rows={2}
+              value={refinePrompt}
+              onChange={(e) => setRefinePrompt(e.target.value)}
+              placeholder='e.g. "add a reset button", "make the title bigger", "fix the cart total math"'
+              disabled={busy}
+            />
+            <div className="flex gap-1.5">
+              <button
+                disabled={busy || !refinePrompt.trim()}
+                onClick={() => {
+                  if (!refinePrompt.trim() || !lastSpec) return;
+                  const change = refinePrompt;
+                  setRefinePrompt("");
+                  build(change, { refineFromSpec: lastSpec });
+                }}
+                className="btn-pixel"
+                style={{ fontSize: 11, padding: "6px 12px" }}
+              >
+                ↻ REFINE
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  if (!lastSpec) return;
+                  setRefinePrompt("");
+                  build(`Debug this app. Fix any bugs in bindings, missing initialState keys, broken actions, mis-named icons. Return a corrected spec.`, { refineFromSpec: lastSpec });
+                }}
+                className="btn-pixel ghost"
+                style={{ fontSize: 11, padding: "6px 12px" }}
+              >
+                🐛 AUTO-DEBUG
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => { setLastSpec(null); setShowSchema(false); setRefinePrompt(""); }}
+                className="btn-pixel ghost"
+                style={{ fontSize: 11, padding: "6px 12px", color: "var(--muted)" }}
+              >
+                ✕ DISMISS
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+    {/* Right pane · inline DelCode preview · ONLY when productionMode +
+        we have something to show. File tree on the left of this pane,
+        active file content on the right. Click a row to focus that file.
+        2026-05-25 ask · "DelCode to be added in the route of VibeCode". */}
+    {productionMode && (streamingFiles.length > 0 || lastProject) && (
+      <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "var(--bg)" }}>
+        <div className="flex items-center justify-between px-2 py-1" style={{ background: "var(--surface)", borderBottom: "1px solid var(--surface-2)" }}>
+          <span className="font-pixel text-[10px] tracking-widest" style={{ color: "var(--accent)" }}>
+            {"</>"} DELCODE INLINE · {(streamingFiles.length || (lastProject?.files?.length ?? 0))} files
+          </span>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "codebase" } }))}
+            className="pill pill-info"
+            style={{ fontSize: 9, padding: "1px 7px", cursor: "pointer" }}
+            title="Open full DelCode IDE in its own window"
+          >
+            ⤢ FULL IDE
+          </button>
+        </div>
+        <div className="flex flex-1 overflow-hidden">
+          <div className="overflow-y-auto" style={{ flex: "0 0 200px", borderRight: "1px solid var(--surface-2)", background: "var(--surface)" }}>
+            {(() => {
+              const files = streamingFiles.length > 0 ? streamingFiles : lastProject?.files ?? [];
+              if (files.length === 0)
+                return <div className="p-3 font-mono text-[10px]" style={{ color: "var(--muted)" }}>No files yet · build will populate</div>;
+              return files.map((f) => {
+                const active = f.path === activePreviewPath;
+                return (
+                  <button
+                    key={f.path}
+                    onClick={() => setActivePreviewPath(f.path)}
+                    className="block w-full text-left px-2 py-1 font-mono text-[10px]"
+                    style={{
+                      background: active ? "var(--surface-2)" : "transparent",
+                      color: active ? "var(--accent)" : "var(--fg)",
+                      cursor: "pointer",
+                      border: "none",
+                      borderLeft: active ? "2px solid var(--accent)" : "2px solid transparent",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {f.path}
+                  </button>
+                );
+              });
+            })()}
+          </div>
+          <div className="flex-1 overflow-auto" style={{ background: "#0a0a14" }}>
+            {(() => {
+              const files = streamingFiles.length > 0 ? streamingFiles : lastProject?.files ?? [];
+              const active = files.find((f) => f.path === activePreviewPath) ?? files[files.length - 1];
+              if (!active)
+                return <div className="p-3 font-mono text-[10px]" style={{ color: "var(--muted)" }}>{busy ? "Agent coding · live files will appear here…" : "Click a file in the list to preview."}</div>;
+              return (
+                <pre
+                  className="font-mono"
+                  style={{
+                    fontSize: 10,
+                    lineHeight: 1.5,
+                    color: "#e8e8f0",
+                    padding: 10,
+                    margin: 0,
+                    whiteSpace: "pre",
+                  }}
+                >
+                  {active.content}
+                </pre>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 }

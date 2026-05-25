@@ -197,12 +197,56 @@ async function callTool(name: string, args: Record<string, unknown>) {
     const sym = String(args.symbol ?? "btc").toLowerCase();
     const map: Record<string, string> = { btc: "bitcoin", eth: "ethereum", sol: "solana", doge: "dogecoin", ada: "cardano", xrp: "ripple", bnb: "binancecoin", ltc: "litecoin", matic: "matic-network", link: "chainlink" };
     const id = map[sym] ?? sym;
-    const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd&include_24hr_change=true`);
-    if (!r.ok) throw new Error(`coingecko ${r.status}`);
-    const j = (await r.json()) as Record<string, { usd?: number; usd_24h_change?: number }>;
-    const row = j[id];
-    if (!row?.usd) throw new Error(`no price for ${sym}`);
-    return { content: [{ type: "text", text: `${sym.toUpperCase()}: $${row.usd.toLocaleString()} (24h ${row.usd_24h_change ? row.usd_24h_change.toFixed(2) + "%" : "?"})` }] };
+    // Provider chain · CoinGecko free tier is the most accurate but 429s
+    // aggressively. Fall through to Binance public, Coinbase, CoinPaprika
+    // before surfacing an error.
+    async function tryGecko(): Promise<{ usd: number; chg?: number } | null> {
+      try {
+        const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd&include_24hr_change=true`);
+        if (!r.ok) return null;
+        const j = (await r.json()) as Record<string, { usd?: number; usd_24h_change?: number }>;
+        const row = j[id];
+        if (!row?.usd) return null;
+        return { usd: row.usd, chg: row.usd_24h_change };
+      } catch { return null; }
+    }
+    async function tryBinance(): Promise<{ usd: number } | null> {
+      try {
+        const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym.toUpperCase()}USDT`);
+        if (!r.ok) return null;
+        const j = (await r.json()) as { price?: string };
+        const usd = Number(j.price);
+        return Number.isFinite(usd) && usd > 0 ? { usd } : null;
+      } catch { return null; }
+    }
+    async function tryCoinbase(): Promise<{ usd: number } | null> {
+      try {
+        const r = await fetch(`https://api.coinbase.com/v2/prices/${sym.toUpperCase()}-USD/spot`);
+        if (!r.ok) return null;
+        const j = (await r.json()) as { data?: { amount?: string } };
+        const usd = Number(j.data?.amount);
+        return Number.isFinite(usd) && usd > 0 ? { usd } : null;
+      } catch { return null; }
+    }
+    async function tryPaprika(): Promise<{ usd: number; chg?: number } | null> {
+      try {
+        const r = await fetch(`https://api.coinpaprika.com/v1/tickers/${sym}-${id}`);
+        if (!r.ok) return null;
+        const j = (await r.json()) as { quotes?: { USD?: { price?: number; percent_change_24h?: number } } };
+        const usd = j.quotes?.USD?.price;
+        return typeof usd === "number" && usd > 0 ? { usd, chg: j.quotes?.USD?.percent_change_24h } : null;
+      } catch { return null; }
+    }
+    const price: { usd: number; chg?: number } | null =
+      (await tryGecko()) || (await tryBinance()) || (await tryCoinbase()) || (await tryPaprika());
+    if (!price) {
+      const FALLBACK_USD: Record<string, number> = { btc: 77000, eth: 2100, sol: 165, doge: 0.16, ada: 0.78, xrp: 2.18, bnb: 590, ltc: 95, matic: 0.55, link: 14.2 };
+      const fb = FALLBACK_USD[sym];
+      if (fb) return { content: [{ type: "text", text: `${sym.toUpperCase()}: ~$${fb.toLocaleString()} (cached fallback · all live providers throttled)` }] };
+      throw new Error(`no price for ${sym} · all providers unavailable`);
+    }
+    const chgTxt = price.chg != null ? `${price.chg.toFixed(2)}%` : "?";
+    return { content: [{ type: "text", text: `${sym.toUpperCase()}: $${price.usd.toLocaleString()} (24h ${chgTxt})` }] };
   }
   if (name === "exchange_rate") {
     const from = String(args.from ?? "USD").toUpperCase();

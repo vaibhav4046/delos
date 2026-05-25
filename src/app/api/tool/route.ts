@@ -29,5 +29,16 @@ export async function POST(req: NextRequest) {
     emit: () => {},
   });
   if (res.ok) return Response.json({ ok: true, data: res.data });
-  return Response.json({ ok: false, error: res.error }, { status: 200 });
+  // B14 · unknown tool → HTTP 404 (was 200+ok:false which broke API contract).
+  // Schema/runtime errors stay 400 so callers can distinguish "wrong tool"
+  // from "wrong args".
+  const notFound = /^Tool not found:/i.test(res.error ?? "");
+  return Response.json(
+    { ok: false, error: res.error },
+    { status: notFound ? 404 : 400 },
+  );
+}
+
+export async function GET() {
+  return Response.json({ error: "method_not_allowed" }, { status: 405 });
 }

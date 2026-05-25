@@ -154,7 +154,7 @@ function saveNotes(n: StickyNote[]) {
 
 export function DesktopWidgets() {
   const [notes, setNotes] = useState<StickyNote[]>([]);
-  const [time, setTime] = useState(new Date());
+  const [time, setTime] = useState<Date | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [layout, setLayout] = useState<Record<WidgetId, WidgetLayout>>(DEFAULT_LAYOUT);
   const [addMenu, setAddMenu] = useState(false);
@@ -173,6 +173,7 @@ export function DesktopWidgets() {
   }
 
   useEffect(() => {
+    setTime(new Date());
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -411,13 +412,14 @@ export function DesktopWidgets() {
             }}
           >
             <div
+              suppressHydrationWarning
               className="font-pixel tracking-wider"
               style={{ color: "var(--fg)", fontSize: 24, lineHeight: 1, marginBottom: 4 }}
             >
-              {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {time ? time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--"}
             </div>
-            <div className="font-mono" style={{ color: "var(--muted)", fontSize: 9, letterSpacing: "0.1em" }}>
-              {time.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+            <div suppressHydrationWarning className="font-mono" style={{ color: "var(--muted)", fontSize: 9, letterSpacing: "0.1em" }}>
+              {time ? time.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : "—"}
             </div>
           </div>
         </WidgetFrame>
@@ -550,11 +552,24 @@ async function geocodeCity(q: string): Promise<WeatherLoc | null> {
   } catch { return null; }
 }
 
+type WeatherData = {
+  tempC: number;
+  apparentC: number;
+  code: number;
+  humidity: number;
+  windKph: number;
+  city: string;
+  region: string;
+  country: string;
+  source: WeatherLoc["source"];
+};
+
 function WeatherWidget() {
-  const [data, setData] = useState<{ tempC: number; code: number; city: string; source: WeatherLoc["source"] } | null>(null);
+  const [data, setData] = useState<WeatherData | null>(null);
   const [err, setErr] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cityInput, setCityInput] = useState("");
+  const [permState, setPermState] = useState<"granted" | "denied" | "prompt" | "unknown">("unknown");
 
   useEffect(() => {
     let cancelled = false;
@@ -562,16 +577,69 @@ function WeatherWidget() {
 
     async function fetchAt(loc: WeatherLoc) {
       try {
-        const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code`;
+        // Proxy through /api/weather · server-side cache + reverse-geocode
+        // + multi-provider fallback so the widget never gets stuck on
+        // CORS/upstream blips. City hint short-circuits the geocode RTT.
+        const url = `/api/weather?lat=${loc.lat}&lon=${loc.lon}${loc.city ? `&city=${encodeURIComponent(loc.city)}` : ""}`;
         const r = await fetch(url);
         if (!r.ok) throw new Error("weather " + r.status);
-        const j = await r.json();
+        const j = (await r.json()) as Partial<WeatherData>;
         if (cancelled) return;
-        setData({ tempC: j.current.temperature_2m, code: j.current.weather_code, city: loc.city, source: loc.source });
+        if (typeof j.tempC !== "number" || typeof j.code !== "number") throw new Error("weather payload");
+        setData({
+          tempC: j.tempC,
+          apparentC: j.apparentC ?? j.tempC,
+          code: j.code,
+          humidity: j.humidity ?? 0,
+          windKph: j.windKph ?? 0,
+          city: j.city || loc.city || "Your location",
+          region: j.region || "",
+          country: j.country || "",
+          source: loc.source,
+        });
         setErr(false);
       } catch {
         if (!cancelled) setErr(true);
       }
+    }
+
+    // Bootstrap fallback · if no coords resolve in 6s, ask the server to
+    // pick IP-based coords (Vercel edge headers when available, ipapi.co
+    // otherwise) so the widget never hangs at "locating…".
+    async function fetchFromServer() {
+      try {
+        const r = await fetch(`/api/weather`);
+        if (!r.ok) return;
+        const j = (await r.json()) as Partial<WeatherData>;
+        if (cancelled || typeof j.tempC !== "number" || typeof j.code !== "number") return;
+        // Only adopt server-derived data when widget hasn't already painted
+        // from a GPS fix · GPS always wins over IP-edge.
+        setData((cur) => cur ?? {
+          tempC: j.tempC!,
+          apparentC: j.apparentC ?? j.tempC!,
+          code: j.code!,
+          humidity: j.humidity ?? 0,
+          windKph: j.windKph ?? 0,
+          city: j.city || "Your location",
+          region: j.region || "",
+          country: j.country || "",
+          source: "ip",
+        });
+        setErr(false);
+      } catch {}
+    }
+    const bootstrapTimer = setTimeout(fetchFromServer, 6000);
+
+    // Read the permissions API so the UI can prompt the user to enable GPS
+    // for higher accuracy when it's still in 'prompt' state.
+    if (typeof navigator !== "undefined" && "permissions" in navigator) {
+      try {
+        (navigator.permissions as Permissions).query({ name: "geolocation" as PermissionName }).then((p) => {
+          if (cancelled) return;
+          setPermState((p.state ?? "unknown") as typeof permState);
+          p.onchange = () => { if (!cancelled) setPermState((p.state ?? "unknown") as typeof permState); };
+        }).catch(() => {});
+      } catch {}
     }
 
     async function load() {
@@ -628,6 +696,7 @@ function WeatherWidget() {
     const interval = setInterval(load, 15 * 60 * 1000);
     return () => {
       cancelled = true;
+      clearTimeout(bootstrapTimer);
       clearInterval(interval);
       if (watchId != null && "geolocation" in navigator) navigator.geolocation.clearWatch(watchId);
     };
@@ -642,15 +711,58 @@ function WeatherWidget() {
     setEditing(false);
     setCityInput("");
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,weather_code`;
-      const r = await fetch(url);
-      const j = await r.json();
-      setData({ tempC: j.current.temperature_2m, code: j.current.weather_code, city: loc.city, source: "manual" });
+      // Server-proxied weather + reverse-geocode · same code path as GPS.
+      const r = await fetch(`/api/weather?lat=${loc.lat}&lon=${loc.lon}&city=${encodeURIComponent(loc.city)}`);
+      const j = (await r.json()) as Partial<WeatherData>;
+      if (typeof j.tempC !== "number" || typeof j.code !== "number") throw new Error("weather payload");
+      setData({
+        tempC: j.tempC,
+        apparentC: j.apparentC ?? j.tempC,
+        code: j.code,
+        humidity: j.humidity ?? 0,
+        windKph: j.windKph ?? 0,
+        city: j.city || loc.city,
+        region: j.region || "",
+        country: j.country || "",
+        source: "manual",
+      });
       setErr(false);
     } catch { setErr(true); }
   }
 
+  // Force a fresh GPS pass · users click this when they've moved or the
+  // cached location is wrong (e.g. travelled via VPN earlier).
+  async function refreshLocation() {
+    try {
+      // Clear manual / cached so resolveLocation goes through full GPS pass.
+      try { localStorage.removeItem(WEATHER_LOC_KEY); } catch {}
+      setData(null);
+      setErr(false);
+      const fresh = await resolveLocation();
+      saveCachedLoc(fresh);
+      const r = await fetch(`/api/weather?lat=${fresh.lat}&lon=${fresh.lon}${fresh.city ? `&city=${encodeURIComponent(fresh.city)}` : ""}`);
+      const j = (await r.json()) as Partial<WeatherData>;
+      if (typeof j.tempC !== "number" || typeof j.code !== "number") throw new Error("weather payload");
+      setData({
+        tempC: j.tempC,
+        apparentC: j.apparentC ?? j.tempC,
+        code: j.code,
+        humidity: j.humidity ?? 0,
+        windKph: j.windKph ?? 0,
+        city: j.city || fresh.city || "Your location",
+        region: j.region || "",
+        country: j.country || "",
+        source: fresh.source,
+      });
+    } catch { setErr(true); }
+  }
+
   const icon = data ? weatherIcon(data.code) : "—";
+  const sourceTag: Record<WeatherLoc["source"], string> = {
+    gps: "GPS",
+    ip: "IP",
+    manual: "MAN",
+  };
   return (
     <div
       style={{
@@ -658,19 +770,49 @@ function WeatherWidget() {
         backdropFilter: "blur(14px) saturate(160%)",
         border: "2px solid var(--surface-2)",
         padding: "10px 14px",
-        minWidth: 160,
+        minWidth: 180,
         textAlign: "center",
         boxShadow: "3px 3px 0 var(--shadow)",
+        position: "relative",
       }}
-      title="Auto-detected from your device. Double-click to override."
+      title={data ? `feels ${Math.round(data.apparentC)}°C · humidity ${data.humidity}% · wind ${Math.round(data.windKph)}km/h · ${sourceTag[data.source] ?? "?"}\n(double-click to override · click ↻ to refresh GPS)` : "Auto-detected. Double-click to override."}
       onDoubleClick={() => setEditing(true)}
     >
+      {/* Refresh button · small, top-right corner. Hover to reveal so it
+          doesn't fight the temp display. */}
+      <button
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); refreshLocation(); }}
+        aria-label="Refresh location and weather"
+        title="Refresh GPS + weather"
+        style={{
+          position: "absolute",
+          top: 4,
+          right: 4,
+          width: 18,
+          height: 18,
+          background: "transparent",
+          color: "var(--muted)",
+          border: "none",
+          fontSize: 12,
+          cursor: "pointer",
+          lineHeight: 1,
+          padding: 0,
+        }}
+      >
+        ↻
+      </button>
       <div className="flex items-center justify-center gap-2">
         <span style={{ fontSize: 22, lineHeight: 1 }}>{icon}</span>
         <span className="font-pixel" style={{ color: "var(--fg)", fontSize: 18, lineHeight: 1 }}>
           {data ? `${Math.round(data.tempC)}°C` : err ? "—" : "…"}
         </span>
       </div>
+      {data && (
+        <div className="font-mono" style={{ color: "var(--muted)", fontSize: 9, marginTop: 2, letterSpacing: "0.04em" }}>
+          feels {Math.round(data.apparentC)}° · {data.humidity}% · {Math.round(data.windKph)}km/h
+        </div>
+      )}
       {editing ? (
         <input
           autoFocus
@@ -701,8 +843,18 @@ function WeatherWidget() {
             fontSize: 9,
             letterSpacing: "0.08em",
           }}
+          title={data?.region ? `${data.city}, ${data.region}${data.country ? ", " + data.country : ""}` : undefined}
         >
           {data?.city ?? (err ? "offline" : "locating…")}
+          {data?.source === "ip" && permState !== "denied" && (
+            <span
+              style={{ marginLeft: 4, color: "var(--accent)", cursor: "pointer", fontSize: 8 }}
+              onClick={(e) => { e.stopPropagation(); refreshLocation(); }}
+              title="GPS will give street-level accuracy. Click to enable."
+            >
+              · enable GPS
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -796,11 +948,15 @@ function FxWidget() {
     let cancelled = false;
     async function load() {
       try {
-        const r = await fetch("https://api.frankfurter.app/latest?from=USD&to=EUR,GBP,INR,JPY");
+        // Server proxy with 3-provider fallback · was direct-Frankfurter
+        // which silently 0'd out on some networks (screenshot: all dashes).
+        const r = await fetch("/api/fx?base=USD&symbols=EUR,GBP,INR,JPY");
         if (!r.ok) throw new Error("fx " + r.status);
-        const j = await r.json();
+        const j = (await r.json()) as { rates?: Record<string, number> };
         if (cancelled) return;
+        if (!j.rates || Object.keys(j.rates).length === 0) throw new Error("fx empty");
         setRates(j.rates);
+        setErr(false);
       } catch {
         if (!cancelled) setErr(true);
       }
