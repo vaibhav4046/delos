@@ -34,7 +34,9 @@ const DEFAULT_MEMBERS = [
 ] as const;
 
 const bodySchema = z.object({
-  goal: z.string().min(3).max(800),
+  // Lowered from 3 → 1 char · users sending "HI" got 422; server pads short
+  // greetings into a richer prompt below.
+  goal: z.string().min(1).max(800),
   members: z.array(modelKey).min(2).max(5).default(() => [...DEFAULT_MEMBERS]),
   judge: modelKey.optional(),
 });

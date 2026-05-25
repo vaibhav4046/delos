@@ -160,9 +160,19 @@ export async function POST(req: NextRequest) {
   }
 
   const obj = safeParseJson(raw);
-  const verdict = PlanResp.safeParse(obj);
+  let verdict = PlanResp.safeParse(obj);
+  // R5-B · planner sometimes wraps plan inside an "answer" step's text · try
+  // to extract that nested JSON and re-validate before falling back.
+  if (!verdict.success && obj && typeof obj === "object") {
+    const o = obj as { plan?: Array<{ action?: string; args?: { text?: string } }> };
+    const firstAnswer = o.plan?.[0];
+    if (firstAnswer?.action === "answer" && typeof firstAnswer.args?.text === "string") {
+      const nested = safeParseJson(firstAnswer.args.text);
+      const reParse = PlanResp.safeParse(nested);
+      if (reParse.success) verdict = reParse;
+    }
+  }
   if (!verdict.success) {
-    // Last-resort fallback · answer with the raw text as a single "answer" step
     return Response.json({
       ok: true,
       planner,

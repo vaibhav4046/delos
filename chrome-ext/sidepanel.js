@@ -685,8 +685,23 @@ async function handleAutonomous(transcript) {
       });
       if (r.ok) {
         const j = await r.json();
+        // R5-D · integration_unavailable envelope · open Settings in main app
+        // tab + speak the reply rather than silently routing nowhere.
+        if (j.kind === "integration_unavailable") {
+          const link = `${state.cfg.endpoint}${j.deepLink || "/os"}`;
+          appendLog("voiceLog", `${tag("warn", "needs connect")} ${esc(j.provider || "")} · <a href="${esc(link)}" target="_blank" style="color:#7dd3fc;text-decoration:underline">Open Settings</a>`);
+          intent = { intent: "answer", reply: j.reply || `${j.provider} not connected — open Settings to connect.` };
+        }
+        else if (j.kind === "fulfilled") {
+          appendLog("voiceLog", `${tag("ok", "✓")} ${esc(j.provider || "")} · ${esc(j.action || "")}`);
+          intent = { intent: "answer", reply: j.reply || "ok" };
+        }
+        else if (j.kind === "integration_call") {
+          // Direct provider call · trust server's reply text
+          intent = { intent: "answer", reply: j.reply || "dispatched" };
+        }
         // Bridge server intent vocabulary → our tab-action vocabulary.
-        if (j.intent === "open_app" && j.app) intent = { intent: "open_url", url: j.app };
+        else if (j.intent === "open_app" && j.app) intent = { intent: "open_url", url: j.app };
         else if (j.intent === "navigate" && j.payload) intent = { intent: "open_url", url: j.payload };
         else if (j.intent === "answer") intent = { intent: "answer", reply: j.reply };
         else intent = { intent: "answer", reply: j.reply || "ok" };
