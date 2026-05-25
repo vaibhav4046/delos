@@ -133,6 +133,53 @@ ok("memory-seed-honors-tenant", async () => {
   assert.ok(r.s === 200 || r.s === 429, `expected 200/429, got ${r.s}: ${r.b.slice(0, 200)}`);
 });
 
+ok("connector-honesty-gmail-notion", async () => {
+  // R11b · guest/unauthenticated connector calls must flag demo:true so
+  // judges + API inspectors see the simulation honestly. Was returning a
+  // bare "draft saved" / "page created" message that looked like real
+  // integration behavior.
+  const g = await POST("/api/connectors/gmail/draft", {
+    to: "judge@aivalley.io",
+    subject: "Hello from DelOS",
+    body: "Test draft.",
+  });
+  const gb = j(g.b);
+  if (gb.ok) {
+    assert.equal(gb.demo, true, `gmail draft missing demo:true · ${JSON.stringify(gb).slice(0, 200)}`);
+    assert.equal(gb.simulated, true, `gmail draft missing simulated:true`);
+    assert.ok(/demo simulated|connect gmail/i.test(gb.message || ""), `gmail message must say Demo simulated · got "${gb.message}"`);
+  }
+  const n = await POST("/api/connectors/notion/create-page", {
+    title: "Demo recap",
+    content: "Test page content.",
+  });
+  const nb = j(n.b);
+  if (nb.ok) {
+    assert.equal(nb.demo, true, `notion page missing demo:true · ${JSON.stringify(nb).slice(0, 200)}`);
+    assert.equal(nb.simulated, true, `notion page missing simulated:true`);
+    assert.ok(/demo simulated|connect notion/i.test(nb.message || ""), `notion message must say Demo simulated · got "${nb.message}"`);
+  }
+});
+
+ok("memory-ui-auto-seed-roundtrip", async () => {
+  // R11b · server-side proxy for the UI auto-seed. Fresh tenant should
+  // be populated by /api/memory/seed and then queryable. If this fails,
+  // the in-OS Memory Browser will land empty for a fresh judge click.
+  const guestTid = `judge_seed_${Date.now()}`;
+  const seed = await POST("/api/memory/seed", { tenantId: guestTid });
+  assert.ok(seed.s === 200 || seed.s === 429, `seed returned ${seed.s}`);
+  if (seed.s === 429) {
+    console.log("  skip · rate-limited");
+    return;
+  }
+  // Give server a beat to flush localFallback.
+  await new Promise((res) => setTimeout(res, 600));
+  const list = await GET(`/api/memory?q=&tenant=${guestTid}&topK=20`);
+  const lb = j(list.b);
+  const total = (lb.local?.length ?? 0) + (lb.hits?.length ?? 0);
+  assert.ok(total >= 5, `auto-seed underfilled · expected ≥5 entries · got ${total}`);
+});
+
 ok("codegen-domain-coverage-investor", async () => {
   const r = await POST("/api/codegen-app", {
     input: "Investor CRM with commitment score warm intro partners dilution",

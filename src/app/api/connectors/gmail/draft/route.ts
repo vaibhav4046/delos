@@ -47,17 +47,27 @@ export async function POST(req: NextRequest) {
     // refresh, which the narrow regex missed → 503 instead of demo.
     const isMissingCred = /no_gmail_credential|unauthenticated|missing[_ ]token|token exchange failed|invalid_grant|expired|401|403/i.test(msg);
     if (isMissingCred && demoMode) {
+      // R11b · explicit demo flags so API inspectors + judges see the
+      // simulation honestly. Was: silent demo response that looked like
+      // a real send. Now: kind+demo+simulated all signal demo mode.
       return Response.json({
         ok: true,
-        draftId: `draft-${Date.now().toString(36)}`,
-        threadId: `thread-${Date.now().toString(36)}`,
+        kind: "demo_simulated",
+        demo: true,
+        simulated: true,
+        provider: "gmail",
+        action: "draft",
+        connected: false,
+        draftId: `draft-demo-${Date.now().toString(36)}`,
+        threadId: `thread-demo-${Date.now().toString(36)}`,
         openUrl: "https://mail.google.com/mail/u/0/#drafts",
         preview: {
           to: parsed.data.to,
           subject: parsed.data.subject,
           body: parsed.data.body.slice(0, 400),
         },
-        message: `✓ draft saved · "${parsed.data.subject}" → ${parsed.data.to} · open Drafts in Gmail to send.`,
+        message: `Demo simulated · "${parsed.data.subject}" → ${parsed.data.to} · connect Gmail OAuth in Settings to send for real.`,
+        reply: `Demo simulated · drafted email to ${parsed.data.to}. Connect Gmail to send real drafts.`,
       });
     }
     return Response.json({ ok: false, error: msg }, { status: isMissingCred ? 401 : 503 });

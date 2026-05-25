@@ -38,12 +38,21 @@ export async function POST(req: NextRequest) {
     const isMissingCred = /no_notion_credential|unauthenticated|missing[_ ]token|invalid_grant|expired|401|403/i.test(msg);
     if (isMissingCred && demoMode) {
       const slug = parsed.data.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      // R11b · explicit demo flags so guests see "Demo simulated" not a
+      // bare "page created" message that looks like real integration.
       return Response.json({
         ok: true,
-        pageId: `page-${Date.now().toString(36)}`,
+        kind: "demo_simulated",
+        demo: true,
+        simulated: true,
+        provider: "notion",
+        action: "create_page",
+        connected: false,
+        pageId: `page-demo-${Date.now().toString(36)}`,
         url: `https://www.notion.so/${slug}`,
         preview: { title: parsed.data.title, content: parsed.data.content.slice(0, 400) },
-        message: `✓ page created · "${parsed.data.title}" · open Notion to view.`,
+        message: `Demo simulated · "${parsed.data.title}" · connect Notion OAuth in Settings to write for real.`,
+        reply: `Demo simulated · created Notion page "${parsed.data.title}". Connect Notion to publish real pages.`,
       });
     }
     return Response.json({ ok: false, error: msg }, { status: isMissingCred ? 401 : 503 });
