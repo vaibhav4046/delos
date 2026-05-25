@@ -24,12 +24,11 @@ const SEED = [
 ];
 
 async function autoSeedIfEmpty(tenantId: string) {
-  // Auto-seed for demo_ AND anon-* tenants on first hit so judges who
-  // open /os?guest=1 and click Memory immediately see a recall demo
-  // populated. Was demo_-only · anon-ip tenants stayed empty forever
-  // (2026-05-25 brutal QA · H2). Authenticated user tenants are still
-  // skipped so their personal memories aren't polluted.
-  if (!/^demo_/i.test(tenantId) && !/^anon[_-]/i.test(tenantId)) return;
+  // Auto-seed for ANY tenant on first hit when memory store is empty
+  // so the Memory Browser never lands on a sad "NO MEMORIES YET"
+  // empty state during a judge demo. Was gated to demo_/anon_ only
+  // which left fresh user tenants (u_*) empty (round 5 brutal-QA).
+  // Reseeding is one-shot per tenant per warm lambda.
   if (G.__delrioSeededTenants?.has(tenantId)) return;
   G.__delrioSeededTenants?.add(tenantId);
   if (getLocalFallback(tenantId).length > 0) return;
