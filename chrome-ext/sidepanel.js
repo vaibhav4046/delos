@@ -323,6 +323,9 @@ async function runMission(isContinuation = false, continuationContext = "") {
 
   const stepResults = [];
   let lastAnswerText = "";
+  // EXT-V6 · accumulate extract/summarize/read output so we can synthesize a
+  // real final answer when the planner left a placeholder.
+  const collectedContext = [];
   for (let i = 0; i < plan.length; i++) {
     if (state.stop) {
       appendLog("missionLog", `${tag("warn", "stopped")} by user`);
@@ -369,7 +372,26 @@ async function runMission(isContinuation = false, continuationContext = "") {
 
     try {
       if (step.action === "answer") {
-        const text = String(step.args.text || "");
+        let text = String(step.args.text || "");
+        // EXT-V6 · synthesize when the planner left a placeholder. Feed all
+        // collected extract/summarize/read content into quick-agent and ask
+        // for a thorough direct answer with concrete details.
+        const isPlaceholder = !text || /synthesis pending|i'?ll (open|search|navigate|browse|find)/i.test(text);
+        if (isPlaceholder && collectedContext.length > 0) {
+          appendLog("missionLog", `${tag("muted", "synth")} composing direct answer from ${collectedContext.length} extract${collectedContext.length === 1 ? "" : "s"}`);
+          try {
+            const synthPrompt = `You are a research synthesizer. The user asked:\n\n"${task}"\n\nHere is the content the browser agent collected from the pages it visited:\n\n${collectedContext.join("\n\n---\n\n").slice(0, 6000)}\n\nWrite a thorough, direct, specific answer in 4-8 sentences. Include concrete details: product names, prices, key features, links if present. Do not say "based on the search results" or "I found". Just give the answer.`;
+            const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ input: synthPrompt, tenantId: state.cfg.tenantId }),
+            });
+            const j = await r.json();
+            if (j.text) text = j.text;
+          } catch {
+            /* fall back to whatever the planner gave us */
+          }
+        }
         lastAnswerText = text;
         appendLog("missionLog", `<div class="answer">${tag("info", "answer")} ${esc(text)}</div>`);
         stepResults.push(`answer: ${text.slice(0, 240)}`);
@@ -394,6 +416,8 @@ async function runMission(isContinuation = false, continuationContext = "") {
         const j = await r.json();
         const result = j.text || j.error || "(no result)";
         appendLog("missionLog", `<div class="answer">${tag("ok", step.action)} ${esc(result)}</div>`);
+        // EXT-V6 · collect for synthesis at the final answer step.
+        collectedContext.push(`From ${d.url}:\n${result}`);
         lastAnswerText = result;
         stepResults.push(`${step.action}: ${result.slice(0, 300)}`);
         continue;
@@ -417,6 +441,19 @@ async function runMission(isContinuation = false, continuationContext = "") {
       if (result?.ok) {
         appendLog("missionLog", `${tag("ok", "✓")} ${esc(JSON.stringify(result.data || {}).slice(0, 160))}`);
         stepResults.push(`${act}(${JSON.stringify(args).slice(0, 80)}) ok`);
+        // EXT-V6 · grab page text after navigate so the synthesis step has
+        // raw material even when the planner skipped an explicit extract.
+        if (act === "navigate") {
+          await new Promise((r) => setTimeout(r, 1800)); // let nav complete + render
+          const after = await tabAction("read");
+          if (after?.ok && after.data?.text) {
+            collectedContext.push(`From ${after.data.url || "page"}:\n${String(after.data.text).slice(0, 2500)}`);
+          }
+        } else if (act === "read" && result.data?.text) {
+          collectedContext.push(`From ${result.data.url || "page"}:\n${String(result.data.text).slice(0, 2500)}`);
+        } else if (act === "links" && Array.isArray(result.data)) {
+          collectedContext.push(`Links found:\n${result.data.slice(0, 10).map((l) => `${l.text} ${l.href}`).join("\n")}`);
+        }
       } else {
         // EXT-V5-2 · friendly skip for chrome:// failures during a step.
         const err = String(result?.error || "");

@@ -93,41 +93,70 @@ function normalizeNavUrl(input: unknown): string | undefined {
   return "https://duckduckgo.com/?q=" + encodeURIComponent(s);
 }
 
-const SYSTEM = `You are DelOS Browser Agent · a Perplexity-style planner that
-breaks a user's task into 1-6 concrete actions executable by a Chrome
-extension against the user's active tab.
+const SYSTEM = `You are DelOS Browser Agent. A Perplexity-style RESEARCH planner that
+breaks a user's task into 4-8 concrete actions executable by a Chrome
+extension against the user's active tab. You ALWAYS produce a direct answer.
 
 Action vocabulary (use ONLY these):
-- navigate { url } · open a URL in the current tab
-- scroll { direction: "up"|"down"|"top"|"bottom", amount?: 800 }
+- navigate { url } · open a URL in the current tab. For research, use a
+  SEARCH ENGINE URL with the query encoded: https://www.google.com/search?q=...
+  or https://duckduckgo.com/?q=... NEVER navigate to a bare homepage when
+  the user asked for specific information.
+- scroll { direction: "up"|"down"|"top"|"bottom", amount?: 1500 }
 - click { needle } · click element whose visible text matches needle (case-insensitive substring)
 - fill { field, value } · fill input matching field (placeholder/label/name)
 - read · pull title + body text from current tab
 - links { limit?: 20 } · list top visible links
-- extract { query } · summarize tab content focused on a query
+- extract { query } · LLM-summarize the current tab focused on the query.
+  Use this LIBERALLY · once per page visited.
 - summarize · summarize the current tab
-- answer { text } · give user a direct text answer (use when no browse needed)
+- answer { text } · ALWAYS the LAST step. Write a thorough 3-6 sentence
+  direct answer with concrete details (names, prices, links). NEVER end a
+  research plan without an answer step.
 
-Tiers — mark destructive/external steps so the extension gates them:
-- read · scroll/read/links/extract/summarize
+Tiers (extension uses to gate approvals):
+- read · scroll/read/links/extract/summarize/navigate to a search/article page
 - reversible · fill (draft only)
 - external · click that posts forms / submits / sends
 - destructive · clicking delete/wipe/remove-account etc.
 
+PLAN TEMPLATES BY INTENT:
+
+Research / find / compare / best / cheapest / top / review:
+  1. navigate { url: search engine URL with query encoded }
+  2. scroll down 1500
+  3. extract { query: original task }
+  4. (optional) click a high-signal result link
+  5. (optional) extract { query }
+  6. answer { text: direct answer with names, prices, links }
+
+Summarize current page:
+  1. read
+  2. summarize
+  3. answer { text: summary }
+
+Single direct question (math, definition, well-known fact):
+  1. answer { text: direct answer }
+
+Action on current page (click X, fill Y):
+  1. click { needle } OR fill { field, value }
+  2. answer { text: confirmation }
+
 Output STRICTLY one JSON object:
 {
   "plan": [
-    { "action": "navigate", "args": { "url": "https://news.ycombinator.com" }, "rationale": "go to HN", "tier": "read" },
-    { "action": "scroll", "args": { "direction": "down", "amount": 1200 }, "tier": "read" },
-    { "action": "extract", "args": { "query": "top 5 stories" }, "tier": "read" },
-    { "action": "summarize", "tier": "read" }
+    { "action": "navigate", "args": { "url": "https://www.google.com/search?q=best+wireless+earbuds+under+50+pounds+2025+uk" }, "rationale": "search results for the query", "tier": "read" },
+    { "action": "scroll", "args": { "direction": "down", "amount": 1500 }, "tier": "read" },
+    { "action": "extract", "args": { "query": "top 3 wireless earbuds under £50 with names, prices, key features" }, "tier": "read" },
+    { "action": "answer", "args": { "text": "Based on the search results, the top 3 wireless earbuds under £50 are: 1) ... 2) ... 3) ..." }, "tier": "read" }
   ],
-  "final": "I'll open Hacker News, scroll, and summarize the top 5."
+  "final": "Searching for the best earbuds under £50, scrolling through results, extracting picks, and writing a direct answer."
 }
 
-Rules:
-- Plan must achieve the task with at most 6 steps.
-- If task is already answerable without browsing, plan = [{"action":"answer","args":{"text":"..."}}].
+CRITICAL RULES:
+- NEVER produce a plan that is just [navigate] · always include extract + answer.
+- For research tasks, the LAST step MUST be { "action": "answer", "args": { "text": "..." } } with a real 3-6 sentence answer.
+- If you don't know the answer yet, plan navigation to a search engine first, then extract, then answer based on extraction.
 - Never click links you have not seen first via read/links.
 - If a task asks for destructive action (delete account, send money), mark tier:"destructive" and add a confirmation step.`;
 
@@ -288,7 +317,7 @@ export async function POST(req: NextRequest) {
   }
   // EXT-V2-4 · post-process plan · normalize every navigate step's URL so the
   // extension never sees a bare "github" or "open airbnb" and dead-ends.
-  const normalizedPlan = verdict.data.plan.map((step) => {
+  let normalizedPlan = verdict.data.plan.map((step) => {
     if (step.action === "navigate") {
       const rawUrl = (step.args as Record<string, unknown>)?.url ?? (step.args as Record<string, unknown>)?.query;
       const fixed = normalizeNavUrl(rawUrl);
@@ -298,6 +327,64 @@ export async function POST(req: NextRequest) {
     }
     return step;
   });
+
+  // EXT-V6-1 · enforce RESEARCH PLAN SHAPE.
+  // Detect intent: research / find / compare / best / cheapest / top / review.
+  // If the planner returned a shallow plan (just 1-2 steps without an answer),
+  // auto-expand into navigate -> scroll -> extract -> answer so the user
+  // always gets a direct answer instead of just "opened amazon".
+  const isResearchTask = /\b(find|search|research|best|cheapest|top|compare|review|recommend|under\s+\$?\d|under\s+£\d|which|what.*(should|are|is the)|list|show me)\b/i.test(task);
+  const hasAnswer = normalizedPlan.some((s) => s.action === "answer");
+  const hasExtract = normalizedPlan.some((s) => s.action === "extract" || s.action === "summarize");
+  const hasNavigate = normalizedPlan.some((s) => s.action === "navigate");
+
+  if (isResearchTask) {
+    // Force search-engine URL on first navigate when the planner left a bare
+    // homepage. Amazon homepage doesn't answer "best earbuds under £50".
+    const firstNavIdx = normalizedPlan.findIndex((s) => s.action === "navigate");
+    if (firstNavIdx >= 0) {
+      const navStep = normalizedPlan[firstNavIdx];
+      const navUrl = String((navStep.args as Record<string, unknown>)?.url || "");
+      // If the URL is a bare homepage (no path/query) for a research task,
+      // swap to a search engine query so the page has actual results.
+      const isBareHomepage = /^https?:\/\/[^/?#]+\/?$/.test(navUrl);
+      if (isBareHomepage || !navUrl) {
+        const searchUrl = "https://www.google.com/search?q=" + encodeURIComponent(task);
+        normalizedPlan[firstNavIdx] = { ...navStep, args: { ...(navStep.args as object), url: searchUrl } };
+      }
+    } else if (!hasNavigate) {
+      // No navigate at all on a research task · inject one at the front.
+      normalizedPlan.unshift({
+        action: "navigate",
+        args: { url: "https://www.google.com/search?q=" + encodeURIComponent(task) },
+        rationale: "search engine for research",
+        tier: "read",
+      });
+    }
+    // Insert scroll + extract before answer if missing.
+    if (!hasExtract) {
+      const insertAt = normalizedPlan.findIndex((s) => s.action === "answer");
+      const idx = insertAt === -1 ? normalizedPlan.length : insertAt;
+      normalizedPlan.splice(idx, 0,
+        { action: "scroll", args: { direction: "down", amount: 1500 }, rationale: "show more results", tier: "read" },
+        { action: "extract", args: { query: task }, rationale: "pull relevant content for the task", tier: "read" },
+      );
+    }
+    // Ensure the LAST step is answer. If not, append a placeholder; the
+    // executor will fill it from the prior extract result via a synthesis
+    // step on the client side.
+    if (!hasAnswer) {
+      normalizedPlan.push({
+        action: "answer",
+        args: { text: verdict.data.final || "Synthesis pending. Re-running with extracted context." },
+        rationale: "direct answer to the user",
+        tier: "read",
+      });
+    }
+  }
+
+  // Cap at 8 steps regardless (Step schema max is 8).
+  if (normalizedPlan.length > 8) normalizedPlan = normalizedPlan.slice(0, 8);
   await persistRun(verdict.data.final ?? "", normalizedPlan.length);
   return Response.json({ ok: true, planner, ...verdict.data, plan: normalizedPlan, memorySynced: true });
 }
