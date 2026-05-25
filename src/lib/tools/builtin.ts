@@ -84,9 +84,33 @@ const webSearch: Tool<
       }
     } catch {}
 
-    // 2) Wikipedia fallback · keep for ZERO-result coverage only.
+    // 2) Curated official-docs results · always added for known dev
+    //    queries so the top hit is never a tangentially-related Wikipedia
+    //    article when DuckDuckGo can't be reached from the edge runtime.
+    //    Each entry is generic enough to be "the entry point" for that
+    //    domain; the scorer still has to confirm the query mentions it.
+    const q = query.toLowerCase();
+    const curated: Array<{ title: string; url: string; snippet: string }> = [];
+    const knownDocs: Array<{ test: RegExp; result: { title: string; url: string; snippet: string } }> = [
+      { test: /\b(openai|gpt-4|gpt[-_ ]?4o|chat\s*completions?)\b.*\b(api|docs?|official|documentation)\b|\b(api|docs?|official|documentation)\b.*\b(openai|gpt)\b/, result: { title: "OpenAI Platform · API documentation", url: "https://platform.openai.com/docs", snippet: "Official OpenAI API reference: chat completions, embeddings, fine-tuning, models, rate limits." } },
+      { test: /\bnext\.?js\b.*\bhydrat/, result: { title: "Next.js · React Hydration Error", url: "https://nextjs.org/docs/messages/react-hydration-error", snippet: "Why hydration errors happen, how to debug them, common causes (browser-only APIs, randomness, mismatched HTML)." } },
+      { test: /\bnext\.?js\b.*\b(docs?|documentation|official|getting\s+started)\b/, result: { title: "Next.js · Official documentation", url: "https://nextjs.org/docs", snippet: "App Router, pages, layouts, server components, routing, data fetching, deployment." } },
+      { test: /\breact\b.*\b(hooks?|docs?|documentation)\b/, result: { title: "React documentation", url: "https://react.dev", snippet: "Modern React: hooks, suspense, server components, concurrent features, reference." } },
+      { test: /\b(anthropic|claude)\b.*\b(api|docs?|official|documentation)\b|\b(api|docs?|official|documentation)\b.*\bclaude\b/, result: { title: "Anthropic · Claude API documentation", url: "https://docs.anthropic.com", snippet: "Claude API: messages, tools, streaming, vision, model overview, prompt engineering." } },
+      { test: /\bvercel\b.*\b(docs?|deploy|official)\b/, result: { title: "Vercel documentation", url: "https://vercel.com/docs", snippet: "Deploy Next.js, build configuration, environment variables, domains, monitoring, cron." } },
+      { test: /\btailwind(\s*css)?\b.*\b(docs?|utility|class|installation)\b/, result: { title: "Tailwind CSS documentation", url: "https://tailwindcss.com/docs", snippet: "Utility-first CSS framework: installation, customization, dark mode, plugins, v4 features." } },
+      { test: /\b(stripe)\b.*\b(api|docs?|payment|billing|invoice)\b/, result: { title: "Stripe API reference", url: "https://docs.stripe.com/api", snippet: "Stripe API: payments, customers, subscriptions, invoices, webhooks, idempotency." } },
+      { test: /\bmdn\b|\b(javascript|js|css|html)\b.*\b(reference|docs?|mdn)\b/, result: { title: "MDN Web Docs", url: "https://developer.mozilla.org", snippet: "Mozilla's open reference for JavaScript, CSS, HTML, Web APIs, accessibility, performance." } },
+      { test: /\bnode\.?js\b.*\b(docs?|api|official)\b/, result: { title: "Node.js documentation", url: "https://nodejs.org/docs", snippet: "Node.js API reference: filesystem, streams, child_process, crypto, performance hooks." } },
+      { test: /\bpython\b.*\b(docs?|tutorial|official)\b/, result: { title: "Python documentation", url: "https://docs.python.org/3", snippet: "Python language reference, standard library, tutorial, packaging, what's new." } },
+    ];
+    for (const k of knownDocs) {
+      if (k.test.test(q)) curated.push(k.result);
+    }
+
+    // 3) Wikipedia fallback · keep for ZERO-result coverage only.
     let wikiResults: Array<{ title: string; url: string; snippet: string }> = [];
-    if (liteResults.length < topK) {
+    if (liteResults.length + curated.length < topK) {
       const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=${Math.max(topK, 6)}&srprop=snippet&srsearch=${encodeURIComponent(query)}&origin=*`;
       const wiki = (await fetch(wikiUrl, { headers: { "User-Agent": "DelRio/1.0" } })
         .then((r) => (r.ok ? r.json() : null))
@@ -102,8 +126,14 @@ const webSearch: Tool<
         }));
     }
 
-    // Score, sort, dedupe, cap.
+    // Score, sort, dedupe, cap. Curated entries get a generous floor so
+    // they don't lose to DDG noise — but still pass through the same
+    // scorer so unrelated curated rows can't dominate.
     const scored: Array<{ title: string; url: string; snippet: string; score: number }> = [];
+    for (const r of curated) {
+      const score = scoreResult(r.title, r.url, r.snippet) + 8;
+      scored.push({ ...r, score });
+    }
     for (const r of [...liteResults, ...wikiResults]) {
       const score = scoreResult(r.title, r.url, r.snippet);
       // Reject obviously irrelevant results · score 0 AND no token overlap.
