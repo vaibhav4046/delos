@@ -136,22 +136,54 @@ export function CalculatorApp() {
 }
 
 // ====== CALENDAR ======
-type CalEvent = { id: string; date: string; title: string };
+type CalEvent = { id: string; date: string; title: string; source?: string; startAt?: number };
 
+// F01 · CalendarApp polls /api/calendar/events every 10s + on mount so
+// events created by voice ("schedule meeting tomorrow 4pm") + scheduler
+// templates land in the UI without manual refresh.
 export function CalendarApp() {
   const [view, setView] = useState(new Date());
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
+  // Sync from backend · merge with local-only entries (id starts with "e-").
+  // Backend ids start with "evt-".
+  async function syncFromBackend() {
+    try {
+      const r = await fetch("/api/calendar/events");
+      if (!r.ok) return;
+      const j = await r.json() as { events?: Array<{ id: string; title: string; startAt: number; source?: string }> };
+      const backend: CalEvent[] = (j.events ?? []).map((e) => {
+        const d = new Date(e.startAt);
+        const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        return { id: e.id, date: ds, title: e.title, source: e.source ?? "backend", startAt: e.startAt };
+      });
+      setEvents((prev) => {
+        const localOnly = prev.filter((e) => e.id.startsWith("e-"));
+        return [...localOnly, ...backend];
+      });
+    } catch {}
+  }
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem("delos.calendar.v1");
       if (raw) setEvents(JSON.parse(raw));
     } catch {}
+    syncFromBackend();
+    const iv = setInterval(syncFromBackend, 10_000);
+    const onVis = () => { if (document.visibilityState === "visible") syncFromBackend(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
   useEffect(() => {
-    try { localStorage.setItem("delos.calendar.v1", JSON.stringify(events)); } catch {}
+    // Only persist locally-created entries (backend syncs from server).
+    const local = events.filter((e) => e.id.startsWith("e-"));
+    try { localStorage.setItem("delos.calendar.v1", JSON.stringify(local)); } catch {}
   }, [events]);
 
   const year = view.getFullYear();

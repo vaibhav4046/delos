@@ -6,8 +6,15 @@
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { listEvents, createEvent, removeEvent, parseWhen } from "@/lib/calendarStore";
+import { listEvents, createEvent, removeEvent } from "@/lib/calendarStore";
+import { parseWhen, validateCalendarParse } from "@/lib/time/parseWhen";
 import { resolveTenant, zodErr } from "@/lib/apiAuth";
+
+// F12 · strip HTML/XSS from titles before persistence. Pair with React's
+// default escaping (NEVER dangerouslySetInnerHTML the title).
+function sanitizeTitle(s: string): string {
+  return String(s).replace(/<[^>]+>/g, "").replace(/[<>]/g, "").trim().slice(0, 200);
+}
 
 export const runtime = "nodejs";
 
@@ -16,6 +23,7 @@ const CreateReq = z.object({
   startAt: z.number().int().optional(),
   endAt: z.number().int().optional(),
   when: z.string().max(200).optional(), // free-text time fragment, e.g. "tomorrow at 4pm"
+  tz: z.string().max(60).optional(),
   notes: z.string().max(2000).optional(),
   attendees: z.array(z.string().max(120)).max(20).optional(),
   source: z.enum(["manual", "voice", "schedule"]).optional(),
@@ -39,19 +47,26 @@ export async function POST(req: NextRequest) {
   }
   const { tenantId } = await resolveTenant(req, { bodyTenantId });
   const data = parsed.data;
+  const tz = data.tz ?? req.headers.get("x-tz") ?? "UTC";
   let startAt = data.startAt;
   let endAt = data.endAt;
   if (!startAt && data.when) {
-    const parsedWhen = parseWhen(data.when);
-    if (parsedWhen) {
-      startAt = parsedWhen.startAt;
-      endAt = parsedWhen.endAt;
+    const p = parseWhen(data.when, { tz });
+    const v = validateCalendarParse(p);
+    if (!v.ok) {
+      return Response.json({ error: v.reason, when: data.when }, { status: 400 });
     }
+    startAt = v.at.getTime();
+    endAt = startAt + (p?.durationMs ?? 1_800_000);
   }
-  if (!startAt) startAt = Date.now() + 3_600_000; // default 1 hour from now
+  if (!startAt) startAt = Date.now() + 3_600_000;
   if (!endAt) endAt = startAt + 1_800_000;
+  // F10 · reject past even when caller passed startAt directly
+  if (startAt < Date.now() - 60_000) {
+    return Response.json({ error: "past_time" }, { status: 400 });
+  }
   const event = createEvent(tenantId, {
-    title: data.title,
+    title: sanitizeTitle(data.title),
     startAt,
     endAt,
     notes: data.notes,

@@ -18,6 +18,8 @@ const VERBS = [
 
 const VERB_GROUP = VERBS.join("|");
 const CONNECTORS = /\s*(?:,|;| then | and then | after that | also | plus | next )\s*/i;
+// F13 · pure-connective tokens that should never become an intent chunk
+const GHOST_TOKENS = new Set(["then", "and", "and then", "after that", "also", "plus", "next", ","]);
 
 export type IntentChunk = {
   text: string;
@@ -40,8 +42,15 @@ export function chunkVoice(rawText: string): IntentChunk[] {
     const verbRe = new RegExp(`(?=\\b(?:${VERB_GROUP})\\b)`, "ig");
     const sub = part.split(verbRe).map((s) => s.trim()).filter(Boolean);
     for (const s of sub) {
+      // F13 · drop ghost connective chunks ("then", "and") that have no verb
+      // AND match a pure-connective token. Real chunks (even verb-less ones
+      // like "tip calculator") keep going.
+      const lower = s.toLowerCase().trim();
+      if (GHOST_TOKENS.has(lower) || lower.length <= 1) continue;
       const m = s.match(new RegExp(`\\b(${VERB_GROUP})\\b`, "i"));
       const verb = m ? m[1].toLowerCase() : null;
+      // Skip chunks that are purely the connector word with no other content
+      if (!verb && /^(then|and|or|also|plus|next)\b\s*$/i.test(lower)) continue;
       chunks.push({ text: s, verb, label: s.length > 50 ? s.slice(0, 47) + "…" : s });
     }
   }

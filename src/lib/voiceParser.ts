@@ -141,17 +141,35 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
   // "remind me at 3pm to <text>" → set_reminder
   // "schedule a daily email digest" → schedule_action, opens schedule
   // "open my notifications" → open_app notifications
-  const remMatch = raw.match(/^(?:please\s+)?remind\s+me\s+(?:to\s+)?(.+?)(?:\s+in\s+(\d+)\s*(minutes?|mins?|hours?|hrs?|days?))?$/i);
-  if (remMatch && /\b(?:remind|reminder)\b/i.test(raw)) {
-    const text = remMatch[1].trim();
-    const n = remMatch[2] ? parseInt(remMatch[2], 10) : 30;
-    const unit = remMatch[3] ?? "minutes";
-    const minutes = /day/i.test(unit) ? n * 1440 : /hour|hr/i.test(unit) ? n * 60 : n;
+  // F03 · use single-source parseWhen so "remind me at 3pm", "remind me
+  // tomorrow", "remind me to call Andy in 2 hours" all parse.
+  const remMatch = raw.match(/^(?:please\s+)?remind\s+me(?:\s+to)?\s+(.+)$/i);
+  if (remMatch) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parseWhen } = require("@/lib/time/parseWhen") as typeof import("@/lib/time/parseWhen");
+    const rest = remMatch[1].trim();
+    const parsed = parseWhen(rest);
+    if (parsed) {
+      // Strip time tokens from the action text
+      const cleanText = rest
+        .replace(/\b(?:in|at|on|by|tonight|tomorrow|today|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d+\s*(?:min|minute|minutes|hour|hours|day|days|week|weeks))\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/[.,]+$/, "");
+      const minutes = Math.max(1, Math.round((parsed.at.getTime() - Date.now()) / 60_000));
+      return {
+        intent: "set_reminder",
+        app: "widgets",
+        payload: JSON.stringify({ text: cleanText || rest, minutes, dueAt: parsed.at.getTime() }),
+        reply: `Reminder set · ${cleanText || rest} at ${parsed.at.toLocaleString()}.`,
+      };
+    }
+    // Fallback · plain "remind me to X" with no time → default 30m
     return {
       intent: "set_reminder",
       app: "widgets",
-      payload: JSON.stringify({ text, minutes }),
-      reply: `Reminder set · ${text} in ${minutes}m.`,
+      payload: JSON.stringify({ text: rest, minutes: 30 }),
+      reply: `Reminder set · ${rest} in 30m.`,
     };
   }
   if (/^(?:schedule|set\s+up|create)\s+(?:a\s+)?(?:daily|weekly|hourly)?\s*(?:email|cohort|mission|notification|reminder|notion|digest|action)\b/i.test(raw)) {

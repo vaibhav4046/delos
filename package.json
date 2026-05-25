@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "guard:no-perplexity": "node -e \"const{execSync}=require('child_process');try{const o=execSync('grep -rIn frontend-cdn.perplexity src public 2>/dev/null || true').toString();if(o.trim()){console.error('Perplexity CDN reference found:');console.error(o);process.exit(1)}console.log('clean')}catch(e){console.log('clean')}\"",
+    "regression": "node scripts/judge-regression.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.78",

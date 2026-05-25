@@ -99,6 +99,18 @@ export async function POST(req: NextRequest) {
   // (or external caller) can fan out across compound voice commands.
   const intents = chunkVoice(transcript);
   const compound = intents.length >= 2;
+  // F04 · executions[] — per-chunk parser result so the client knows what
+  // each intent resolved to and whether it dispatched. Client-side VoiceApp
+  // executor still fires the OS event for each.
+  const executions = intents.map((c) => {
+    const parsedSub = parseVoiceLocal(c.text);
+    return {
+      intent: c,
+      status: parsedSub ? ("fulfilled" as const) : ("rejected" as const),
+      resolved: parsedSub ?? null,
+      err: parsedSub ? undefined : "no_local_match",
+    };
+  });
 
   // ─── Fast path · deterministic regex parser ──────────────────────────────
   // Covers ~90% of voice intents (open / build / cohort / math / greetings /
@@ -109,7 +121,20 @@ export async function POST(req: NextRequest) {
   if (!forceLLM) {
     const local = parseVoiceLocal(transcript);
     if (local) {
-      return Response.json({ ...local, source: "local", intents, compound });
+      // F17 · top-level intent reflects compound state honestly
+      const topIntent = compound ? "compound" : local.intent;
+      const reply = compound
+        ? intents.map((i) => i.label).join(" · ")
+        : local.reply;
+      return Response.json({
+        ...local,
+        intent: topIntent,
+        reply,
+        source: "local",
+        intents,
+        executions,
+        compound,
+      });
     }
   }
 
@@ -210,7 +235,7 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
         setTimeout(() => reject(new Error("voice_command_timeout")), 8_000),
       ),
     ]);
-    return Response.json({ ...(obj as object), source: "llm", intents, compound });
+    return Response.json({ ...(obj as object), source: "llm", intents, executions, compound, ...(compound ? { intent: "compound" } : {}) });
   } catch (e) {
     // Voice mis-classification should NEVER 500 the client — the mic loop
     // depends on a sane fallback every time. Always return a 200 with an
@@ -220,12 +245,13 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
     const msg = e instanceof Error ? e.message : String(e);
     const rateLimited = /rate[_ ]?limit/i.test(msg);
     return Response.json({
-      intent: "unknown",
+      intent: compound ? "compound" : "unknown",
       reply: rateLimited
         ? "Slow down — voice agent is rate-limited. Try again in a minute."
         : "I didn't catch that — try again with a clearer command.",
       hint: msg.slice(0, 80),
       intents,
+      executions,
       compound,
     });
   }

@@ -7,6 +7,7 @@ import { withModels, type ModelOverrides, type ModelKey } from "@/lib/llm";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { classifyInjection } from "@/lib/security/injection-classifier";
 import { normalizeInputField } from "@/lib/apiField";
+import { detectDomain } from "@/lib/codegenPlaybooks";
 
 import { zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
@@ -79,15 +80,48 @@ export async function POST(req: NextRequest) {
       parsed.data.previousSpec && typeof parsed.data.previousSpec === "object"
         ? (parsed.data.previousSpec as Parameters<typeof buildAppFromPrompt>[1]) // type narrowing below
         : undefined;
-    const spec = await withModels(overrides, () =>
+    let spec = await withModels(overrides, () =>
       buildAppFromPrompt(parsed.data.prompt, previousSpec ? { previousSpec: previousSpec as never } : undefined),
     );
+    // F05 · domain playbook coverage check + repair. If the prompt matches a
+    // known domain (investor CRM, regulatory, clinical, etc.) ensure the
+    // domain's required terms appear as visible labels in the spec. Below
+    // 85% coverage, append a coverage-patch component listing missing terms.
+    const domain = detectDomain(parsed.data.prompt);
+    let coverage: { score: number; missing: string[]; domain: string } | null = null;
+    if (domain) {
+      const flat = JSON.stringify(spec).toLowerCase();
+      const matched: string[] = [];
+      const missing: string[] = [];
+      for (const term of domain.requiredTerms) {
+        const re = new RegExp(`\\b${term.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`, "i");
+        if (re.test(flat)) matched.push(term);
+        else missing.push(term);
+      }
+      const score = matched.length / Math.max(1, domain.requiredTerms.length);
+      coverage = { score, missing, domain: domain.key };
+      if (score < 0.85 && missing.length > 0) {
+        // Inject a "Domain coverage" section so the missing terms become visible.
+        // We mutate the spec defensively · narrow the shape we trust.
+        const root = (spec as unknown as { root?: { kind: string; children?: unknown[] }; components?: unknown[] }).components;
+        const patchTitle = `${domain.label} · required surfaces`;
+        const patchNodes = missing.map((m, i) => ({ id: `cov-${i}`, kind: "text" as const, value: m.charAt(0).toUpperCase() + m.slice(1) }));
+        if (Array.isArray(root)) {
+          (root as Array<{ id: string; kind: string }>).push(
+            { id: "coverage-heading", kind: "text" } as { id: string; kind: string; value?: string },
+            ...patchNodes,
+          );
+          // Set value field after spread since the heading is shaped differently
+          (root[root.length - 1 - missing.length] as unknown as { value?: string }).value = patchTitle;
+        }
+      }
+    }
     await safeAddMemory({
       tenantId,
       text: `Built DelOS app "${spec.name}" from prompt: ${parsed.data.prompt.slice(0, 120)}`,
-      metadata: { runId: "app-builder", tags: ["app-build"], appId: spec.id },
+      metadata: { runId: "app-builder", tags: ["app-build"], appId: spec.id, ...(coverage ? { domain: coverage.domain, coverage: coverage.score } : {}) },
     });
-    return Response.json({ spec });
+    return Response.json({ spec, ...(coverage ? { playbook: coverage.domain, coverage } : {}) });
   } catch (e) {
     // Most failures here are "LLM didn't return a valid AppSpec" (zod fail
     // on the generated JSON). That's a user-facing problem with the prompt,
