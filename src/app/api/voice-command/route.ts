@@ -131,14 +131,13 @@ export async function POST(req: NextRequest) {
       err: parsedSub ? undefined : "no_local_match",
     };
   });
-  // P0 · drop rejected/unknown chunks from non-compound results. When the
-  // top-level result is a single non-compound intent (~90% of calls), the
-  // chunker false-positives produce noisy "rejected" entries with
-  // err: "no_local_match" that contradict the top-level intent. Surface
-  // only fulfilled chunks so an API inspector sees clean shape.
-  const executions = compound
-    ? rawExecutions
-    : rawExecutions.filter((e) => e.status !== "rejected" && e.kind !== "unknown");
+  // P0 · drop rejected/unknown chunks unconditionally. The chunker
+  // sometimes splits into 2+ parts where only 1 parses to a real intent;
+  // the unparsed remainder shipping back as `unknown · no_local_match`
+  // contradicts the top-level intent and looks like a regression to API
+  // inspectors. Unknown chunks cannot execute anyway, so dropping them
+  // is the right semantics in both compound and non-compound cases.
+  const executions = rawExecutions.filter((e) => e.status !== "rejected" && e.kind !== "unknown");
 
   // ─── Fast path · deterministic regex parser ──────────────────────────────
   // Covers ~90% of voice intents (open / build / cohort / math / greetings /
