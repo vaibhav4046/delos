@@ -180,6 +180,31 @@ into this file with timing + status. Local smoke (with `.env.local`):
 | `/api/tts/voices` | GET | list | |
 | `/api/integrations/status` | GET | provider state list | |
 
+## Round-2 fixes (commit `29cc6eb`)
+
+User screenshots flagged three more after the first push:
+
+1. **Arena · `mistral large` row shows `bytez_not_in_catalog`** —
+   `runQuickAgent` fell through to the Bytez tertiary after Mistral
+   failed, and the chip card displayed the Bytez error under the
+   Mistral row. Misleading. **Fix:** added `disableFallback: true` on
+   the cohort/arena path so each row pins to one executor and surfaces
+   its real provider error. `quick.ts:20-31`, `cohort/route.ts:131-141`.
+
+2. **Run-log shows red "GAME OVER" even when /api/run synthesises a
+   recoverable fallback answer right after.** The fallback path is
+   working — the UX read was wrong. **Fix:** `AgentLog.tsx:151-164`
+   flips to yellow "RECOVERED" pill for non-fatal errors. GAME OVER is
+   reserved for `auth_failed` / `tenant_mismatch` / `forbidden`.
+
+3. **Dock wobble + dock too big.** Magnification jumped icons 24px →
+   46px on a tight sigma=56 zone with cubic-bezier(0.34, 1.56)
+   overshoot easing firing per pointer move — read as vibration.
+   **Fix:** `Dock.tsx:71-75` BASE_SIZE 24→20, MAX_BOOST 22→6, SIGMA
+   56→96, easing → cubic-bezier(0.25, 0.46, 0.45, 0.94). Container
+   padding/gap tightened. Dock is ~40% shorter and hover lift is calm
+   (-10→-3px).
+
 ## Known residual risks
 
 1. **Local Turbopack build flakes on OneDrive paths.** Vercel CI runs
