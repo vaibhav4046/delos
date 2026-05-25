@@ -139,12 +139,13 @@ export function detectDomain(prompt: string): DomainSpec | null {
   ranked.sort((a, b) => b.score - a.score);
   const top = ranked[0];
   if (!top || top.score < MIN_SCORE) return null;
-  // Force-skip generic-dashboard for clone prompts. Domain cockpits
-  // (investor-crm, regulatory-fintech, etc) still take precedence
-  // when they actually match.
-  if (top.spec.key === "generic-dashboard" && CLONE_KEYWORDS.test(prompt)) {
-    return null;
-  }
+  // Clone keyword present? Refuse ANY deterministic playbook so the LLM
+  // path produces a brand-shaped multi-file project. Was matching
+  // ops-incident on "Notion clone" because the prompt mentioned
+  // "status pills" and ops-incident has "status" in requiredTerms,
+  // earning a score of 1 that beat MIN_SCORE. Domain cockpits still
+  // win when the prompt does NOT carry a clone keyword.
+  if (CLONE_KEYWORDS.test(prompt)) return null;
   return top.spec;
 }
 
