@@ -22,70 +22,122 @@ const webSearch: Tool<
     if (chaosFail(ctx, "tool_outage")) throw new Error("Search provider is down (chaos: tool_outage)");
     if (flakeRoll(ctx)) throw new Error("Transient network error (chaos: tool_flake)");
 
-    // 1) DuckDuckGo Instant Answer (good for definitions / topics).
-    const ddgUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
-    const ddg = await fetch(ddgUrl, { headers: { "User-Agent": "DelRio/1.0" } })
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null) as {
-        RelatedTopics?: Array<{ Text?: string; FirstURL?: string; Topics?: Array<{ Text?: string; FirstURL?: string }> }>;
-        AbstractText?: string;
-        AbstractSource?: string;
-        AbstractURL?: string;
-      } | null;
-    const flatTopics: Array<{ Text?: string; FirstURL?: string }> = [];
-    for (const t of ddg?.RelatedTopics ?? []) {
-      if (Array.isArray(t.Topics)) flatTopics.push(...t.Topics);
-      else flatTopics.push(t);
-    }
-    const ddgResults = flatTopics
-      .filter((x) => x.Text && x.FirstURL)
-      .map((x) => ({ title: x.Text!.slice(0, 100), url: x.FirstURL!, snippet: x.Text! }));
-
-    let abstract = ddg?.AbstractText || undefined;
-    let abstractSource = ddg?.AbstractSource || undefined;
-    let abstractUrl = ddg?.AbstractURL || undefined;
-
-    // 2) Wikipedia REST API as a real fallback. DDG returns empty for many
-    // queries (especially over server-side fetches from cloud IPs), so we
-    // also pull the top Wikipedia results so DEL SEARCH never lands empty.
-    const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=${Math.max(topK, 6)}&srprop=snippet&srsearch=${encodeURIComponent(query)}&origin=*`;
-    const wiki = await fetch(wikiUrl, { headers: { "User-Agent": "DelRio/1.0" } })
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null) as {
-        query?: { search?: Array<{ title?: string; snippet?: string; pageid?: number }> };
-      } | null;
-    const wikiResults = (wiki?.query?.search ?? [])
-      .filter((s) => s.title)
-      .map((s) => ({
-        title: s.title!,
-        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(s.title!.replace(/ /g, "_"))}`,
-        // Wikipedia snippet uses MediaWiki <span class="searchmatch">…</span> markup.
-        snippet: (s.snippet ?? "").replace(/<[^>]+>/g, "").slice(0, 240),
-      }));
-
-    // 3) If DDG had an extract and Wikipedia hit the same topic first, use that
-    // as the abstract source — Wikipedia is almost always more useful copy.
-    if (!abstract && wikiResults[0]?.snippet) {
-      abstract = wikiResults[0].snippet;
-      abstractSource = "Wikipedia";
-      abstractUrl = wikiResults[0].url;
+    // Query token set for relevance scoring + official-domain boost.
+    const qWords = new Set(
+      query
+        .toLowerCase()
+        .replace(/[^\w\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length >= 3),
+    );
+    function scoreResult(title: string, url: string, snippet: string): number {
+      const text = `${title} ${snippet}`.toLowerCase();
+      let score = 0;
+      for (const w of qWords) if (text.includes(w)) score += 1;
+      // Official-domain heuristic — when query mentions a brand and the
+      // URL host contains that brand, boost heavily. Catches "OpenAI
+      // official docs" → openai.com, "Next.js hydration" → nextjs.org.
+      try {
+        const host = new URL(url).hostname.toLowerCase();
+        for (const w of qWords) {
+          if (w.length >= 4 && host.includes(w)) score += 5;
+        }
+        // Generic doc-domain boosts when query mentions "docs" / "official"
+        if (/\b(docs?|documentation|official)\b/i.test(query)) {
+          if (/^(docs|developer|developers|api|learn)\./.test(host)) score += 4;
+          if (/(github|nextjs|reactjs|mdn|mozilla|openai|anthropic|stripe|vercel|tailwindcss|nodejs|python)\.(org|com|dev|io)$/.test(host)) score += 3;
+        }
+      } catch {}
+      return score;
     }
 
-    // Merge, dedupe by URL, cap at topK.
-    const merged: Array<{ title: string; url: string; snippet: string }> = [];
+    // 1) DuckDuckGo HTML/lite parsing as PRIMARY (was Instant Answer JSON
+    // which returned RelatedTopics dump · often irrelevant). Lite endpoint
+    // returns real organic results without JS.
+    const lite = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    let liteResults: Array<{ title: string; url: string; snippet: string }> = [];
+    try {
+      const r = await fetch(lite, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; DelRio/2.2; +https://delrio.vercel.app)",
+          Accept: "text/html",
+        },
+      });
+      if (r.ok) {
+        const html = await r.text();
+        // Result blocks have anchor `class="result__a"` with the title +
+        // href; snippet is `class="result__snippet"`. Extract via regex.
+        const blocks: Array<{ title: string; url: string; snippet: string }> = [];
+        const anchorRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+        let m: RegExpExecArray | null;
+        while ((m = anchorRe.exec(html)) && blocks.length < 20) {
+          let url = m[1];
+          // DuckDuckGo wraps hrefs in a redirect: //duckduckgo.com/l/?uddg=ENCODED
+          const wrap = url.match(/[?&]uddg=([^&]+)/);
+          if (wrap) url = decodeURIComponent(wrap[1]);
+          if (!/^https?:\/\//.test(url)) continue;
+          const title = m[2].replace(/<[^>]+>/g, "").trim();
+          const snippet = m[3].replace(/<[^>]+>/g, "").trim().slice(0, 240);
+          if (title && url) blocks.push({ title, url, snippet });
+        }
+        liteResults = blocks;
+      }
+    } catch {}
+
+    // 2) Wikipedia fallback · keep for ZERO-result coverage only.
+    let wikiResults: Array<{ title: string; url: string; snippet: string }> = [];
+    if (liteResults.length < topK) {
+      const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=${Math.max(topK, 6)}&srprop=snippet&srsearch=${encodeURIComponent(query)}&origin=*`;
+      const wiki = (await fetch(wikiUrl, { headers: { "User-Agent": "DelRio/1.0" } })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)) as {
+        query?: { search?: Array<{ title?: string; snippet?: string }> };
+      } | null;
+      wikiResults = (wiki?.query?.search ?? [])
+        .filter((s) => s.title)
+        .map((s) => ({
+          title: s.title!,
+          url: `https://en.wikipedia.org/wiki/${encodeURIComponent(s.title!.replace(/ /g, "_"))}`,
+          snippet: (s.snippet ?? "").replace(/<[^>]+>/g, "").slice(0, 240),
+        }));
+    }
+
+    // Score, sort, dedupe, cap.
+    const scored: Array<{ title: string; url: string; snippet: string; score: number }> = [];
+    for (const r of [...liteResults, ...wikiResults]) {
+      const score = scoreResult(r.title, r.url, r.snippet);
+      // Reject obviously irrelevant results · score 0 AND no token overlap.
+      if (score === 0) continue;
+      scored.push({ ...r, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+
     const seen = new Set<string>();
-    for (const r of [...ddgResults, ...wikiResults]) {
-      if (seen.has(r.url)) continue;
-      seen.add(r.url);
-      merged.push(r);
+    const merged: Array<{ title: string; url: string; snippet: string }> = [];
+    for (const r of scored) {
+      const host = (() => {
+        try {
+          return new URL(r.url).hostname;
+        } catch {
+          return r.url;
+        }
+      })();
+      if (seen.has(host + r.url.split("?")[0])) continue;
+      seen.add(host + r.url.split("?")[0]);
+      merged.push({ title: r.title, url: r.url, snippet: r.snippet });
       if (merged.length >= topK) break;
     }
+
+    // Abstract from top scored result.
+    const abstract = merged[0]?.snippet;
+    const abstractSource = merged[0] ? new URL(merged[0].url).hostname : undefined;
+    const abstractUrl = merged[0]?.url;
 
     if (merged.length === 0) {
       merged.push({
         title: `No results for "${query}"`,
         url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
-        snippet: "No DuckDuckGo or Wikipedia hits. Try a different phrasing.",
+        snippet: "Search returned no hits matching your query terms. Try different keywords or be more specific.",
       });
     }
     return { results: merged, abstract, abstractSource, abstractUrl };

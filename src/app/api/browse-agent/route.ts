@@ -84,12 +84,36 @@ Rules:
 - If a task asks for destructive action (delete account, send money), mark tier:"destructive" and add a confirmation step.`;
 
 function safeParseJson(text: string): unknown {
+  if (!text) return null;
   // Strip code fences if present
-  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
-  // Find first { and last }
+  const cleaned = text.replace(/```(?:json)?/gi, "").trim();
+  // Try parse as-is first (cleanest case).
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+  // Find first { and last matching balanced }.
   const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start === -1 || end === -1) return null;
+  if (start === -1) return null;
+  // Walk brace-balanced to find matching close · handles nested JSON
+  // inside prose ("Here is my plan: { … } and we will execute it").
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let end = -1;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end === -1) end = cleaned.lastIndexOf("}");
+  if (end === -1) return null;
   try {
     return JSON.parse(cleaned.slice(start, end + 1));
   } catch {

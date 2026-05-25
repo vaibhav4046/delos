@@ -17,9 +17,17 @@ const VERBS = [
 ] as const;
 
 const VERB_GROUP = VERBS.join("|");
-const CONNECTORS = /\s*(?:,|;| then | and then | after that | also | plus | next )\s*/i;
+// Connector tokens that split compound voice commands. Adding bare ` and `
+// as a split point so "open browser and search X" cleanly splits into
+// ["open browser", "search X"] instead of leaving "and" glued to the
+// browser chunk producing the "browserand" ghost reported in 2026-05-25 QA.
+const CONNECTORS = /\s*(?:,|;| then | and then | and | after that | also | plus | next )\s*/i;
 // F13 · pure-connective tokens that should never become an intent chunk
 const GHOST_TOKENS = new Set(["then", "and", "and then", "after that", "also", "plus", "next", ","]);
+// Trailing/leading connector cleanup · catches "and", "then" left glued
+// to a chunk after verb-based split.
+const TRAILING_CONNECTOR_RE = /\s+(and|then|or|also|plus|next|,)\s*$/i;
+const LEADING_CONNECTOR_RE = /^(and|then|or|also|plus|next)\s+/i;
 
 export type IntentChunk = {
   text: string;
@@ -41,7 +49,10 @@ export function chunkVoice(rawText: string): IntentChunk[] {
     // so "open terminal calculate 17 times 19" → 2 intents.
     const verbRe = new RegExp(`(?=\\b(?:${VERB_GROUP})\\b)`, "ig");
     const sub = part.split(verbRe).map((s) => s.trim()).filter(Boolean);
-    for (const s of sub) {
+    for (const sRaw of sub) {
+      // Strip leading + trailing connector words ("and", "then", "or")
+      // so chunks don't leak "open browser and" / "and search foo".
+      const s = sRaw.replace(LEADING_CONNECTOR_RE, "").replace(TRAILING_CONNECTOR_RE, "").trim();
       // F13 · drop ghost connective chunks ("then", "and") that have no verb
       // AND match a pure-connective token. Real chunks (even verb-less ones
       // like "tip calculator") keep going.

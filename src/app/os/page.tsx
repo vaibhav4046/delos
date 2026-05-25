@@ -1313,6 +1313,38 @@ export default function OSPage() {
               // auto-hides and peek-reveals on cursor approach.
               autoHide={windows.filter((w) => !w.minimized).length > 0}
             />
+            {/* F2 · floating + button above the dock · opens Launchpad
+                (full app grid). Yellow brand square matching dock tile size,
+                positioned just above the dock with a small gap. */}
+            <button
+              onClick={() => setLaunchpadOpen(true)}
+              aria-label="Open Launchpad · all apps"
+              title="All apps (F4 / ⌘Space)"
+              className="font-pixel"
+              style={{
+                position: "fixed",
+                bottom: 84,
+                left: "50%",
+                transform: "translateX(-50%)",
+                width: 48,
+                height: 48,
+                background: "var(--accent)",
+                color: "var(--on-accent)",
+                border: "1px solid var(--surface-2)",
+                borderRadius: 6,
+                fontSize: 28,
+                lineHeight: "44px",
+                fontWeight: 700,
+                cursor: "pointer",
+                zIndex: 90,
+                boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+                transition: "transform 140ms ease",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateX(-50%) translateY(-3px)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateX(-50%)"; }}
+            >
+              +
+            </button>
           </div>
 
           <ToastStack items={toasts} onDismiss={(id) => setToasts((p) => p.filter((x) => x.id !== id))} />

@@ -434,14 +434,26 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
   }
 
   // ─── 6c. Recall memory ──────────────────────────────────────────────────
+  // Patterns broadened so "what do you remember about X" / "remember
+  // anything about X" / "recall X" / "remember my X" all route to
+  // recall_memory. Was failing on natural phrasing in 2026-05-25 QA.
   const recall = lower.match(
-    /^(?:recall|what\s+(?:was|did|were|is\s+my)|show\s+me\s+my|find\s+my|look\s+up\s+my|do\s+you\s+remember|search\s+memory\s+for)\s+(.{2,300})$/i,
+    /^(?:recall|what\s+(?:was|did|were|is\s+my|do\s+you\s+remember)|show\s+me\s+my|find\s+my|look\s+up\s+my|do\s+you\s+remember|remember\s+anything|search\s+memory\s+for|what\s+(?:do\s+)?you\s+(?:remember|know)(?:\s+about)?)\s+(.{2,300})$/i,
   );
   if (recall) {
     return {
       intent: "recall_memory",
-      payload: recall[1].trim(),
+      payload: recall[1].replace(/^about\s+/i, "").trim(),
       reply: `Recalling ${recall[1].slice(0, 30)}.`,
+    };
+  }
+  // Bare "what do you remember" without an object · catch as broad recall.
+  if (/^what\s+do\s+you\s+remember(\s+about\s+(.+))?[?.]?$/i.test(lower)) {
+    const m2 = lower.match(/about\s+(.+?)[?.]?$/);
+    return {
+      intent: "recall_memory",
+      payload: m2 ? m2[1].trim() : "recent",
+      reply: m2 ? `Recalling ${m2[1].slice(0, 30)}.` : "Recalling recent memories.",
     };
   }
 

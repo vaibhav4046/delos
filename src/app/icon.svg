@@ -1,10 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- DelOS favicon · pixel "D" wordmark in brand yellow on dark navy.
+       Matches the Logo component used across the OS shell. -->
   <rect x="0" y="0" width="32" height="32" fill="#1b1b2e"/>
   <rect x="2" y="2" width="28" height="28" fill="#fbc531"/>
   <rect x="2" y="2" width="28" height="2" fill="#fff3a6"/>
   <rect x="2" y="2" width="2" height="28" fill="#fff3a6"/>
   <rect x="2" y="28" width="28" height="2" fill="#7a4f0d"/>
   <rect x="28" y="2" width="2" height="28" fill="#7a4f0d"/>
+  <!-- Pixel "D" letterform · left vertical bar + top/bottom arms + right curve -->
   <rect x="7" y="7" width="4" height="18" fill="#1b1b2e"/>
   <rect x="11" y="7" width="9" height="3" fill="#1b1b2e"/>
   <rect x="11" y="22" width="9" height="3" fill="#1b1b2e"/>
