@@ -570,7 +570,58 @@ Output JSON: { "path":"${f.path}","content":"…escaped source…","language":"$
           at: Date.now(),
         });
       } catch (e) {
-        send({ t: "error", message: (e as Error).message, at: Date.now() });
+        const msg = (e as Error).message;
+        // Provider 429 / quota / rate limit · fall back to a deterministic
+        // generic-dashboard project so the stream NEVER ends without
+        // project_done on demo day. QA report 2026-05-25 · "arbitrary
+        // clone builder consistently returned plan_start → error mistral 429".
+        const isQuotaErr = /429|rate.?limit|quota|tokens per day|tpd/i.test(msg);
+        if (isQuotaErr) {
+          try {
+            const fallback = buildDomainPlaybook(userPrompt + " generic dashboard", stackHint);
+            if (fallback) {
+              send({
+                t: "fallback_engaged",
+                reason: "provider quota exhausted · deterministic playbook fallback",
+                at: Date.now(),
+              });
+              for (let i = 0; i < fallback.project.files.length; i++) {
+                const f = fallback.project.files[i];
+                send({
+                  t: "file_done",
+                  path: f.path,
+                  content: f.content,
+                  language: f.language,
+                  index: i,
+                  total: fallback.project.files.length,
+                  at: Date.now(),
+                  fallback: true,
+                });
+              }
+              send({
+                t: "project_done",
+                project: {
+                  name: fallback.project.name + " (fallback)",
+                  description: fallback.project.description,
+                  stack: fallback.project.stack,
+                  files: fallback.project.files,
+                },
+                at: Date.now(),
+                fallback: true,
+              });
+            } else {
+              send({
+                t: "error",
+                message: "Provider quota exhausted · retry in ~60s or pick a simpler prompt",
+                at: Date.now(),
+              });
+            }
+          } catch {
+            send({ t: "error", message: msg, at: Date.now() });
+          }
+        } else {
+          send({ t: "error", message: msg, at: Date.now() });
+        }
       } finally {
         try {
           controller.close();

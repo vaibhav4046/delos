@@ -1,16 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
-  <!-- DelOS favicon · pixel "D" wordmark in brand yellow on dark navy.
-       Matches the Logo component used across the OS shell. -->
+  <!-- DelOS favicon · pixel "D" letterform in dark navy on brand yellow square.
+       Matches the wordmark Logo component used in the OS shell. -->
   <rect x="0" y="0" width="32" height="32" fill="#1b1b2e"/>
   <rect x="2" y="2" width="28" height="28" fill="#fbc531"/>
   <rect x="2" y="2" width="28" height="2" fill="#fff3a6"/>
   <rect x="2" y="2" width="2" height="28" fill="#fff3a6"/>
   <rect x="2" y="28" width="28" height="2" fill="#7a4f0d"/>
   <rect x="28" y="2" width="2" height="28" fill="#7a4f0d"/>
-  <!-- Pixel "D" letterform · left vertical bar + top/bottom arms + right curve -->
-  <rect x="7" y="7" width="4" height="18" fill="#1b1b2e"/>
-  <rect x="11" y="7" width="9" height="3" fill="#1b1b2e"/>
-  <rect x="11" y="22" width="9" height="3" fill="#1b1b2e"/>
-  <rect x="20" y="10" width="3" height="12" fill="#1b1b2e"/>
-  <rect x="23" y="12" width="2" height="8" fill="#1b1b2e"/>
+  <!-- Pixel "D" · left vertical bar, top + bottom arms, right curve -->
+  <!-- Left vertical bar -->
+  <rect x="8" y="8" width="3" height="16" fill="#1b1b2e"/>
+  <!-- Top arm -->
+  <rect x="11" y="8" width="8" height="3" fill="#1b1b2e"/>
+  <!-- Bottom arm -->
+  <rect x="11" y="21" width="8" height="3" fill="#1b1b2e"/>
+  <!-- Top-right curve corner -->
+  <rect x="19" y="10" width="3" height="3" fill="#1b1b2e"/>
+  <!-- Right vertical inner bar -->
+  <rect x="21" y="11" width="3" height="10" fill="#1b1b2e"/>
+  <!-- Bottom-right curve corner -->
+  <rect x="19" y="19" width="3" height="3" fill="#1b1b2e"/>
 </svg>

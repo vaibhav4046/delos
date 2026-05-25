@@ -152,9 +152,18 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
     const rest = remMatch[1].trim();
     const parsed = parseWhen(rest);
     if (parsed) {
-      // Strip time tokens from the action text
+      // Strip time tokens from the action text. Order longer
+      // alternatives first so "30 minutes" matches the plural variant
+      // before "min" leaves "utes" behind. Was producing "call Andy
+      // minutes" / "call Andy hour" etc in 2026-05-25 QA.
       const cleanText = rest
-        .replace(/\b(?:in|at|on|by|tonight|tomorrow|today|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d+\s*(?:min|minute|minutes|hour|hours|day|days|week|weeks))\b/gi, "")
+        .replace(
+          /\b(?:in|at|on|by|tonight|tomorrow|today|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d+\s*(?:minutes|minute|hours|hour|days|day|weeks|week|mins|min))\b/gi,
+          "",
+        )
+        // Strip dangling "to" left over from "remind me at 3pm to call Andy"
+        .replace(/^to\s+/i, "")
+        .replace(/\s+to\s+/i, " ")
         .replace(/\s+/g, " ")
         .trim()
         .replace(/[.,]+$/, "");
@@ -202,11 +211,27 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
   // Time signal still required so this doesn't catch "schedule a thing" without when.
   const calMatch = raw.match(/^(?:please\s+)?(?:schedule|create|add|book|set\s+up)\s+(?:a\s+|an\s+)?(?:event|meeting|call|sync|standup|reminder|appointment|lunch|dinner|breakfast|coffee|drinks|catch\s+up|chat|talk|interview|review|demo|session|1[:-]?1|one[\s-]?on[\s-]?one)?\s*(.+)$/i);
   if (calMatch && /\b(?:today|tonight|tomorrow|day\s+after\s+tomorrow|next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)|at\s+\d|in\s+\d+\s*(?:min|hour|day))\b/i.test(raw)) {
+    // Split into title + when so calendar widget doesn't end up with
+    // event title = "next Friday at 1pm". 2026-05-25 QA bug · voice
+    // create_event lost the noun. Now we strip the time portion to get
+    // a clean title.
+    const fullText = calMatch[1].trim();
+    const whenRe = /\b(today|tonight|tomorrow|day\s+after\s+tomorrow|next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?\b/i;
+    const timeRe = /\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i;
+    const inRe = /\bin\s+\d+\s*(?:min|minute|minutes|hour|hours|day|days)\b/i;
+    let title = fullText;
+    let when = "";
+    const whenMatch = fullText.match(whenRe) || fullText.match(timeRe) || fullText.match(inRe);
+    if (whenMatch) {
+      when = whenMatch[0].trim();
+      title = fullText.replace(whenRe, "").replace(timeRe, "").replace(inRe, "").replace(/\s+/g, " ").replace(/^(?:with|on|for|to|about)\s+/i, "").trim();
+    }
+    if (!title) title = "Event";
     return {
       intent: "create_event",
       app: "calendar",
-      payload: calMatch[1].trim(),
-      reply: "Adding to your calendar.",
+      payload: JSON.stringify({ title, when, raw: fullText }),
+      reply: `Adding ${title}${when ? " · " + when : ""} to your calendar.`,
     };
   }
   if (/^(?:open|show)\s+(?:my\s+)?(?:widgets?|clock|reminders?)\b/i.test(raw)) {

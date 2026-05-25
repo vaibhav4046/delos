@@ -440,7 +440,7 @@ export default function OSPage() {
 
   // Bootstrap: fetch /api/me, lock per-user tenantId, decide whether to show OnboardingPortal.
   useEffect(() => {
-    fetch("/api/me")
+    fetch("/api/me?profile=full", { credentials: "include" })
       .then((r) => r.json())
       .then((d: { signedIn?: boolean; email?: string; tenantId?: string }) => {
         setSession(d);

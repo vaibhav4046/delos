@@ -316,7 +316,7 @@ Produce the final deliverable now.`,
       let to = recipientMatch?.[1];
       if (!to) {
         try {
-          const me = await fetch("/api/me").then((r) => r.ok ? r.json() : null).catch(() => null) as { email?: string } | null;
+          const me = await fetch("/api/me?profile=full", { credentials: "include" }).then((r) => r.ok ? r.json() : null).catch(() => null) as { email?: string } | null;
           to = me?.email;
         } catch {}
       }

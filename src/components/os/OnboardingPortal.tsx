@@ -41,7 +41,7 @@ export function OnboardingPortal({ onClose }: { onClose: () => void }) {
   const [coordinatorPlan, setCoordinatorPlan] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/me").then((r) => r.json()).then((d) => {
+    fetch("/api/me?profile=full", { credentials: "include" }).then((r) => r.json()).then((d) => {
       setMe(d);
       if (d?.tenantId) {
         setTenantId(d.tenantId);
