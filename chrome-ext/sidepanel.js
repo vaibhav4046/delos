@@ -200,21 +200,29 @@ async function captureAndLog(targetId, label = "") {
   } catch {}
 }
 
-// EXT-V5-2 · safely read the active tab. Returns null with a logged hint when
-// the active tab is a chrome:// / extension / file URL the agent can't touch.
-async function safeReadTab(targetLog = "missionLog") {
+// EXT-V5-2 / EXT-V7 · safely read the active tab. Returns null with a logged
+// hint when no real webpage is available. Background.js's activeTab() now
+// scans every window for an http(s) tab so this rarely fails, but keeps
+// the same helpful message when the user genuinely has only browser-internal
+// tabs open. Pass `silent: true` to suppress the log when the caller will
+// route differently (e.g. answer the question without tab context).
+async function safeReadTab(targetLog = "missionLog", silent = false) {
   const r = await tabAction("read");
   if (!r?.ok) {
     const err = r?.error || "";
-    if (/chrome:\/\/|edge:\/\/|cannot access/i.test(err)) {
-      appendLog(targetLog, `${tag("muted", "tab")} skipped · open any regular webpage (e.g. google.com) and the agent can use it for context`);
-      return null;
+    if (!silent) {
+      if (/no active tab|no real webpage|cannot access|chrome:\/\/|edge:\/\//i.test(err)) {
+        appendLog(targetLog, `${tag("muted", "tab")} no real webpage open · open any site (e.g. google.com) for tab-aware features. Switching to general answer mode.`);
+      } else {
+        appendLog(targetLog, `${tag("muted", "tab")} read failed · ${esc(err)}`);
+      }
     }
-    appendLog(targetLog, `${tag("muted", "tab")} read failed · ${esc(err)}`);
     return null;
   }
   if (isUnscriptableUrl(r.data?.url)) {
-    appendLog(targetLog, `${tag("muted", "tab")} on a browser-internal page · open a real webpage to use as context`);
+    if (!silent) {
+      appendLog(targetLog, `${tag("muted", "tab")} on a browser-internal page · open any site to use it as context. Switching to general answer mode.`);
+    }
     return null;
   }
   return r.data;
@@ -250,6 +258,9 @@ async function runMission(isContinuation = false, continuationContext = "") {
 
   // Gather current tab context if user opted in and tab is scriptable.
   let tabContext = null;
+  // EXT-V7 · detect tab-aware intent ("this tab", "current page", "summarize this")
+  // so we can fast-path to a friendly answer when no real webpage is open.
+  const tabAwareIntent = /\b(this|current|the)\s+(tab|page|article|site|post|video|content)\b|^summarize$|\bsummari[sz]e\s+this\b/i.test(taskRaw);
   if ($("#missionUseTab")?.checked) {
     const d = await safeReadTab("missionLog");
     if (d) {
@@ -261,6 +272,30 @@ async function runMission(isContinuation = false, continuationContext = "") {
       };
       if (!isContinuation) {
         appendLog("missionLog", `${tag("muted", "ctx")} ${esc(d.title || d.url || "(tab)")}`);
+      }
+    } else if (tabAwareIntent && !isContinuation) {
+      // EXT-V7 · the user asked about "this tab" but there is no real tab.
+      // Short-circuit to quick-agent so we don't waste a browse-agent round
+      // that would also fail. Tell the agent to admit the constraint and
+      // answer generally.
+      try {
+        const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            input: `The user asked "${taskRaw}" but no regular webpage is currently open in their browser (only browser-internal pages like the new tab page). Explain that you cannot see a webpage right now and ask them to open any site, then offer to answer the question generally if they meant it that way. Keep it to 2-3 sentences.`,
+            tenantId: state.cfg.tenantId || undefined,
+          }),
+        });
+        const j = await r.json();
+        const reply = j.text || "Open any regular webpage (like google.com) and ask again so I can see what you are looking at.";
+        appendLog("missionLog", `<div class="answer">${tag("info", "agent")} ${esc(reply)}</div>`);
+        state.thread.push({ role: "agent", text: reply });
+        $("#convoInput")?.focus();
+        return;
+      } catch (e) {
+        appendLog("missionLog", `${tag("bad", "ERR")} ${esc(e.message)}`);
+        return;
       }
     }
   }
@@ -598,7 +633,11 @@ async function askConvo() {
 $("#missionReadBtn")?.addEventListener("click", async () => {
   appendLog("missionLog", `${tag("info", "tab")} reading…`);
   const d = await safeReadTab("missionLog");
-  if (!d) return;
+  if (!d) {
+    // EXT-V7 · friendly fallback when no real tab. Was: silent failure.
+    appendLog("missionLog", `${tag("muted", "tip")} open any webpage (google.com, news.ycombinator.com) and click Read again.`);
+    return;
+  }
   appendLog("missionLog", `<div class="muted">${esc(d.title || "(no title)")} · ${esc(d.url || "")}</div>`);
   appendLog("missionLog", `<div class="answer">${tag("ok", "text")} ${esc(String(d.text || "").slice(0, 1200))}…</div>`);
 });
@@ -606,7 +645,10 @@ $("#missionReadBtn")?.addEventListener("click", async () => {
 $("#missionSummarizeBtn")?.addEventListener("click", async () => {
   appendLog("missionLog", `${tag("info", "tab")} summarizing…`);
   const d = await safeReadTab("missionLog");
-  if (!d) return;
+  if (!d) {
+    appendLog("missionLog", `${tag("muted", "tip")} open any webpage and click Summarize again.`);
+    return;
+  }
   try {
     const r = await fetch(`${state.cfg.endpoint}/api/quick-agent`, {
       method: "POST",

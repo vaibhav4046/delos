@@ -47,9 +47,49 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+// EXT-V7 · pick the right tab even when the side panel is focused. Chrome
+// reports `active: true, lastFocusedWindow: true` against the side panel's
+// own window when the panel has focus, so `read` was landing on a
+// chrome-extension:// URL and getting blocked. Strategy:
+//   1. Try the current window's active tab.
+//   2. If it's unscriptable, scan every window for any active tab whose
+//      URL is http:// or https://.
+//   3. As a last resort scan ALL tabs for the most recently active
+//      http(s) tab.
+function isWebUrl(u) {
+  return typeof u === "string" && /^https?:\/\//i.test(u);
+}
+
 async function activeTab() {
-  const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  return t;
+  // 1. current window first (fast path)
+  try {
+    const [a] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (a && isWebUrl(a.url)) return a;
+  } catch {}
+  // 2. last focused window (handles side-panel quirks)
+  try {
+    const [b] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (b && isWebUrl(b.url)) return b;
+  } catch {}
+  // 3. any window's active tab that is a real webpage
+  try {
+    const all = await chrome.tabs.query({ active: true });
+    const web = all.find((t) => isWebUrl(t.url));
+    if (web) return web;
+  } catch {}
+  // 4. most recently accessed http(s) tab across all windows
+  try {
+    const everything = await chrome.tabs.query({});
+    const webTabs = everything.filter((t) => isWebUrl(t.url));
+    if (webTabs.length) {
+      // chrome.tabs.Tab.lastAccessed is in MV3 since Chrome 121; fall back
+      // to id ordering when missing.
+      webTabs.sort((p, q) => (q.lastAccessed ?? q.id ?? 0) - (p.lastAccessed ?? p.id ?? 0));
+      return webTabs[0];
+    }
+  } catch {}
+  // 5. give up gracefully — caller shows the helpful "open a real webpage" hint
+  return null;
 }
 
 async function runInTab(tabId, fn, args = []) {
