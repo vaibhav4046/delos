@@ -57,9 +57,12 @@ async function probeModel(
       return { ok: /ok/i.test(r.text), ms: Date.now() - t0 };
     }
     // Standard providers via withModels override · use runQuickAgent
+    // with disableFallback so each row reports its OWN provider error
+    // instead of cascading down to the Bytez tertiary and showing
+    // bytez_not_in_catalog under every supposedly-working model.
     const { withModels } = await import("@/lib/llm");
     const text = await withModels({ executor: model as Parameters<typeof resolveModel>[0] }, () =>
-      runQuickAgent({ prompt: "Reply with exactly: OK" }),
+      runQuickAgent({ prompt: "Reply with exactly: OK", disableFallback: true }),
     );
     return { ok: /ok/i.test(text), ms: Date.now() - t0 };
   } catch (e) {
