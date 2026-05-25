@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "guard:no-perplexity": "node -e \"const{execSync}=require('child_process');try{const o=execSync('grep -rIn frontend-cdn.perplexity src public 2>/dev/null || true').toString();if(o.trim()){console.error('Perplexity CDN reference found:');console.error(o);process.exit(1)}console.log('clean')}catch(e){console.log('clean')}\"",
+    "guard:no-perplexity": "node scripts/guard-no-perplexity.mjs",
     "regression": "node scripts/judge-regression.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs"
   },

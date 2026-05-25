@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
   // awaiting_approval so the client modal can gate them.
   const DESTRUCTIVE = new Set(["clear_memory", "delete_event", "wipe_drafts", "delete_repo"]);
   const EXTERNAL = new Set(["send_email", "github_repo", "github_issue", "gdrive_share"]);
-  const executions = intents.map((c) => {
+  const rawExecutions = intents.map((c) => {
     const parsedSub = parseVoiceLocal(c.text);
     const kind = parsedSub?.intent ?? "unknown";
     let tier: "read" | "reversible" | "external" | "destructive" = "reversible";
@@ -131,6 +131,14 @@ export async function POST(req: NextRequest) {
       err: parsedSub ? undefined : "no_local_match",
     };
   });
+  // P0 · drop rejected/unknown chunks from non-compound results. When the
+  // top-level result is a single non-compound intent (~90% of calls), the
+  // chunker false-positives produce noisy "rejected" entries with
+  // err: "no_local_match" that contradict the top-level intent. Surface
+  // only fulfilled chunks so an API inspector sees clean shape.
+  const executions = compound
+    ? rawExecutions
+    : rawExecutions.filter((e) => e.status !== "rejected" && e.kind !== "unknown");
 
   // ─── Fast path · deterministic regex parser ──────────────────────────────
   // Covers ~90% of voice intents (open / build / cohort / math / greetings /

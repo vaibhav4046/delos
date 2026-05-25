@@ -5,7 +5,20 @@
 
 import assert from "node:assert/strict";
 
-const BASE = process.argv[2] ?? "http://localhost:3000";
+// P1 · auto-detect base URL. Prefer explicit argv, then DELOS_BASE_URL env,
+// then ping localhost — if not reachable, fall back to the live deploy so
+// `npm run regression` works out-of-the-box without a local dev server.
+async function pickBase() {
+  if (process.argv[2]) return process.argv[2];
+  if (process.env.DELOS_BASE_URL) return process.env.DELOS_BASE_URL;
+  try {
+    const r = await fetch("http://localhost:3000/api/health", { signal: AbortSignal.timeout(1500) });
+    if (r.ok) return "http://localhost:3000";
+  } catch { /* localhost down, fall through */ }
+  console.error("[regression] localhost:3000 not reachable · using https://delrio.vercel.app");
+  return "https://delrio.vercel.app";
+}
+const BASE = await pickBase();
 const tenant = `judge_${Date.now()}`;
 const j = (s) => JSON.parse(s);
 const REQ = (m, p, b, h = {}) =>

@@ -510,6 +510,31 @@ function MemoryRow({
 
 function EmptyState({ tenant, onSeeded }: { tenant: string | null; onSeeded: () => void }) {
   const [seeding, setSeeding] = useState(false);
+  // P1 · auto-fire seed on mount for guest/anon/demo tenants so judges who
+  // randomly click Memory Browser never see the sad empty state. Manual
+  // tenants (u_*) keep the explicit button so we don't pollute their store.
+  useEffect(() => {
+    if (!tenant) return;
+    const isGuest = /^(demo|qa|test|judge|hack|anon|delrio_demo)/i.test(tenant) || tenant === "delrio_demo";
+    if (!isGuest) return;
+    let cancelled = false;
+    (async () => {
+      setSeeding(true);
+      try {
+        const tid = /^(demo|qa|test|judge|hack)_/i.test(tenant) ? tenant : `demo_${Date.now()}`;
+        const r = await fetch("/api/memory/seed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tenantId: tid }),
+        });
+        if (r.ok && !cancelled) onSeeded();
+      } finally {
+        if (!cancelled) setSeeding(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant]);
   return (
     <div
       className="flex flex-col items-center justify-center text-center gap-3"

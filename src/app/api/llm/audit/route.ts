@@ -92,7 +92,26 @@ export async function GET(req: NextRequest) {
     results.push({ model, ...out });
   }
   G.__delos_llm_audit = { at: Date.now(), results };
-  return Response.json({ ok: true, cachedAt: Date.now(), results });
+  return Response.json({
+    ok: true,
+    cachedAt: Date.now(),
+    results,
+    // P0 · expose healthy/unhealthy split so cohort + model picker can
+    // route around dead providers automatically. Callers should prefer
+    // `healthy` over MODELS_TO_AUDIT.
+    healthy: results.filter((r) => r.ok).map((r) => r.model),
+    unhealthy: results.filter((r) => !r.ok).map((r) => ({ model: r.model, err: r.err, missingKey: r.missingKey })),
+  });
+}
+
+// P0 · cohort + browse-agent + extension call this to drop dead providers
+// before spawning members. Cache-respecting · returns the most recent audit
+// without re-probing. If no audit ran yet, returns the full target list so
+// the first call doesn't fail.
+export function getHealthyModelsSync(): string[] | null {
+  const cached = G.__delos_llm_audit;
+  if (!cached || Date.now() - cached.at > AUDIT_TTL_MS) return null;
+  return cached.results.filter((r) => r.ok).map((r) => r.model);
 }
 
 export async function POST() {

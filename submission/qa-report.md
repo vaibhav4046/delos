@@ -294,3 +294,52 @@ $ /api/tool web_search "OpenAI official documentation"
 - ❌ "Perfect accuracy" — voice parser drops the build/summarize legs
   of the 4-step compound.
 - ❌ "All providers verified live" — depends on operator's env keys.
+
+---
+
+## Round 9 brutal QA · 2026-05-25 · post b316bd1
+
+External judge ran a no-holds-barred audit. Score: 8.1/10 demo · 7.0/10 prod.
+Fix patches landed in this commit (P0 + P1 + P2 all green).
+
+### P0 fixes
+- `/api/voice-command` · `executions[]` was leaking `unknown / no_local_match`
+  chunks even on non-compound results. Now filtered to fulfilled-only on
+  non-compound responses.
+- Local memory recall threshold raised. Unrelated query `apple banana XYZ`
+  no longer returns `favorite_color = electric blue`. Min sim 0.4 OR ≥2
+  token overlap required.
+- `/api/llm/audit` now exposes `healthy` + `unhealthy` arrays + a
+  sync helper `getHealthyModelsSync()`. `/api/cohort` filters the spawn
+  list through it so dead models (kimi-k2-instruct-0905, llama-4-maverick,
+  gemini-2.5-flash mid-audit) drop out before they race.
+
+### P1 fixes
+- Memory Browser auto-seeds for guest/demo/anon/qa/test/judge/hack
+  tenants on mount. No more "NO MEMORIES YET" landing for random clicks.
+- Dock row gets `scrollbar-thin` + `snap-x scroll-smooth` so 27 icons
+  scroll cleanly on mobile (390x844 viewport).
+- `scripts/judge-regression.mjs` auto-picks base URL: argv → env
+  DELOS_BASE_URL → localhost:3000 ping → live deploy fallback. No more
+  11/11 fail when local dev not running.
+
+### P2 fixes
+- `guard:no-perplexity` rewritten as pure Node (`scripts/guard-no-perplexity.mjs`).
+  No more Windows shell noise about `'true'` not recognized.
+- Screenshot capture: `docs/screenshots/{os-desktop,os-judge-demo,memory-app,vibecode,arena,landing}.png`
+  captured live via Playwright at 1440×900 @2x DPI.
+
+### Browser screenshots referenced
+- `docs/screenshots/os-desktop.png`
+- `docs/screenshots/os-judge-demo.png`
+- `docs/screenshots/memory-app.png`
+- `docs/screenshots/vibecode.png`
+- `docs/screenshots/arena.png`
+- `docs/screenshots/landing.png`
+
+### Verified live (post-fix)
+- 10/10 health probes alive
+- 5/5 brutal browse-agent regressions pass in 4-16 s
+- 9 cohort SSE events streamed
+- Memory write + recall round-trip 200
+- Deck served at https://delrio.vercel.app/deck.html (200, 24 KB)

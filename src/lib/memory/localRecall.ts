@@ -50,8 +50,15 @@ export function scoreLocal(query: string, mem: LocalMem, idf: Map<string, number
   if (mt.length === 0) return 0;
   const overlap = qt.filter((t) => mt.includes(t));
   if (overlap.length === 0) return 0;
-  const idfSum = overlap.reduce((sum, t) => sum + (idf.get(t) ?? 1), 0);
   const sim = overlap.length / qt.length;
+  // P0 · raised minimum overlap threshold. Previously `apple banana XYZ`
+  // matched `favorite color electric blue` via a single chance common
+  // token (~33% sim). Now require:
+  //   - sim ≥ 0.4 OR overlap.length ≥ 2
+  // so unrelated queries return empty rather than confidently surfacing
+  // a wrong fact.
+  if (sim < 0.4 && overlap.length < 2) return 0;
+  const idfSum = overlap.reduce((sum, t) => sum + (idf.get(t) ?? 1), 0);
   const ageH = mem.createdAt ? (Date.now() - mem.createdAt) / 3.6e6 : 24;
   const recency = Math.exp(-ageH / 72);
   return sim * idfSum * (0.6 + 0.4 * recency);

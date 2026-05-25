@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
   // Honor ?godMode=1 query param.
   const url = new URL(req.url);
   const isGodMode = url.searchParams.get("godMode") === "1" && isNimEnabled();
-  const members: string[] = isGodMode
+  const requestedMembers: string[] = isGodMode
     ? [
         "groq:openai/gpt-oss-120b",
         "groq:meta-llama/llama-4-maverick-17b-128e-instruct",
@@ -99,6 +99,16 @@ export async function POST(req: NextRequest) {
         `nim:${NIM_MODELS.nemotronSuper49b}`,
       ]
     : (parsed.data.members as string[]);
+  // P0 · drop unhealthy models from cohort spawn list using last audit.
+  // Falls through to requested list if no audit cached so the first call
+  // doesn't 500. Keeps min ≥2 members so cohort always has someone to race.
+  const { getHealthyModelsSync } = await import("@/app/api/llm/audit/route");
+  const healthy = getHealthyModelsSync();
+  let members: string[] = requestedMembers;
+  if (healthy && healthy.length >= 2) {
+    const filtered = requestedMembers.filter((m) => healthy.includes(m));
+    if (filtered.length >= 2) members = filtered;
+  }
   const judgeKey = parsed.data.judge ?? ("mistral:mistral-large-latest" as ModelKey);
 
   const stream = new ReadableStream({
