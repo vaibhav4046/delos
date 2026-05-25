@@ -220,6 +220,44 @@ export function DelCodeApp() {
     setActivePath(path);
     setOpenPaths((p) => (p.includes(path) ? p : [...p, path]));
   }
+
+  // W03 · export current project · POSTs files inline so serverless cold-start
+  // can't lose the cached project between codegen call and export click.
+  async function exportProject(format: "zip" | "html") {
+    if (!files.length) {
+      window.dispatchEvent(new CustomEvent("toast", { detail: { text: "Run a build first to enable export.", tone: "warn" } }));
+      return;
+    }
+    const G = globalThis as unknown as { __delos_current_project_id?: string; __delos_delcode_pending?: { name?: string } };
+    const name = G.__delos_delcode_pending?.name ?? "delos-export";
+    try {
+      const res = await fetch(`/api/codegen-app/export?format=${format}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: G.__delos_current_project_id,
+          name,
+          files: files.map((f) => ({ path: f.path, content: f.content })),
+        }),
+      });
+      if (!res.ok) {
+        window.dispatchEvent(new CustomEvent("toast", { detail: { text: `export ${format} failed (${res.status})`, tone: "bad" } }));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${name.replace(/[^a-z0-9-]+/gi, "-")}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      window.dispatchEvent(new CustomEvent("toast", { detail: { text: `↓ ${format.toUpperCase()} downloaded`, tone: "ok" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("toast", { detail: { text: `export error: ${(e as Error).message.slice(0, 60)}`, tone: "bad" } }));
+    }
+  }
   function closeTab(path: string) {
     setOpenPaths((p) => {
       const remaining = p.filter((x) => x !== path);
@@ -573,24 +611,14 @@ export function DelCodeApp() {
                 under its id; we read the latest project id from the global
                 pending payload set by VibeCode's stream consumer. */}
             <button
-              onClick={() => {
-                const G = globalThis as unknown as { __delos_current_project_id?: string };
-                const id = G.__delos_current_project_id;
-                if (!id) { alert("Run a VibeCode build first to enable export."); return; }
-                window.open(`/api/codegen-app/export?id=${encodeURIComponent(id)}&format=zip`, "_blank");
-              }}
+              onClick={() => exportProject("zip")}
               title="Download project as zip"
               style={{ background: "#30363d", color: "#7dd3fc", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}
             >
               ↓ ZIP
             </button>
             <button
-              onClick={() => {
-                const G = globalThis as unknown as { __delos_current_project_id?: string };
-                const id = G.__delos_current_project_id;
-                if (!id) { alert("Run a VibeCode build first to enable export."); return; }
-                window.open(`/api/codegen-app/export?id=${encodeURIComponent(id)}&format=html`, "_blank");
-              }}
+              onClick={() => exportProject("html")}
               title="Download as single-file HTML preview"
               style={{ background: "#30363d", color: "#fbcfe8", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}
             >
