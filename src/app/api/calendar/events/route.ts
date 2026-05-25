@@ -8,6 +8,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { listEvents, createEvent, removeEvent } from "@/lib/calendarStore";
 import { parseWhen, validateCalendarParse, isCoherentTimeText } from "@/lib/time/parseWhen";
+import { parseWhenZeroDep } from "@/lib/time/parseWhenZeroDep";
 import { resolveTenant, zodErr } from "@/lib/apiAuth";
 
 // F12 · strip HTML/XSS from titles before persistence. Pair with React's
@@ -51,17 +52,40 @@ export async function POST(req: NextRequest) {
   let startAt = data.startAt;
   let endAt = data.endAt;
   if (!startAt && data.when) {
-    // F11 · pre-flight coherence check rejects garbage like "three eels from sunday"
     if (!isCoherentTimeText(data.when)) {
       return Response.json({ error: "unparseable_time", when: data.when }, { status: 400 });
     }
-    const p = parseWhen(data.when, { tz });
-    const v = validateCalendarParse(p);
-    if (!v.ok) {
-      return Response.json({ error: v.reason, when: data.when }, { status: 400 });
+    // R5 · tz-correct zero-dep parser PRIMARY · fixes +1h BST bug.
+    // Falls back to legacy regex parser if zero-dep returns null (weird edge cases).
+    let parsedAt: Date | null = null;
+    let durationMs = 1_800_000;
+    let confidence = 0.5;
+    try {
+      const z = parseWhenZeroDep(data.when, { tz });
+      if (z) {
+        parsedAt = z.at;
+        durationMs = z.durationMs;
+        confidence = z.confidence;
+      }
+    } catch {
+      // ignore · fall through to legacy
     }
-    startAt = v.at.getTime();
-    endAt = startAt + (p?.durationMs ?? 1_800_000);
+    if (!parsedAt) {
+      const legacy = parseWhen(data.when, { tz });
+      const v = validateCalendarParse(legacy);
+      if (!v.ok) return Response.json({ error: v.reason, when: data.when }, { status: 400 });
+      parsedAt = v.at;
+      durationMs = legacy?.durationMs ?? 1_800_000;
+      confidence = legacy?.confidence ?? 0.5;
+    }
+    if (parsedAt.getTime() < Date.now() - 60_000) {
+      return Response.json({ error: "past_time" }, { status: 400 });
+    }
+    if (confidence < 0.4) {
+      return Response.json({ error: "low_confidence" }, { status: 400 });
+    }
+    startAt = parsedAt.getTime();
+    endAt = startAt + durationMs;
   }
   if (!startAt) startAt = Date.now() + 3_600_000;
   if (!endAt) endAt = startAt + 1_800_000;
