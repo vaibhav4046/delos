@@ -137,6 +137,50 @@ export async function POST(req: NextRequest) {
   if (!forceLLM) {
     const local = parseVoiceLocal(transcript);
     if (local) {
+      // V03 · integration_unavailable envelope · when the spoken command
+      // implies a connector (gmail/notion/github/gdrive) and that connector
+      // isn't connected on this account, return a clean envelope the client
+      // can render as a "Connect X" CTA instead of silently routing through
+      // Del Assistant.
+      const connectorMatch = (() => {
+        const lt = transcript.toLowerCase();
+        if (/^(?:draft|compose|send|read|show|check)\s+(?:an?\s+)?(?:email|gmail|inbox)/i.test(lt))
+          return { provider: "gmail", action: /^send/i.test(lt) ? "send" : /^draft|compose/i.test(lt) ? "draft_reply" : "list_recent" };
+        if (/notion/i.test(lt)) return { provider: "notion", action: /create|add/i.test(lt) ? "create_page" : "search" };
+        if (/(?:google\s+)?drive|gdrive/i.test(lt)) return { provider: "gdrive", action: "list_recent" };
+        if (/github|gh\s+repo|gh\s+issue/i.test(lt)) return { provider: "github", action: /repo/i.test(lt) ? "create_repo" : "create_issue" };
+        return null;
+      })();
+      if (connectorMatch) {
+        const envVar = ({ gmail: "GMAIL_CLIENT_ID", notion: "NOTION_CLIENT_ID", github: "GITHUB_CLIENT_ID", gdrive: "GMAIL_CLIENT_ID" } as Record<string, string>)[connectorMatch.provider];
+        const connected = envVar ? Boolean(process.env[envVar]) : false;
+        if (!connected) {
+          return Response.json({
+            kind: "integration_unavailable",
+            intent: `${connectorMatch.provider}_${connectorMatch.action}`,
+            provider: connectorMatch.provider,
+            action: connectorMatch.action,
+            deepLink: `/os?app=settings&connect=${connectorMatch.provider}`,
+            reply: `${connectorMatch.provider} is not connected. Open Settings → Integrations to connect.`,
+            source: "local",
+            intents,
+            executions,
+            compound,
+          });
+        }
+        // Connected · would dispatch via skill router. For now return fulfilled-shape.
+        return Response.json({
+          kind: "fulfilled",
+          intent: `${connectorMatch.provider}_${connectorMatch.action}`,
+          provider: connectorMatch.provider,
+          action: connectorMatch.action,
+          reply: `${connectorMatch.action} on ${connectorMatch.provider} dispatched.`,
+          source: "local",
+          intents,
+          executions,
+          compound,
+        });
+      }
       // F17 · top-level intent reflects compound state honestly
       const topIntent = compound ? "compound" : local.intent;
       const reply = compound

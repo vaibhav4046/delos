@@ -21,6 +21,7 @@ import { safeAddMemory } from "@/lib/hydra";
 import { buildDomainPlaybook, scoreCoverage, applyCoveragePatch } from "@/lib/codegenPlaybooks";
 import { classifyInjection } from "@/lib/security/injection-classifier";
 import { normalizeInputField } from "@/lib/apiField";
+import { storeProject, slugifyName } from "@/lib/codegenProjectStore";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -344,9 +345,19 @@ export async function POST(req: NextRequest) {
               total: finalFiles.length,
             });
           }
+          // W03 · persist + emit id so client can offer ZIP/HTML download
+          const persisted = storeProject({
+            id: slugifyName(project.name) + "-" + Date.now().toString(36),
+            name: project.name,
+            description: project.description,
+            stack: project.stack,
+            files: finalFiles.map((f) => ({ path: f.path, content: f.content, language: f.language })),
+          });
           send({
             t: "project_done",
+            projectId: persisted.id,
             project: {
+              id: persisted.id,
               name: project.name,
               description: project.description,
               stack: project.stack,
@@ -539,9 +550,18 @@ Output JSON: { "path":"${f.path}","content":"…escaped source…","language":"$
           metadata: { runId: "codegen-stream", tags: ["codegen", "stream"], projectName: plan.name },
         });
 
+        const persisted = storeProject({
+          id: slugifyName(plan.name) + "-" + Date.now().toString(36),
+          name: plan.name,
+          description: plan.description,
+          stack: plan.stack,
+          files: fileResults.map((f) => ({ path: f.path, content: f.content, language: f.language })),
+        });
         send({
           t: "project_done",
+          projectId: persisted.id,
           project: {
+            id: persisted.id,
             name: plan.name,
             description: plan.description,
             stack: plan.stack,

@@ -24,6 +24,7 @@ import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { buildDomainPlaybook, scoreCoverage, applyCoveragePatch } from "@/lib/codegenPlaybooks";
 import { classifyInjection } from "@/lib/security/injection-classifier";
 import { normalizeInputField } from "@/lib/apiField";
+import { storeProject, slugifyName } from "@/lib/codegenProjectStore";
 
 import { zodErr } from "@/lib/apiAuth";
 // Codegen is the heaviest paid path. Cap to keep one attacker from draining
@@ -693,7 +694,15 @@ export async function POST(req: NextRequest) {
           domain: playbook.domain.key,
         },
       });
-      return Response.json({ ok: true, project: finalProject });
+      // W03 · persist to project store so /api/codegen-app/export can serve
+      const persisted = storeProject({
+        id: slugifyName(finalProject.name) + "-" + Date.now().toString(36),
+        name: finalProject.name,
+        description: finalProject.description,
+        stack: finalProject.stack,
+        files: finalProject.files.map((f) => ({ path: f.path, content: f.content, language: f.language })),
+      });
+      return Response.json({ ok: true, project: { ...finalProject, id: persisted.id } });
     }
   }
 
@@ -946,7 +955,15 @@ Output JSON only:
         fileCount: project.files.length,
       },
     });
-    return Response.json({ ok: true, project });
+    // W03 · persist slow-path project too
+    const persisted = storeProject({
+      id: slugifyName(project.name) + "-" + Date.now().toString(36),
+      name: project.name,
+      description: project.description,
+      stack: project.stack,
+      files: project.files.map((f) => ({ path: f.path, content: f.content, language: f.language })),
+    });
+    return Response.json({ ok: true, project: { ...project, id: persisted.id } });
   } catch (e) {
     return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

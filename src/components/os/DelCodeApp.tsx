@@ -93,8 +93,31 @@ function detectLang(path: string): Lang {
   return LANG_BY_EXT[ext] ?? "txt";
 }
 
+// W01 · global cache for codegen-app stream events that arrived BEFORE
+// DelCode mounted. VibeCode pushes here; DelCode reads on mount + listens
+// for new events. Fixes the IDE-shows-sample-files race condition.
+type DelcodeIncoming = { files: Array<{ path: string; content: string }>; name?: string };
+const G = globalThis as unknown as { __delos_delcode_pending?: DelcodeIncoming | null };
+G.__delos_delcode_pending ??= null;
+export function pushDelcodePayload(p: DelcodeIncoming) {
+  G.__delos_delcode_pending = p;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("delos-codegen-load", { detail: p }));
+  }
+}
+function consumeDelcodePending(): DelcodeIncoming | null {
+  const p = G.__delos_delcode_pending;
+  G.__delos_delcode_pending = null;
+  return p ?? null;
+}
+
 function loadFiles(): DelFile[] {
   if (typeof window === "undefined") return STARTER_FILES;
+  // W01 · pending codegen project takes priority over stale localStorage sample
+  const pending = consumeDelcodePending();
+  if (pending?.files?.length) {
+    return pending.files.map((f) => ({ path: f.path, content: f.content, dirty: false }));
+  }
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return STARTER_FILES;
@@ -546,6 +569,33 @@ export function DelCodeApp() {
               {activeFile?.dirty ? "💾 SAVE" : "✓ SAVED"}
             </button>
             <button onClick={() => runCmd("run")} title="Run active file" style={{ background: "#1f6feb", color: "#fff", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}>▶ RUN</button>
+            {/* W03 · download buttons · backend persists the codegen project
+                under its id; we read the latest project id from the global
+                pending payload set by VibeCode's stream consumer. */}
+            <button
+              onClick={() => {
+                const G = globalThis as unknown as { __delos_current_project_id?: string };
+                const id = G.__delos_current_project_id;
+                if (!id) { alert("Run a VibeCode build first to enable export."); return; }
+                window.open(`/api/codegen-app/export?id=${encodeURIComponent(id)}&format=zip`, "_blank");
+              }}
+              title="Download project as zip"
+              style={{ background: "#30363d", color: "#7dd3fc", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}
+            >
+              ↓ ZIP
+            </button>
+            <button
+              onClick={() => {
+                const G = globalThis as unknown as { __delos_current_project_id?: string };
+                const id = G.__delos_current_project_id;
+                if (!id) { alert("Run a VibeCode build first to enable export."); return; }
+                window.open(`/api/codegen-app/export?id=${encodeURIComponent(id)}&format=html`, "_blank");
+              }}
+              title="Download as single-file HTML preview"
+              style={{ background: "#30363d", color: "#fbcfe8", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}
+            >
+              ↓ HTML
+            </button>
           </div>
         </div>
         {/* Editor body · gutter + textarea */}

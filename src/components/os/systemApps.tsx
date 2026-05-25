@@ -1166,12 +1166,13 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
                 const content = ev.content as string;
                 const retried = Boolean(ev.retried);
                 accFiles.push({ path, content });
-                // Push incremental files into DelCode so the user
-                // SEES the IDE populate as the agent writes.
+                // W01 · push via global pending queue so DelCode catches
+                // payload regardless of mount timing. consumeDelcodePending
+                // runs on DelCode load · subscription handles subsequent events.
+                const payload = { files: accFiles, name: projectName };
+                (globalThis as unknown as { __delos_delcode_pending?: typeof payload }).__delos_delcode_pending = payload;
                 window.dispatchEvent(
-                  new CustomEvent("delos-codegen-load", {
-                    detail: { files: accFiles, name: projectName },
-                  }),
+                  new CustomEvent("delos-codegen-load", { detail: payload }),
                 );
                 setCodeProgress({
                   index: (ev.index as number) + 1,
@@ -1200,6 +1201,14 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
                 setFileChecklist((prev) =>
                   prev.map((row) => (row.path === path ? { ...row, status: "skipped" as const, reason } : row)),
                 );
+              } else if (ev.t === "project_done") {
+                // W03 · stash projectId globally so DelCode toolbar ZIP/HTML
+                // buttons know which project to export.
+                const pid = (ev.projectId ?? (ev.project as { id?: string } | undefined)?.id) as string | undefined;
+                if (pid) {
+                  (globalThis as unknown as { __delos_current_project_id?: string }).__delos_current_project_id = pid;
+                  window.dispatchEvent(new CustomEvent("delos-codegen-done", { detail: { projectId: pid } }));
+                }
               } else if (ev.t === "error") {
                 streamErr = String(ev.message ?? "stream error");
               }
