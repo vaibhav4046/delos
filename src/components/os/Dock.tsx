@@ -188,7 +188,6 @@ export function Dock({
         onMouseEnter={() => setRevealed(true)}
         data-app-dock
         className="flex items-end gap-0.5 sm:gap-1 px-2 sm:px-3 py-1 sm:py-1.5 overflow-x-auto overflow-y-hidden pointer-events-auto max-w-[calc(100vw-1rem)] snap-x scroll-smooth"
-        style={{ scrollbarWidth: "thin", scrollbarColor: "var(--accent-shadow,#B89500) transparent" }}
         style={{
           background: "rgba(var(--bg-rgb), 0.88)",
           border: "2px solid var(--surface-2)",
@@ -197,6 +196,7 @@ export function Dock({
           WebkitBackdropFilter: "blur(14px) saturate(170%)",
           boxShadow: "0 -2px 0 var(--bg), 0 -4px 0 var(--surface-2), 0 -6px 16px var(--shadow)",
           scrollbarWidth: "thin",
+          scrollbarColor: "var(--accent-shadow,#B89500) transparent",
         }}
       >
         {order.map((key, i) => {
