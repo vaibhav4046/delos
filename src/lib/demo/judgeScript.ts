@@ -130,6 +130,57 @@ export type JudgeHandlers = {
 
 export type JudgeRunController = { cancel: () => void };
 
+// Side-effect memory writes per step. Each step in the demo writes a
+// typed memory so the Memory Browser at the end recalls the full
+// sequence. Without these, a fresh user tenant lands on an empty
+// Memory Browser and the punchline of the demo evaporates.
+const MEMORY_SOURCES: Record<string, { source: string; tags: string[]; text: string }> = {
+  GMAIL: {
+    source: "voice-memory",
+    tags: ["voice-memory", "mcp", "gmail"],
+    text: "Judge demo step 1 · drafted a Gmail message to judges@delrio.app about hackathon final demo recap via Del Assistant MCP.",
+  },
+  NOTION: {
+    source: "voice-memory",
+    tags: ["voice-memory", "mcp", "notion"],
+    text: "Judge demo step 2 · created a Notion page titled DelOS Hackathon Demo Recap via Del Assistant MCP.",
+  },
+  GITHUB: {
+    source: "voice-memory",
+    tags: ["voice-memory", "mcp", "github"],
+    text: "Judge demo step 3 · listed live GitHub repositories for vaibhav4046 through the Del Assistant.",
+  },
+  VIBECODE: {
+    source: "codegen",
+    tags: ["codegen", "investor-crm"],
+    text: "Judge demo step 4 · VibeCode built an Investor CRM with warm intro graph, pipeline kanban, and follow up reminder dock.",
+  },
+  MEMORY: {
+    source: "user-fact",
+    tags: ["user-fact", "demo"],
+    text: "Judge demo step 5 · Memory Browser opened with recall prefilled. Five pillars complete in one tab.",
+  },
+};
+
+async function writeStepMemory(label: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  const entry = MEMORY_SOURCES[label];
+  if (!entry) return;
+  try {
+    await fetch("/api/memory/write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: entry.text,
+        tags: entry.tags,
+        source: entry.source,
+      }),
+    });
+  } catch {
+    /* memory write is fire and forget · demo continues regardless */
+  }
+}
+
 // Fire the script. Returns a controller so the caller can cancel any
 // pending steps if the user re clicks the button mid run.
 export function runJudgeDemo(
@@ -147,6 +198,9 @@ export function runJudgeDemo(
       if (cancelled) return;
       handlers.toast?.(`judge ${step.index}/${total} · ${step.label}`, "ok");
       handlers.card?.({ index: step.index, total, label: step.label, explainer: step.explainer });
+      // Persist a typed memory for this step so the closing Memory
+      // Browser step sees a recall hit instead of an empty pane.
+      void writeStepMemory(step.label);
       if (step.open) handlers.spawn(step.open);
       if (step.intent) {
         // 300ms grace lets the target app subscribe to the intent bus
