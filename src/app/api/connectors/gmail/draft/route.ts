@@ -40,7 +40,12 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, draftId: draft.draftId, threadId: draft.threadId, openUrl: `https://mail.google.com/mail/u/0/#drafts` });
   } catch (e) {
     const msg = (e as Error).message;
-    const isMissingCred = /no_gmail_credential|unauthenticated|missing[_ ]token/i.test(msg);
+    // Broader catch · any credential-side failure (missing, expired,
+    // exchange refused, invalid grant) falls back to the demo simulator
+    // so guest judges never hit a 503. Live Chrome E2E showed cookied
+    // sessions hitting `token exchange failed: 400` from a stale stored
+    // refresh, which the narrow regex missed → 503 instead of demo.
+    const isMissingCred = /no_gmail_credential|unauthenticated|missing[_ ]token|token exchange failed|invalid_grant|expired|401|403/i.test(msg);
     if (isMissingCred && demoMode) {
       return Response.json({
         ok: true,

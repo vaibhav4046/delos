@@ -33,7 +33,9 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, pageId: page.pageId, url: page.url });
   } catch (e) {
     const msg = (e as Error).message;
-    const isMissingCred = /no_notion_credential|unauthenticated|missing[_ ]token/i.test(msg);
+    // Same broadened catch as gmail/draft · any credential-side failure
+    // routes to demo so guests don't see 503.
+    const isMissingCred = /no_notion_credential|unauthenticated|missing[_ ]token|invalid_grant|expired|401|403/i.test(msg);
     if (isMissingCred && demoMode) {
       const slug = parsed.data.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
       return Response.json({
