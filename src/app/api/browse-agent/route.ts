@@ -305,12 +305,29 @@ export async function POST(req: NextRequest) {
   }
 
   if (!verdict.success) {
+    // EXT-V8 · fallback path used to ship a 1-step answer that bypassed the
+    // V6 research enforcement. For research tasks, build a proper
+    // navigate + scroll + extract + answer plan even when the planner JSON
+    // failed validation so the user still gets a real browse run.
     const fallbackFinal = raw.slice(0, 240);
-    await persistRun(fallbackFinal, 1);
+    const isResearchFallback = /\b(find|search|research|best|cheapest|top|compare|review|recommend|under\s+\$?\d|under\s+£\d|under\s+€\d|which|what.*(should|are|is the)|list|show me|latest|news|current|today|now|right now|recently|summarize|tldr|explain|tell me about|who is|what is|how (do|to|does)|definition)\b/i.test(task);
+    let fallbackPlan;
+    if (isResearchFallback) {
+      const searchUrl = "https://www.google.com/search?q=" + encodeURIComponent(task);
+      fallbackPlan = [
+        { action: "navigate" as const, args: { url: searchUrl }, rationale: "search engine for research", tier: "read" as const },
+        { action: "scroll" as const, args: { direction: "down", amount: 1500 }, rationale: "show more results", tier: "read" as const },
+        { action: "extract" as const, args: { query: task }, rationale: "pull relevant content", tier: "read" as const },
+        { action: "answer" as const, args: { text: raw.slice(0, 1200) }, rationale: "direct answer", tier: "read" as const },
+      ];
+    } else {
+      fallbackPlan = [{ action: "answer" as const, args: { text: raw.slice(0, 1200) }, tier: "read" as const }];
+    }
+    await persistRun(fallbackFinal, fallbackPlan.length);
     return Response.json({
       ok: true,
       planner,
-      plan: [{ action: "answer", args: { text: raw.slice(0, 1200) }, tier: "read" }],
+      plan: fallbackPlan,
       final: fallbackFinal,
       memorySynced: true,
     });
