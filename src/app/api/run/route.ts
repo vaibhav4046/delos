@@ -148,9 +148,28 @@ export async function POST(req: NextRequest) {
         // Emit a deterministic answer event so the demo path never ends
         // without an `answer` — judges should never see "GAME OVER" with
         // no resolution. Status-page synthetic check requires `t:answer`.
+        //
+        // Clean user-facing text · no "(provider unavailable · synthesized)"
+        // prefix in the answer. The structured `t:error` event above already
+        // told the UI what happened; the answer should be a clean retry hint.
+        const ANSWER_MAP: Record<string, string> = {
+          "Model provider temporarily unavailable (rate limit). Will retry.":
+            "Hit the model provider rate limit. Please retry in a moment.",
+          "Model provider timed out. Retrying.":
+            "Model provider timed out. Please retry.",
+          "Model provider auth failed.":
+            "Model provider authentication failed. Check API keys in Settings.",
+          "Model provider returned an upstream error.":
+            "Model provider had an upstream error. Please retry.",
+          "Network error reaching model provider.":
+            "Network hiccup reaching model provider. Please retry.",
+          "Model provider error.":
+            "Could not reach a model right now. Please retry in a few seconds.",
+        };
+        const answerText = ANSWER_MAP[cleanMsg] ?? "Could not complete this run. Please retry.";
         const fallbackAnswer: RunEvent = {
           t: "answer",
-          text: `(provider unavailable · synthesized) ${cleanMsg}`,
+          text: answerText,
           at: Date.now(),
         };
         if (resolvedRunId) recordEvent(resolvedRunId, fallbackAnswer);
