@@ -53,6 +53,7 @@ const WidgetsApp = lazy(() => import("@/components/os/WidgetsApp").then((m) => (
 import { ScheduleTicker } from "@/components/os/ScheduleTicker";
 import { ReminderEngine } from "@/components/os/ReminderEngine";
 import { ShortcutsSticky } from "@/components/os/ShortcutsSticky";
+import { ProviderHealthPill } from "@/components/os/ProviderHealthPill";
 
 // Mini-shell that wraps a lazy app in a Suspense boundary with a tiny
 // shimmer placeholder. Without this React would throw "rendered a
@@ -1230,6 +1231,12 @@ export default function OSPage() {
                 <Icons.Command size={10} /> K
               </button>
               <span data-tour="hydradb" className="hidden sm:inline-flex pill pill-ok"><span className="w-2 h-2 inline-block accent-pulse" style={{ background: "var(--success)" }} /> HYDRADB</span>
+              {/* WIN-2 · "Agents Under Pressure" chaos pill · live provider
+                  cascade status. Reads /api/llm/audit cached snapshot,
+                  shows healthy/total count. Clickable to open Arena /
+                  Terminal · matches Agentos's fault-injector visibility
+                  without copying. Tooltip explains the 6-provider race. */}
+              <ProviderHealthPill onOpen={() => spawnSystemApp("terminal")} />
               <button
                 onClick={() => spawnSystemApp("notifications")}
                 className="pill inline-flex items-center gap-1"

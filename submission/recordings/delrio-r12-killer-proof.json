@@ -1,0 +1,105 @@
+{
+  "at": "2026-05-25T23:19:59.359Z",
+  "base": "https://delrio.vercel.app",
+  "regression": {
+    "ok": true,
+    "summary": "14 pass, 0 skip",
+    "lines": [
+      "✓ api-field-unified-input",
+      "✓ topbar-counters-truthful",
+      "✓ memory-seed-honors-tenant",
+      "✓ voice-execution-aligns-top-level",
+      "✓ connector-honesty-gmail-notion",
+      "✓ memory-ui-auto-seed-roundtrip",
+      "✓ codegen-domain-coverage-investor",
+      "✓ ALL CHECKS PASSED (14 pass, 0 skip)"
+    ]
+  },
+  "memory": {
+    "status": 200,
+    "tenantId": "delrio_demo",
+    "local": 12,
+    "hits": 0,
+    "first": "Memory recall hit — agent searching 'how did we handle context flood last time' surfaced this very entry via g"
+  },
+  "voice": [
+    {
+      "text": "schedule lunch next Friday at 1pm",
+      "status": 200,
+      "top": "create_event",
+      "exec": "create_event",
+      "reply": "Adding lunch · next Friday at 1pm to your calendar."
+    },
+    {
+      "text": "create calendar event lunch next Friday at 1pm",
+      "status": 200,
+      "top": "create_event",
+      "exec": "create_event",
+      "reply": "Adding calendar event lunch · next Friday at 1pm to your calendar."
+    },
+    {
+      "text": "remind me at 3pm to call Andy",
+      "status": 200,
+      "top": "set_reminder",
+      "exec": "set_reminder",
+      "reply": "Reminder set · call Andy at 5/26/2026, 3:00:00 PM."
+    },
+    {
+      "text": "remember that my demo tenant is gastronomy one",
+      "status": 200,
+      "top": "store_memory",
+      "exec": "store_memory",
+      "reply": "Saved · my demo tenant is gastronomy one."
+    },
+    {
+      "text": "build me an investor CRM with commitment score and warm intro graph",
+      "status": 200,
+      "top": "build_app",
+      "exec": "build_app",
+      "reply": "Building investor crm with commitment score and w…."
+    }
+  ],
+  "calendar": {
+    "status": 200,
+    "ok": true,
+    "title": "Judge demo lunch",
+    "iso": "2026-05-29T12:00:00.000Z"
+  },
+  "connectors": {
+    "gmail": {
+      "status": 200,
+      "kind": "demo_simulated",
+      "demo": true,
+      "simulated": true
+    },
+    "notion": {
+      "status": 200,
+      "kind": "demo_simulated",
+      "demo": true,
+      "simulated": true
+    }
+  },
+  "audit": {
+    "status": 200,
+    "healthy": 5,
+    "unhealthy": 3
+  },
+  "codegen": {
+    "status": 200,
+    "ok": true,
+    "name": "n-investor-crm-with-commitment-score-warm-",
+    "files": 10,
+    "components": 6,
+    "coverage": "9/9",
+    "badGeneric": false,
+    "paths": [
+      "package.json",
+      "app/page.tsx",
+      "app/data/portfolio.ts",
+      "app/components/CommitmentScore.tsx",
+      "app/components/WarmIntroGraph.tsx",
+      "app/components/PartnerFollowUp.tsx",
+      "app/components/RiskFlags.tsx"
+    ]
+  }
+}
