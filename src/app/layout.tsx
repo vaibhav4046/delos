@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Pixelify_Sans, Inter, JetBrains_Mono, Playfair_Display } from "next/font/google";
 import "./globals.css";
+import "@xterm/xterm/css/xterm.css";
 import { GlobalCmdK } from "@/components/GlobalCmdK";
 
 const pixel = Pixelify_Sans({ subsets: ["latin"], variable: "--font-pixel-google", display: "swap" });

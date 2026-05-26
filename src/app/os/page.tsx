@@ -47,6 +47,9 @@ const OssLibraryApp = lazy(() => import("@/components/os/OssLibraryApp").then((m
 // Memory Browser · sleek interactive memory dashboard. Distinct from
 // the Memory Match game (which keeps the "memory" key). 2026-05-25.
 const MemoryBrowserApp = lazy(() => import("@/components/os/MemoryBrowserApp").then((m) => ({ default: m.MemoryBrowserApp })));
+// CROWN-2 · parallel coding-agent fleet with isolated tenants + xterm
+// terminals per agent. Direct response to MissionControl's Agent Fleet.
+const AgentFleetApp = lazy(() => import("@/components/os/AgentFleetApp").then((m) => ({ default: m.AgentFleetApp })));
 const NotificationCenter = lazy(() => import("@/components/os/NotificationCenter").then((m) => ({ default: m.NotificationCenter })));
 const ScheduleApp = lazy(() => import("@/components/os/ScheduleApp").then((m) => ({ default: m.ScheduleApp })));
 const WidgetsApp = lazy(() => import("@/components/os/WidgetsApp").then((m) => ({ default: m.WidgetsApp })));
@@ -282,6 +285,22 @@ const SYSTEM_APPS: Record<string, DockItem> = {
       width: 720,
       height: 560,
       content: <L label="memory browser"><MemoryBrowserApp /></L>,
+    }),
+  },
+  // CROWN-2 · Agent Fleet · 3 parallel agents in isolated tenants with
+  // real xterm panes. New entry in the app registry · dock-tile launcher
+  // added in SYSTEM_APPS_ORDER.
+  agentFleet: {
+    id: "agentFleet",
+    label: "Agent Fleet",
+    icon: "GitBranch",
+    spawn: () => ({
+      id: "agentFleet",
+      title: "AGENT FLEET · PARALLEL",
+      icon: "GitBranch",
+      width: 960,
+      height: 640,
+      content: <L label="agent fleet"><AgentFleetApp /></L>,
     }),
   },
   notifications: {
@@ -970,8 +989,8 @@ export default function OSPage() {
       // routing via MCP tool calls (Gmail / Notion / GitHub / GDrive) and the
       // cohort race UI no longer ships as a top-level surface.
       "assistant", "identity", "arena", "voice",
-      // Builders (4)
-      "builder", "codebase", "cores", "mission",
+      // Builders (5) · agentFleet added · parallel agents w/ isolated tenants
+      "builder", "agentFleet", "codebase", "cores", "mission",
       // Tools (7) · memoryBrowser surfaces save-state across runs
       "memoryBrowser", "notifications", "schedule", "widgets", "ingest", "terminal", "browser", "marketplace", "oss", "analytics",
       // Files & notes (5)

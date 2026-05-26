@@ -19,6 +19,8 @@
     "@ai-sdk/react": "^3.0.190",
     "@codesandbox/sandpack-react": "^2.20.0",
     "@hydradb/sdk": "^0.0.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ai": "^6.0.188",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
