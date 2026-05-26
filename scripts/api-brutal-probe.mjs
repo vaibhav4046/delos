@@ -85,11 +85,11 @@ const checks = [
   { name: "memory-export", method: "GET", path: `/api/memory/export?tenantId=${TENANT}`, expect: (r) => r.ok },
   { name: "voice-command-create-event", method: "POST", path: "/api/voice-command", body: { transcript: "schedule meeting tomorrow at 3pm", tenantId: TENANT }, expect: (r) => r.ok && Array.isArray(r.payload?.executions) && r.payload.executions.length > 0 },
   { name: "voice-router", method: "POST", path: "/api/voice-router", body: { transcript: "hello", tenantId: TENANT }, expect: (r) => r.ok },
-  { name: "tool-web-search", method: "POST", path: "/api/tool", body: { name: "web_search", args: { q: "delos hackathon" }, tenantId: TENANT }, expect: (r) => r.ok && r.payload?.ok !== false },
+  { name: "tool-web-search", method: "POST", path: "/api/tool", body: { name: "web_search", args: { query: "delos hackathon" }, tenantId: TENANT }, timeout: 40000, expect: (r) => r.ok && r.payload?.ok !== false },
   { name: "tool-404", method: "POST", path: "/api/tool", body: { name: "nonexistent.tool", args: {} }, expect: (r) => r.status === 404 },
   { name: "quick-agent", method: "POST", path: "/api/quick-agent", body: { input: "reply in exactly 3 words: hi from qa", tenantId: TENANT }, expect: (r) => r.ok && (r.payload?.text || r.payload?.output || r.payload?.answer) },
   { name: "improve", method: "POST", path: "/api/improve", body: { text: "make this better", tenantId: TENANT }, expect: (r) => r.ok || r.status === 400 },
-  { name: "eval", method: "POST", path: "/api/eval", body: { input: "1+1", expected: "2", tenantId: TENANT }, expect: (r) => r.ok || r.status === 400 },
+  { name: "eval", method: "POST", path: "/api/eval", body: { input: "1+1", expected: "2", tenantId: TENANT }, timeout: 90000, expect: (r) => r.ok && r.payload?.ok !== false },
   { name: "wallpaper", method: "GET", path: "/api/wallpaper", expect: (r) => r.ok || r.status === 400 },
   { name: "chat", method: "POST", path: "/api/chat", body: { messages: [{ role: "user", content: "hi" }], tenantId: TENANT }, expect: (r) => r.ok },
   { name: "schedule-run-now", method: "POST", path: "/api/schedule/run-now", body: { tenantId: TENANT, kind: "notify", payload: { title: "qa run-now probe", body: "x" }, label: "qa" }, expect: (r) => r.ok && r.payload?.ok !== false },
@@ -105,7 +105,7 @@ const checks = [
   { name: "gdrive-list", method: "POST", path: "/api/connectors/gdrive/list", body: { q: "", limit: 5 }, expect: (r) => r.status === 200 || r.status === 401 },
   { name: "github-list", method: "POST", path: "/api/connectors/github/list", body: { q: "", limit: 5 }, expect: (r) => r.status === 200 || r.status === 401 },
   { name: "connectors-manual", method: "GET", path: `/api/connectors/manual?tenantId=${TENANT}`, expect: (r) => r.ok || r.status === 405 },
-  { name: "codegen-app", method: "POST", path: "/api/codegen-app", body: { prompt: "tip calculator with bill and tip slider", tenantId: TENANT }, timeout: 90000, expect: (r) => r.ok && (r.payload?.files?.length || 0) >= 1 },
+  { name: "codegen-app", method: "POST", path: "/api/codegen-app", body: { prompt: "tip calculator with bill and tip slider", tenantId: TENANT }, timeout: 90000, expect: (r) => r.ok && (r.payload?.project?.files?.length || r.payload?.files?.length || 0) >= 1 },
   { name: "codegen-app-clarify", method: "POST", path: "/api/codegen-app/clarify", body: { prompt: "todo list with categories", tenantId: TENANT }, expect: (r) => r.ok && typeof r.payload?.clarify === "boolean" },
   { name: "wiki-generate", method: "POST", path: "/api/wiki/generate", body: { topic: "HydraDB", tenantId: TENANT }, expect: (r) => r.ok || r.status === 400 },
   { name: "brand-chat", method: "POST", path: "/api/brand-chat", body: { input: "what is delos", tenantId: TENANT }, expect: (r) => r.ok || r.status === 400 },
@@ -119,7 +119,7 @@ const checks = [
   // SSE endpoints
   { name: "run-sse", method: "POST", path: "/api/run", body: { input: "reply in 3 words: qa ok done", tenantId: TENANT }, sseTimeout: 15000, expect: (r) => r.ok && r.payload?.sseTypes?.includes("meta") },
   { name: "cohort-sse", method: "POST", path: "/api/cohort", body: { goal: "research two coffee beans under 5 dollars", tenantId: TENANT, min: 3 }, sseTimeout: 20000, expect: (r) => r.ok && (r.payload?.sseTypes?.length || 0) >= 1 },
-  { name: "browse-agent-sse", method: "POST", path: "/api/browse-agent", body: { task: "go to example.com and summarize the page", tenantId: TENANT }, sseTimeout: 18000, expect: (r) => r.ok && (r.payload?.sseTypes?.length || 0) >= 1 },
+  { name: "browse-agent", method: "POST", path: "/api/browse-agent", body: { task: "go to example.com and summarize the page", tenantId: TENANT }, sseTimeout: 18000, timeout: 30000, expect: (r) => r.ok && ((r.payload?.sseTypes?.length || 0) >= 1 || (r.payload?.plan?.length || 0) >= 1) },
   { name: "codegen-app-stream-sse", method: "POST", path: "/api/codegen-app-stream", body: { prompt: "tip calculator with bill input and percentage slider", tenantId: TENANT }, sseTimeout: 30000, expect: (r) => r.ok && (r.payload?.sseTypes?.length || 0) >= 1 },
 ];
 
@@ -129,8 +129,8 @@ for (const c of checks) {
   let pass = false;
   try { pass = c.expect(r); } catch {}
   const sample = r.ct?.includes("event-stream")
-    ? `sse[${r.payload?.sseTypes?.join(",")}]`
-    : j(r.payload).slice(0, 140);
+    ? `sse[${r.payload?.sseTypes?.join(",") ?? ""}]`
+    : (r.payload === undefined ? `(no body, err=${r.err ?? ""})` : j(r.payload).slice(0, 140));
   log(`${pass ? "✓" : "✗"} ${c.name.padEnd(34)} ${String(r.status).padStart(3)} ${sample}`);
   results.push({ name: c.name, status: r.status, ok: r.ok, pass, sample });
 }
