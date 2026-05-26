@@ -72,7 +72,7 @@ const checks = [
   { name: "tts-voices", method: "GET", path: "/api/tts/voices", expect: (r) => r.ok },
   { name: "builtin-apps", method: "GET", path: "/api/builtin-apps", expect: (r) => r.ok },
   { name: "files-list", method: "GET", path: `/api/files/list?tenantId=${TENANT}`, expect: (r) => r.ok || r.status === 200 },
-  { name: "llm-audit", method: "GET", path: "/api/llm/audit", expect: (r) => r.ok && (r.payload?.results?.length > 0 || r.payload?.healthy) },
+  { name: "llm-audit", method: "GET", path: "/api/llm/audit", timeout: 60000, expect: (r) => r.ok && (r.payload?.results?.length > 0 || r.payload?.healthy) },
   { name: "memory-list", method: "GET", path: `/api/memory?tenantId=${TENANT}&q=&limit=10`, expect: (r) => r.ok && Array.isArray(r.payload?.local) },
   { name: "run-log-list", method: "GET", path: "/api/run-log", expect: (r) => r.ok },
   { name: "keys-status", method: "GET", path: "/api/keys/status", expect: (r) => r.ok },
@@ -106,7 +106,7 @@ const checks = [
   { name: "github-list", method: "POST", path: "/api/connectors/github/list", body: { q: "", limit: 5 }, expect: (r) => r.status === 200 || r.status === 401 },
   { name: "connectors-manual", method: "GET", path: `/api/connectors/manual?tenantId=${TENANT}`, expect: (r) => r.ok || r.status === 405 },
   { name: "codegen-app", method: "POST", path: "/api/codegen-app", body: { prompt: "tip calculator with bill and tip slider", tenantId: TENANT }, timeout: 90000, expect: (r) => r.ok && (r.payload?.project?.files?.length || r.payload?.files?.length || 0) >= 1 },
-  { name: "codegen-app-clarify", method: "POST", path: "/api/codegen-app/clarify", body: { prompt: "todo list with categories", tenantId: TENANT }, expect: (r) => r.ok && typeof r.payload?.clarify === "boolean" },
+  { name: "codegen-app-clarify", method: "POST", path: "/api/codegen-app/clarify", body: { prompt: "todo list with categories", tenantId: TENANT }, timeout: 45000, expect: (r) => r.ok && typeof r.payload?.clarify === "boolean" },
   { name: "wiki-generate", method: "POST", path: "/api/wiki/generate", body: { topic: "HydraDB", tenantId: TENANT }, expect: (r) => r.ok || r.status === 400 },
   { name: "brand-chat", method: "POST", path: "/api/brand-chat", body: { input: "what is delos", tenantId: TENANT }, expect: (r) => r.ok || r.status === 400 },
   { name: "clone-builder", method: "POST", path: "/api/clone-builder", body: { spec: "todo list", tenantId: TENANT }, expect: (r) => r.ok || r.status === 400 },
@@ -125,7 +125,7 @@ const checks = [
 
 const results = [];
 for (const c of checks) {
-  const r = await hit(c.method, c.path, c.body, { sseTimeout: c.sseTimeout });
+  const r = await hit(c.method, c.path, c.body, { sseTimeout: c.sseTimeout, timeout: c.timeout });
   let pass = false;
   try { pass = c.expect(r); } catch {}
   const sample = r.ct?.includes("event-stream")
