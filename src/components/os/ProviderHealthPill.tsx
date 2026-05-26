@@ -13,7 +13,7 @@ import * as Icons from "lucide-react";
 type Audit = {
   healthy?: string[];
   unhealthy?: Array<{ model: string; err?: string }>;
-  results?: Array<{ model: string; ok: boolean }>;
+  results?: Array<{ model: string; ok: boolean; err?: string }>;
 };
 
 export function ProviderHealthPill({ onOpen }: { onOpen?: () => void }) {
@@ -43,8 +43,14 @@ export function ProviderHealthPill({ onOpen }: { onOpen?: () => void }) {
     };
   }, []);
 
-  const healthy = data?.healthy?.length ?? 0;
-  const total = (data?.results?.length ?? 0) || healthy + (data?.unhealthy?.length ?? 0);
+  // /api/llm/audit returns { results: [{model, ok, err?}, ...] } · derive
+  // healthy/total from results when present, fall back to legacy healthy[]/unhealthy[]
+  // shape if a future endpoint version returns that instead.
+  const resultsHealthy = data?.results?.filter((r) => r.ok).length;
+  const healthy = resultsHealthy ?? data?.healthy?.length ?? 0;
+  const total =
+    (data?.results?.length ?? 0) ||
+    (data?.healthy?.length ?? 0) + (data?.unhealthy?.length ?? 0);
   const allHealthy = total > 0 && healthy === total;
   const fallbackActive = total > 0 && healthy < total;
 
