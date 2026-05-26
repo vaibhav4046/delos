@@ -112,17 +112,35 @@ Output JSON:
     });
     return obj.answer;
   } catch {
-    // Stitch a deterministic answer from the work done · happens on full
-    // multi-provider rate-limit. Better than ending the run silently.
+    // Synthesis LLM exhausted · stitch a clean deterministic answer from
+    // the work done. No ugly "(model unavailable · fallback)" prefix in
+    // the user-facing string — the tool output IS the answer when the
+    // tools already did the work. The OS surfaces fallback state via the
+    // provider-health pill, not by polluting the answer text.
     const wins = args.toolHistory.filter((h) => h.ok);
     if (wins.length > 0) {
       const last = wins[wins.length - 1];
-      return `(model unavailable · fallback) Completed via ${last.tool}: ${last.summary.slice(0, 200)}`;
+      // If the last tool's summary is already a usable JSON-style answer
+      // (eg `{"summary":[...]}`), parse it and present the inner text.
+      const summary = last.summary || "";
+      try {
+        const obj = JSON.parse(summary) as Record<string, unknown>;
+        // Common shapes: { summary: [...] } / { answer: "..." } / { result: ... }
+        if (Array.isArray(obj.summary)) {
+          return (obj.summary as unknown[]).map((s) => String(s)).join(" ");
+        }
+        if (typeof obj.answer === "string") return obj.answer;
+        if (typeof obj.result === "string") return obj.result;
+        if (typeof obj.text === "string") return obj.text;
+      } catch {
+        /* not JSON · use raw */
+      }
+      return summary.slice(0, 1200);
     }
     if (args.scratch.length > 0) {
-      return `(model unavailable · fallback) Notes: ${args.scratch.slice(-3).join(" · ").slice(0, 240)}`;
+      return args.scratch.slice(-3).join(" · ").slice(0, 600);
     }
-    return "(model unavailable · no usable result from this run · try a different model in Settings)";
+    return "No usable result from this run. Try rephrasing the goal or pick a different model in Settings.";
   }
 }
 void generateJson;
