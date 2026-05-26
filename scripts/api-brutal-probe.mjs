@@ -89,7 +89,7 @@ const checks = [
   { name: "tool-404", method: "POST", path: "/api/tool", body: { name: "nonexistent.tool", args: {} }, expect: (r) => r.status === 404 },
   { name: "quick-agent", method: "POST", path: "/api/quick-agent", body: { input: "reply in exactly 3 words: hi from qa", tenantId: TENANT }, expect: (r) => r.ok && (r.payload?.text || r.payload?.output || r.payload?.answer) },
   { name: "improve", method: "POST", path: "/api/improve", body: { text: "make this better", tenantId: TENANT }, expect: (r) => r.ok || r.status === 400 },
-  { name: "eval", method: "POST", path: "/api/eval", body: { input: "1+1", expected: "2", tenantId: TENANT }, timeout: 90000, expect: (r) => r.ok && r.payload?.ok !== false },
+  { name: "eval", method: "POST", path: "/api/eval", body: { tasks: ["instruction-following"], models: ["groq:openai/gpt-oss-20b"], perTaskTimeoutMs: 8000 }, timeout: 30000, expect: (r) => r.ok && r.payload?.ok !== false && (r.payload?.results?.length || 0) >= 1 },
   { name: "wallpaper", method: "GET", path: "/api/wallpaper", expect: (r) => r.ok || r.status === 400 },
   { name: "chat", method: "POST", path: "/api/chat", body: { messages: [{ role: "user", content: "hi" }], tenantId: TENANT }, expect: (r) => r.ok },
   { name: "schedule-run-now", method: "POST", path: "/api/schedule/run-now", body: { tenantId: TENANT, kind: "notify", payload: { title: "qa run-now probe", body: "x" }, label: "qa" }, expect: (r) => r.ok && r.payload?.ok !== false },
