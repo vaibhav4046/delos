@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Icons from "lucide-react";
+import { MemoryGraph } from "./MemoryGraph";
 
 export type MemHit = { text: string; score: number };
 export type LocalMem = { id: string; text: string; tags: string[]; createdAt: number };
@@ -109,6 +110,10 @@ export function MemoryDashboard({
   const [loading, setLoading] = useState(false);
   const [lastSync, setLastSync] = useState<number | null>(null);
   const [toneFilter, setToneFilter] = useState<Tone | "all">("all");
+  // WIN-LOCK · LIST vs GRAPH view toggle. GRAPH mode renders the HydraDB
+  // knowledge graph as a live force-directed SVG · matches MissionControl's
+  // Context Graph + Agentos's HydraDB Graph workspace without copying.
+  const [viewMode, setViewMode] = useState<"list" | "graph">("list");
   const [autoSync, setAutoSync] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -325,8 +330,8 @@ export function MemoryDashboard({
         )}
       </div>
 
-      {/* Tone filter chips */}
-      <div className="flex flex-wrap gap-1.5">
+      {/* Tone filter chips + LIST/GRAPH view toggle */}
+      <div className="flex flex-wrap gap-1.5 items-center">
         <ToneChip label="All" active={toneFilter === "all"} onClick={() => setToneFilter("all")} count={local.length} />
         {(Object.keys(TONE_LABEL) as Tone[]).map((t) => {
           const count = local.filter((m) => toneOf(m.text, m.tags) === t).length;
@@ -342,6 +347,24 @@ export function MemoryDashboard({
             />
           );
         })}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          <button
+            onClick={() => setViewMode("list")}
+            className={`pill ${viewMode === "list" ? "pill-info" : "pill-muted"} cursor-pointer`}
+            style={{ fontSize: 10, padding: "2px 8px" }}
+            title="List view"
+          >
+            <Icons.List size={10} /> LIST
+          </button>
+          <button
+            onClick={() => setViewMode("graph")}
+            className={`pill ${viewMode === "graph" ? "pill-info" : "pill-muted"} cursor-pointer`}
+            style={{ fontSize: 10, padding: "2px 8px" }}
+            title="HydraDB knowledge graph"
+          >
+            <Icons.Network size={10} /> GRAPH
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -388,6 +411,16 @@ export function MemoryDashboard({
           </div>
         ) : localFiltered.length === 0 ? (
           <EmptyState tenant={tenant} onSeeded={() => load(query)} />
+        ) : viewMode === "graph" ? (
+          <MemoryGraph
+            memories={localFiltered.map((m) => ({
+              id: m.id,
+              text: m.text,
+              tags: m.tags,
+              createdAt: m.createdAt,
+            }))}
+            height={compact ? 360 : 460}
+          />
         ) : (
           <div className="space-y-1.5">
             {localFiltered.slice(0, 40).map((m) => (
