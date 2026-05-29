@@ -28,16 +28,75 @@ function safeModelName(m: LanguageModel): string {
 // Plain Map is fine — Vercel Lambdas live ~5 min, longer than the cooldown
 // we want, so the state stays warm across requests in the same container.
 const COOLDOWN: Map<string, number> = new Map();
-const COOLDOWN_MS = 10 * 60_000; // 10 minutes
+const COOLDOWN_MS = 10 * 60_000; // 10 minutes — quota exhaustion (rate_limited)
+// Transient faults (5xx, network blip, our own per-call timeout) get a SHORT
+// shelf: long enough to stop hammering a flapping provider on every single
+// request, short enough that we recover within a minute once it's healthy.
+const SHORT_COOLDOWN_MS = 30_000;
+// Hard ceiling on any one provider call. Callers that pass their own (shorter)
+// abortSignal still win — we abort on whichever fires first. Without this, a
+// provider that accepts the TCP connection but never streams a token hangs the
+// whole request until the platform's maxDuration kills it: the SSE stream dies
+// with no `answer` event. Bounding each call lets the cascade fail over fast.
+const PER_CALL_TIMEOUT_MS = 20_000;
 
-function modelProvider(m: LanguageModel): string {
-  const x = m as { provider?: string; modelId?: string };
-  if (x.provider) return x.provider;
-  const id = x.modelId ?? "";
-  // Convention from llm.ts: providers prefix model ids as "groq:..." etc.
-  const sep = id.indexOf("/");
-  return sep > 0 ? id.slice(0, sep) : id;
+// Merge a caller's optional abort with an internal timeout. Returns a signal
+// that fires on whichever happens first, a cleanup to release the timer/
+// listener, and a flag telling us our timeout (not the caller) fired.
+function mergeAbort(
+  caller: AbortSignal | undefined,
+  ms: number,
+): { signal: AbortSignal; cleanup: () => void; timedOut: () => boolean } {
+  const ctl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctl.abort();
+  }, ms);
+  const onCallerAbort = () => ctl.abort();
+  if (caller) {
+    if (caller.aborted) ctl.abort();
+    else caller.addEventListener("abort", onCallerAbort, { once: true });
+  }
+  return {
+    signal: ctl.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      caller?.removeEventListener("abort", onCallerAbort);
+    },
+    timedOut: () => timedOut,
+  };
 }
+
+// ─── Circuit-breaker keys ───────────────────────────────────────────────
+// Two granularities so a transient blip on ONE model can't brick its
+// siblings, while a genuine account-wide quota 429 still shelves the family:
+//   • family — the provider account (all SKUs share one quota): "mistral",
+//     "groq", "google". A `rate_limited` 429 shelves THIS (long, 10 min).
+//   • model  — the specific SKU id ("mistral-large-latest"). Every other
+//     fault (timeout/5xx/network/unknown) shelves only THIS (short, 30s), so
+//     mistral-small stays usable when mistral-large momentarily flaps.
+// The AI SDK reports provider as "mistral.chat"/"groq.chat" — we take the
+// segment before the dot so every SKU of a provider shares one family key.
+// This fixes the live outage where a single transient Mistral fault shelved
+// the whole `mistral.chat` family for 10 min and bricked every cascade
+// member (the breaker keyed every SKU under one provider string).
+function breakerKeys(m: LanguageModel): { family: string; model: string } {
+  const x = m as { provider?: string; modelId?: string };
+  const model = x.modelId ?? x.provider ?? "unknown";
+  const provRaw =
+    x.provider ?? (x.modelId?.includes("/") ? x.modelId.split("/")[0] : x.modelId) ?? "unknown";
+  const family = provRaw.split(".")[0];
+  return { family, model };
+}
+
+// A candidate is "cool" (skip it) when EITHER its family or its specific
+// model id is currently shelved.
+function isModelCool(m: LanguageModel): boolean {
+  const { family, model } = breakerKeys(m);
+  return isProviderCool(family) || isProviderCool(model);
+}
+export { breakerKeys, isModelCool };
 
 export function isProviderCool(provider: string): boolean {
   const t = COOLDOWN.get(provider);
@@ -63,12 +122,19 @@ export async function generateJsonWithFallback<T>(args: {
   temperature?: number;
   maxRetries?: number;
   onUsage?: (u: LLMUsage) => void;
+  // Caller-supplied abort (e.g. a build/file timeout). When it fires we stop
+  // walking the cascade so a dead request can't keep burning provider quota.
+  abortSignal?: AbortSignal;
+  // Per-provider-call ceiling. Defaults to PER_CALL_TIMEOUT_MS inside
+  // generateJson; pass a tighter value for latency-sensitive routes.
+  timeoutMs?: number;
 }): Promise<T> {
   const candidates = [args.primary, ...args.fallbacks];
   let lastErr = "all_providers_failed";
   for (const m of candidates) {
-    const provider = modelProvider(m);
-    if (isProviderCool(provider)) continue;
+    if (args.abortSignal?.aborted) throw new Error("timeout");
+    if (isModelCool(m)) continue;
+    const { family, model } = breakerKeys(m);
     try {
       return await generateJson({
         model: m,
@@ -77,13 +143,25 @@ export async function generateJsonWithFallback<T>(args: {
         temperature: args.temperature,
         maxRetries: args.maxRetries ?? 2, // tighter per-provider since we have fallbacks
         onUsage: args.onUsage,
+        abortSignal: args.abortSignal,
+        timeoutMs: args.timeoutMs,
       });
     } catch (e) {
       const msg = (e as Error).message;
       lastErr = sanitizeProviderError(msg);
-      if (lastErr === "rate_limited") shelveProvider(provider);
-      // Continue to next provider on rate_limited / upstream_5xx / timeout.
-      if (lastErr === "auth_failed" || lastErr === "network_error") continue;
+      // Aborted mid-call — bail now instead of trying the next provider (which
+      // would instantly reject on the same already-aborted signal) and Bytez.
+      if (args.abortSignal?.aborted) throw new Error("timeout");
+      // Shelve so SUBSEQUENT requests skip it. `rate_limited` is account-wide
+      // quota exhaustion (shared across a provider's SKUs) → shelve the whole
+      // FAMILY long. EVERY other failure — timeout / 5xx / network / the
+      // catch-all `upstream_error` — shelves only THIS model id short, so (a) a
+      // momentary blip on one SKU can't brick its siblings, and (b) an unmapped
+      // error still triggers a backoff instead of being retried first forever.
+      if (lastErr === "rate_limited") shelveProvider(family);
+      else shelveProvider(model, SHORT_COOLDOWN_MS);
+      // Walk to the next provider on any failure (the for-loop continues).
+      continue;
     }
   }
   // ─── Tertiary fallback · Bytez ────────────────────────────────────────
@@ -92,7 +170,7 @@ export async function generateJsonWithFallback<T>(args: {
   // in our account's catalog — that's a soft skip, not an error. If it
   // returns a non-empty string we attempt to extract JSON from it the
   // same way generateJson does.
-  if (bytezAvailable()) {
+  if (bytezAvailable() && !args.abortSignal?.aborted) {
     const sys = "Respond ONLY with a single JSON object. No prose, no markdown fences, no tool calls, no commentary.";
     const fullPrompt = `${args.prompt}\n\nReturn ONLY a valid JSON object.`;
     const bytezMessages: BytezMessage[] = [
@@ -134,6 +212,8 @@ export async function generateJson<T>(args: {
   temperature?: number;
   maxRetries?: number;
   onUsage?: (u: LLMUsage) => void;
+  abortSignal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<T> {
   const sys =
     "Respond ONLY with a single JSON object. No prose, no markdown fences, no tool calls, no commentary.";
@@ -142,6 +222,8 @@ export async function generateJson<T>(args: {
   let lastErr = "";
   for (let i = 0; i < attempts; i++) {
     let text = "";
+    // Fresh per-attempt budget: caller's abort merged with an internal ceiling.
+    const merged = mergeAbort(args.abortSignal, args.timeoutMs ?? PER_CALL_TIMEOUT_MS);
     try {
       const t0 = Date.now();
       const result = await generateText({
@@ -149,6 +231,7 @@ export async function generateJson<T>(args: {
         system: sys,
         prompt: i === 0 ? fullPrompt : `${fullPrompt}\n\nPrevious attempt failed: ${lastErr}. Strict JSON ONLY.`,
         temperature: args.temperature ?? 0.2,
+        abortSignal: merged.signal,
       });
       const ms = Date.now() - t0;
       if (args.onUsage) {
@@ -167,7 +250,22 @@ export async function generateJson<T>(args: {
       // short reason code per common case so the QA-surfaced "information
       // disclosure" finding is closed.
       lastErr = sanitizeProviderError((e as Error).message);
+      // Caller's own abort fired (their deadline) — propagate as timeout.
+      if (args.abortSignal?.aborted) throw new Error("timeout");
+      // OUR per-call ceiling fired: this provider is hung. Re-prompting the same
+      // one won't help and just burns the budget — bail so the cascade fails
+      // over to the next provider.
+      if (merged.timedOut()) throw new Error("timeout");
+      // Hard provider errors (bad/expired key, exhausted quota) will NOT recover
+      // by re-prompting the SAME provider — retrying just adds latency before the
+      // caller's fallback chain can switch providers. Bail immediately for those;
+      // keep retrying only transient/parse failures where the re-prompt helps.
+      if (lastErr === "auth_failed" || lastErr === "rate_limited") {
+        throw new Error(lastErr);
+      }
       continue;
+    } finally {
+      merged.cleanup();
     }
     const json = extractJson(text);
     if (!json) {
@@ -196,6 +294,12 @@ export async function generateJson<T>(args: {
 // messages so DelOS responses never leak upstream-provider account info.
 function sanitizeProviderError(msg: string): string {
   let s = String(msg || "");
+  // Idempotent · if the message is ALREADY one of our reason codes (e.g. it was
+  // sanitized once inside generateJson, then re-sanitized by the fallback layer),
+  // return it unchanged. Without this, "auth_failed" fails the 401/403 regex
+  // below and gets misclassified as "upstream_error", and a re-thrown
+  // "rate_limited" would stop triggering the provider cooldown.
+  if (/^(rate_limited|timeout|auth_failed|upstream_5xx|network_error|upstream_error)$/.test(s)) return s;
   s = s.replace(/org_[a-z0-9]{20,}/gi, "<org>");
   s = s.replace(/req_[a-z0-9_]{8,}/gi, "<req>");
   s = s.replace(/https?:\/\/console\.[^\s)\]]+/gi, "<upgrade-url>");

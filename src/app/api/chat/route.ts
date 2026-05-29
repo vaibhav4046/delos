@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { streamText } from "ai";
-import { resolveModel, withModels, type ModelKey } from "@/lib/llm";
+import { resolveModel, type ModelKey } from "@/lib/llm";
 import { callTool, listTools } from "@/lib/mcp/client";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
@@ -39,6 +39,66 @@ const bodySchema = z.object({
   searchMcpUrl: z.string().url().optional(),
 });
 
+// Cascade order: agents "flow under pressure". When the requested model's
+// provider has no key (or it errors), fall through to the next keyed provider
+// so the assistant still answers instead of dead-ending on a missing key.
+const FALLBACK_ORDER: ModelKey[] = [
+  "google:gemini-2.5-flash",
+  "mistral:mistral-large-latest",
+  "mistral:mistral-small-latest",
+  "groq:openai/gpt-oss-120b",
+  "groq:openai/gpt-oss-20b",
+];
+
+function envKeyFor(model: string): string | null {
+  if (model.startsWith("groq:")) return "GROQ_API_KEY";
+  if (model.startsWith("mistral:")) return "MISTRAL_API_KEY";
+  if (model.startsWith("google:")) return "GOOGLE_GENERATIVE_AI_API_KEY";
+  return null;
+}
+
+function hasProviderKey(model: string): boolean {
+  const k = envKeyFor(model);
+  return !k || (process.env[k] ?? "").length > 0;
+}
+
+// Requested model first, then the fallback chain, de-duped. Drop providers
+// with no key so we never waste a round-trip on a guaranteed 401. If nothing
+// is keyed, still attempt the requested model so the client gets a real error.
+function candidateModels(requested: ModelKey): ModelKey[] {
+  const ordered = [requested, ...FALLBACK_ORDER].filter((m, i, a) => a.indexOf(m) === i);
+  const keyed = ordered.filter(hasProviderKey);
+  return keyed.length ? keyed : [requested];
+}
+
+// Gemini 2.5 counts "thinking" tokens against the output budget. Left
+// unbounded, open-ended prompts can spend the ENTIRE budget on reasoning and
+// emit zero visible text — the stream comes back empty (observed: "which is
+// best ai model now" → empty stream). For the fast/balanced Flash tier we
+// disable thinking outright (chat doesn't need it, and it speeds first token);
+// for the Pro reasoning tier we cap thinking so there's always room left for
+// the answer. Namespaced under `google`, so Groq/Mistral ignore it.
+function providerOptionsFor(model: ModelKey) {
+  if (model === "google:gemini-2.5-flash") {
+    return { google: { thinkingConfig: { thinkingBudget: 0 } } };
+  }
+  if (model === "google:gemini-2.5-pro") {
+    return { google: { thinkingConfig: { thinkingBudget: 1024 } } };
+  }
+  return undefined;
+}
+
+// Turn raw provider errors into something a user can act on. Free-tier daily
+// quota is the common one (e.g. Gemini free tier = 20 requests/day), and the
+// raw message is a wall of billing-URL text — collapse it to a clear next step.
+function friendlyErr(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/quota|rate.?limit|\b429\b|exceeded|too many requests/i.test(raw)) {
+    return "All available models are rate-limited right now (free-tier daily quota reached). Add another provider key in Settings → Provider Keys, or try again later.";
+  }
+  return raw;
+}
+
 export async function POST(req: NextRequest) {
   const ip = clientIp(req);
   const lim = rateLimit(`chat:ip:${ip}`, CHAT_LIMIT_PER_MIN, CHAT_WINDOW_MS);
@@ -57,7 +117,17 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder();
-      const send = (obj: unknown) => controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      // Guard every enqueue · client disconnect closes the controller and
+      // enqueue throws. Latch `closed` so the cascade loop below also stops.
+      let closed = false;
+      const send = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
 
       try {
         let searchContext = "";
@@ -83,32 +153,90 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join("\n");
 
-        await withModels({ executor: model as ModelKey }, async () => {
+        const candidates = candidateModels(model);
+        let streamed = false;
+        let lastErr: unknown = null;
+
+        for (const cand of candidates) {
+          // Stop cascading the moment the client goes away.
+          if (req.signal.aborted || closed) break;
           const t0 = Date.now();
-          const result = await streamText({
-            model: resolveModel(model),
-            system: finalSystem || undefined,
-            messages: messages.map((m) => ({ role: m.role, content: m.content })),
-            temperature: 0.7,
-          });
+          try {
+            const result = streamText({
+              model: resolveModel(cand),
+              system: finalSystem || undefined,
+              messages: messages.map((m) => ({ role: m.role, content: m.content })),
+              temperature: 0.7,
+              providerOptions: providerOptionsFor(cand),
+              // Abort the in-flight provider request if the client disconnects.
+              abortSignal: req.signal,
+              // Fail fast so a rate-limited provider cascades to the next
+              // candidate quickly instead of blocking the stream through the
+              // SDK's multi-second exponential backoff.
+              maxRetries: 1,
+            });
 
-          for await (const chunk of result.textStream) {
-            send({ t: "delta", text: chunk });
+            let sawText = false;
+            let finishReason: string | undefined;
+            let usage: { inputTokens?: number; outputTokens?: number } | undefined;
+
+            // Consume fullStream (NOT textStream): textStream silently SWALLOWS
+            // provider errors — a 429/quota/401 just ends the stream empty, so
+            // the old code mislabeled every provider failure as "empty stream"
+            // and never cascaded. fullStream surfaces an explicit error part we
+            // can throw on and fall through.
+            for await (const part of result.fullStream) {
+              if (part.type === "text-delta") {
+                if (!sawText) {
+                  // First visible token — commit to this candidate.
+                  if (cand !== model) send({ t: "fallback", from: model, to: cand });
+                  streamed = true;
+                  sawText = true;
+                }
+                if (part.text) send({ t: "delta", text: part.text });
+              } else if (part.type === "error") {
+                throw part.error; // → catch below; cascades if nothing streamed yet
+              } else if (part.type === "finish") {
+                finishReason = part.finishReason;
+                usage = part.totalUsage as { inputTokens?: number; outputTokens?: number };
+              }
+            }
+
+            if (!sawText) {
+              // Ended with no visible text and no error part (odd finishReason,
+              // or genuinely empty). Cascade rather than return a blank answer.
+              lastErr = new Error(finishReason ? `no text (finishReason: ${finishReason})` : "empty stream");
+              continue;
+            }
+
+            send({
+              t: "done",
+              ms: Date.now() - t0,
+              promptTokens: usage?.inputTokens ?? 0,
+              completionTokens: usage?.outputTokens ?? 0,
+              model: cand,
+            });
+            break;
+          } catch (err) {
+            lastErr = err;
+            // Once deltas are on the wire we can't cleanly restart on another
+            // model, so surface the error. Otherwise fall through and cascade.
+            if (streamed) {
+              send({ t: "error", message: friendlyErr(err) });
+              break;
+            }
           }
+        }
 
-          const usage = (await result.usage) as unknown as { inputTokens?: number; outputTokens?: number; promptTokens?: number; completionTokens?: number } | undefined;
-          send({
-            t: "done",
-            ms: Date.now() - t0,
-            promptTokens: usage?.inputTokens ?? usage?.promptTokens ?? 0,
-            completionTokens: usage?.outputTokens ?? usage?.completionTokens ?? 0,
-            model,
-          });
-        });
+        if (!streamed && lastErr) {
+          send({ t: "error", message: friendlyErr(lastErr) });
+        }
       } catch (e) {
         send({ t: "error", message: e instanceof Error ? e.message : String(e) });
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {}
       }
     },
   });

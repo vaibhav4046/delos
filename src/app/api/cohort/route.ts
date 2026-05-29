@@ -265,6 +265,18 @@ Output JSON:
           // point, override to the faster candidate. Defense in depth in
           // case the LLM ignores the latency rule.
           let winnerIndex = verdict.winnerIndex;
+          // Guard · the judge LLM can hallucinate an out-of-range index (e.g. 5
+          // when only 3 answers raced — the schema only bounds it ≥0). Snap it
+          // back to the best-scored ok answer, then the fastest, so the UI never
+          // highlights a non-existent / failed row.
+          const okIndexes = new Set(okAnswers.map((a) => a.index));
+          if (!okIndexes.has(winnerIndex)) {
+            const byScore = (Array.isArray(verdict.scores) ? [...verdict.scores] : [])
+              .filter((s) => okIndexes.has(s.index))
+              .sort((a, b) => b.score - a.score)[0];
+            const bySpeed = [...okAnswers].sort((a, b) => a.ms - b.ms)[0];
+            winnerIndex = byScore?.index ?? bySpeed?.index ?? 0;
+          }
           if (fastestMs > 0 && Array.isArray(verdict.scores)) {
             const winnerAnswer = okAnswers.find((a) => a.index === winnerIndex);
             if (winnerAnswer && winnerAnswer.ms > fastestMs * 10) {

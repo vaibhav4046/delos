@@ -28,9 +28,12 @@ export function SnakeGame() {
   const [score, setScore] = useState(0);
   const [high, setHigh] = useState(0);
   const dirRef = useRef(dir);
+  // Mirror latest dir into a ref so the keydown handler reads it without re-binding.
+  // eslint-disable-next-line react-hooks/refs
   dirRef.current = dir;
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     try { setHigh(Number(localStorage.getItem("delos.snake.high") ?? 0)); } catch {}
   }, []);
 
@@ -88,7 +91,7 @@ export function SnakeGame() {
       });
     }, SNAKE_TICK_MS);
     return () => clearInterval(t);
-  }, [alive, food]);
+  }, [alive, started, food]);
 
   function reset() {
     setSnake([[8, 8], [8, 7], [8, 6]]);
@@ -282,7 +285,11 @@ export function MemoryMatchGame() {
     setMoves(0);
   }, []);
 
-  useEffect(() => { reset(); }, [reset]);
+  useEffect(() => {
+    // Deal a fresh board on mount; reset() seeds card state synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    reset();
+  }, [reset]);
 
   useEffect(() => {
     if (selected.length !== 2) return;
@@ -290,6 +297,8 @@ export function MemoryMatchGame() {
     const ca = cards[a];
     const cb = cards[b];
     if (!ca || !cb) return;
+    // Two cards face-up: score the move and resolve the match/mismatch.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setMoves((m) => m + 1);
     if (ca.sym === cb.sym) {
       const next = [...cards];
@@ -307,6 +316,7 @@ export function MemoryMatchGame() {
       }, 700);
       return () => clearTimeout(t);
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selected, cards]);
 
   function flip(i: number) {
@@ -591,6 +601,7 @@ export function Game2048() {
   const [over, setOver] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     try { setBest(Number(localStorage.getItem("delos.2048.best") ?? 0)); } catch {}
   }, []);
 

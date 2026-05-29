@@ -4,7 +4,7 @@
 // for ongoing Gmail data access.
 
 import { env } from "@/lib/env";
-import { deriveTenant, getSecret } from "@/lib/session";
+import { getSecret } from "@/lib/session";
 import { NextRequest } from "next/server";
 import { createHmac } from "node:crypto";
 

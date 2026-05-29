@@ -53,11 +53,14 @@ const APP_ALIASES: Record<string, string> = {
   browser: "browser", browse: "browser", web: "browser",
   builder: "builder", build: "builder", appbuilder: "builder",
   codebase: "codebase", code: "codebase", codegen: "codebase",
-  cohort: "cohort", council: "cohort", race: "cohort",
+  // M7 · Cohort + Cowork retired from the product. Their alias words now
+  // resolve to the assistant (which absorbed both) so "open cohort" /
+  // "open cowork" land on a live surface instead of a missing app id.
+  cohort: "assistant", council: "assistant", race: "assistant",
   cores: "cores", devfactory: "cores",
   arena: "arena", battleroyale: "arena", battle: "arena",
   voice: "voice", voiceagent: "voice", mic: "voice",
-  cowork: "cowork", autonomous: "cowork",
+  cowork: "assistant", autonomous: "assistant",
   mission: "mission", missioncontrol: "mission", control: "mission",
   marketplace: "marketplace", tools: "marketplace", powerups: "marketplace",
   oss: "oss", osslibrary: "oss", opensource: "oss",
@@ -342,7 +345,6 @@ export function parseVoiceLocal(transcript: string): VoiceAction | null {
   // Phonetic correction · Whisper mishears common app names in far-field
   // audio. Normalize BEFORE intent matching so judge demos don't fail
   // because the recogniser dropped a syllable. Mutates `lower` in place.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fix = (s: string) => s
     .replace(/\b(dell us|the los|dial us|dello)\b/gi, "delos")
     .replace(/\bdel\s+us\b/gi, "delos")

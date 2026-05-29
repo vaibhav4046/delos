@@ -51,6 +51,14 @@ export function VoiceApp() {
   useEffect(() => {
     if (stt.state === "listening" || stt.state === "recording") setPhase("listening");
     else if (stt.state === "transcribing") setPhase("transcribing");
+    // Mic went idle WITHOUT a transcript to submit (user tapped stop on
+    // silence, or recognition ended empty). Reset the status pill + ring back
+    // to idle so it doesn't sit stuck on "LISTENING" — which reads as hung.
+    // Guard: only clear mic-driven phases. Never clobber an in-flight pipeline
+    // phase (planning/executing/speaking are set explicitly by submit()).
+    else if (stt.state === "idle") {
+      setPhase((p) => (p === "listening" || p === "transcribing" ? "idle" : p));
+    }
   }, [stt.state]);
 
   // Load autonomy pref (default ON, override possible)
@@ -244,7 +252,7 @@ export function VoiceApp() {
       // Otherwise route through Del Assistant for real connector dispatch
       window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "assistant" } }));
       await new Promise((r) => setTimeout(r, 400));
-      window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "assistant.ask", prompt: payload || action.reply || action.intent } }));
+      window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "assistant.ask", text: payload || action.reply || action.intent } }));
       return;
     }
     switch (action.intent) {
@@ -268,9 +276,11 @@ export function VoiceApp() {
         break;
       }
       case "run_cohort":
-        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "cohort" } }));
+        // M7 · Cohort app retired. Route "race the models / council" to the
+        // assistant, which answers the same query via its autonomous pipeline.
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "assistant" } }));
         await new Promise((r) => setTimeout(r, 400));
-        window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "cohort.run", goal: payload } }));
+        window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "assistant.ask", text: payload } }));
         break;
       case "run_mission":
         window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "terminal" } }));
@@ -325,6 +335,9 @@ export function VoiceApp() {
           const list = raw ? JSON.parse(raw) : [];
           const r = { id: `rm-${Date.now()}`, text, dueAt: Date.now() + minutes * 60_000, done: false };
           localStorage.setItem("delos.reminders.v1", JSON.stringify([r, ...list]));
+          // Wake ReminderEngine now · without this it only notices on its
+          // 20s poll, so short reminders fire late.
+          window.dispatchEvent(new CustomEvent("delos-reminder-added"));
         } catch {}
         // Surface as a notification immediately so the user sees feedback
         window.dispatchEvent(new CustomEvent("toast", { detail: { text: `Reminder set · ${text} in ${minutes}m`, tone: "ok" } }));
@@ -444,7 +457,7 @@ export function VoiceApp() {
         // right connector route. Voice payload becomes the user's chat message.
         window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "assistant" } }));
         await new Promise((r) => setTimeout(r, 400));
-        window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "assistant.ask", prompt: payload } }));
+        window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "assistant.ask", text: payload } }));
         break;
     }
   }
@@ -597,11 +610,11 @@ export function VoiceApp() {
             <div className="text-[10px] leading-relaxed">
               Examples (autonomous):
               <ul className="mt-1 space-y-0.5 ml-3 list-disc">
-                <li>"Open Del Assistant and ask why graph DBs beat vectors for agent memory"</li>
-                <li>"Build me a stopwatch app"</li>
-                <li>"Run cohort: best framework for AI agent OS"</li>
-                <li>"Open ingest and add my Notion workspace"</li>
-                <li>"Summarize my last 5 runs"</li>
+                <li>&quot;Open Del Assistant and ask why graph DBs beat vectors for agent memory&quot;</li>
+                <li>&quot;Build me a stopwatch app&quot;</li>
+                <li>&quot;Run cohort: best framework for AI agent OS&quot;</li>
+                <li>&quot;Open ingest and add my Notion workspace&quot;</li>
+                <li>&quot;Summarize my last 5 runs&quot;</li>
               </ul>
             </div>
           </div>

@@ -16,6 +16,19 @@ const localFallback: StoredMemory[] = G.__delrioLocalMem;
 const tenantsReady = G.__delrioTenantsReady;
 const tenantsRequested = G.__delrioTenantsRequested;
 
+// Cap the in-process mirror so a long-lived warm Lambda with heavy write
+// traffic can't grow it without bound (it persists on globalThis across
+// requests). Oldest entries drop first; durable rows still live in HydraDB.
+const LOCAL_FALLBACK_MAX = 5000;
+
+// Guests + unauthenticated callers legitimately hit HydraDB 401 on every
+// recall/write and fall back to local — that's by design, not an incident, so
+// we don't spam the server log with it. Real outages (5xx, network, timeout)
+// still get logged.
+function isExpectedAuthError(msg: string): boolean {
+  return /\b401\b|unauthorized/i.test(msg);
+}
+
 export async function ensureTenant(tenantId: string) {
   if (tenantsReady.has(tenantId)) return;
   if (tenantsRequested.has(tenantId)) return;
@@ -38,7 +51,11 @@ async function withRetry<T>(fn: () => Promise<T>, opts: { tries: number; baseMs:
     } catch (e) {
       lastErr = e;
       const msg = e instanceof Error ? e.message : String(e);
-      const transient = /TENANT_NOT_FOUND|provisioned|503|429|temporar|timeout|ECONNRESET/i.test(msg);
+      // Word-boundary the status codes so a request id / count that merely
+      // contains "429" or "503" (e.g. "req 50312…") isn't misread as transient
+      // and retried — the write path (addMemory, tries:6) isn't idempotent, so
+      // spurious retries risk a double-write.
+      const transient = /TENANT_NOT_FOUND|provisioned|\b(?:429|503)\b|temporar|timeout|ECONNRESET/i.test(msg);
       if (!transient || i === opts.tries - 1) throw e;
       const delay = opts.baseMs * Math.pow(2, i) + Math.random() * 300;
       await new Promise((r) => setTimeout(r, Math.min(delay, 6000)));
@@ -97,7 +114,8 @@ export async function safeAddMemory(args: Parameters<typeof addMemory>[0]) {
   try {
     await addMemory(args);
   } catch (e) {
-    console.warn("[hydra] addMemory failed after retries:", e instanceof Error ? e.message : e);
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!isExpectedAuthError(msg)) console.warn("[hydra] addMemory failed after retries:", msg);
   }
   localFallback.push({
     id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -107,6 +125,10 @@ export async function safeAddMemory(args: Parameters<typeof addMemory>[0]) {
     tags: (args.metadata?.tags as string[]) ?? [],
     createdAt: Date.now(),
   });
+  // Cap the in-process mirror so a warm Lambda can't grow it unbounded.
+  if (localFallback.length > LOCAL_FALLBACK_MAX) {
+    localFallback.splice(0, localFallback.length - LOCAL_FALLBACK_MAX);
+  }
 }
 
 export async function safeRecall(args: Parameters<typeof recall>[0]): Promise<RecallHit[]> {
@@ -114,7 +136,8 @@ export async function safeRecall(args: Parameters<typeof recall>[0]): Promise<Re
     const hits = await recall(args);
     if (hits.length > 0) return hits;
   } catch (e) {
-    console.warn("[hydra] recall failed, using local fallback:", e instanceof Error ? e.message : e);
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!isExpectedAuthError(msg)) console.warn("[hydra] recall failed, using local fallback:", msg);
   }
   // Local fallback — fuzzy word-overlap scoring against query
   const stop = new Set(["the", "a", "an", "and", "or", "for", "of", "in", "on", "to", "is", "are", "be", "what", "why", "how", "do", "does", "i", "me", "my", "you", "your", "with"]);

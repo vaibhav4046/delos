@@ -19,9 +19,36 @@ export type RunOptions = {
   maxSteps?: number;
   extraTools?: Tool[];
   tenantId?: string;
+  // Wall-clock budget for the STEP LOOP. We stop starting new steps past this
+  // and synthesize a best-effort answer, leaving headroom for final synthesis
+  // before the route's maxDuration (60s) hard-kills the function with no answer.
+  deadlineMs?: number;
+  // Client-disconnect signal · when the SSE consumer (browser fetch reader)
+  // goes away the route aborts this, so we stop starting new steps and burning
+  // LLM calls on a run nobody is listening to. Checked at the top of each step.
+  signal?: AbortSignal;
 };
 
 type Role = "planner" | "executor" | "critic" | "appBuilder" | "subagent";
+
+// Input bounds — keep prompts from growing without limit across replans, long
+// runs, or the `context_flood` chaos mode (which injects 20 noise memories).
+// Unbounded memory hints + scratchpad inflate every planner/executor/critic
+// prompt, driving latency, token cost, and provider context-limit errors.
+const MAX_HINTS = 8;
+const MAX_HINT_LEN = 500;
+const MAX_SCRATCH = 16;
+const MAX_SCRATCH_ENTRY = 300;
+
+function boundedHints(hits: Array<{ text: string }>): string[] {
+  return hits.slice(0, MAX_HINTS).map((h) => h.text.slice(0, MAX_HINT_LEN));
+}
+
+// Append to the scratchpad with per-entry length + sliding-window size caps.
+function pushScratch(scratch: string[], entry: string): void {
+  scratch.push(entry.slice(0, MAX_SCRATCH_ENTRY));
+  if (scratch.length > MAX_SCRATCH) scratch.splice(0, scratch.length - MAX_SCRATCH);
+}
 
 function extractExactFacts(goal: string): Array<{ key: string; value: string }> {
   if (!/\b(remember|store|save|pin)\b/i.test(goal)) return [];
@@ -70,6 +97,10 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   const startedAt = Date.now();
   const chaos = new Set<string>(opts.chaos ?? []);
   const maxSteps = opts.maxSteps ?? 8;
+  // Stop starting new steps after this. 45s leaves ~15s of the route's 60s
+  // maxDuration for final-answer synthesis + the memory write, so the run
+  // ALWAYS emits an `answer` rather than getting hard-killed mid-step.
+  const deadlineAt = startedAt + (opts.deadlineMs ?? 45_000);
   let goal = opts.goal;
   let originalGoal = opts.goal;
   const initialGoal = opts.goal;
@@ -154,7 +185,7 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
     for (let i = 0; i < settled.length; i++) {
       const s = settled[i];
       if (s.status === "fulfilled") {
-        scratch.push(`subagent[${i}] answered "${plan.subgoals[i].slice(0, 60)}": ${s.value.slice(0, 200)}`);
+        pushScratch(scratch, `subagent[${i}] answered "${plan.subgoals[i].slice(0, 60)}": ${s.value.slice(0, 200)}`);
         yield { t: "subagent", id: subIds[i], goal: plan.subgoals[i], status: "done", result: s.value.slice(0, 240), at: Date.now() };
       } else {
         yield { t: "subagent", id: subIds[i], goal: plan.subgoals[i], status: "fail", result: String(s.reason).slice(0, 200), at: Date.now() };
@@ -167,6 +198,14 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   let stepIdx = 0;
   let consecutiveFailures = 0;
   let replans = 0;
+  // Per-step retry budget · the critic can return verdict="retry" when a step
+  // succeeded-but-insufficient (drift) or failed in a way the SAME approach
+  // can recover. Previously "retry" fell through to stepIdx+=1, silently
+  // advancing past the unsatisfied step (and the heuristic fallback critic
+  // returns "retry" by default when all LLM providers are down). Re-run the
+  // same step up to MAX_STEP_RETRIES times, then give up and advance.
+  let stepRetries = 0;
+  const MAX_STEP_RETRIES = 2;
   let finalAnswerText: string | null = null;
   let interruptFired = false;
   // Total completed steps counter — survives replans (unlike stepIdx which resets)
@@ -174,6 +213,34 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   const startTime = Date.now();
 
   while (stepIdx < Math.min(plan.steps.length, maxSteps)) {
+    // Client-disconnect guard · if the SSE consumer went away, stop immediately.
+    // No point spending planner/executor/critic LLM calls whose output can't be
+    // delivered. Return (not break) so we skip final-answer synthesis too.
+    if (opts.signal?.aborted) {
+      yield {
+        t: "recover",
+        reason: "client disconnected",
+        strategy: "aborting run — consumer gone, skipping further LLM work",
+        at: Date.now(),
+      };
+      return;
+    }
+
+    // Wall-clock budget guard · stop starting new steps once we're past the
+    // deadline and fall through to best-effort synthesis. Prevents the platform
+    // from killing the function mid-step (which would strand the stream with no
+    // answer event). Checked BEFORE any per-step LLM work so we never start a
+    // call we can't afford to finish.
+    if (Date.now() > deadlineAt) {
+      yield {
+        t: "recover",
+        reason: `wall-clock budget exhausted after ${stepsCompleted} step(s)`,
+        strategy: "stopping step loop; synthesizing best-effort answer from partial results",
+        at: Date.now(),
+      };
+      break;
+    }
+
     const step = plan.steps[stepIdx];
 
     // Live steering: pick up any user instructions injected via /api/steer
@@ -188,13 +255,14 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
       plan = await makePlan({
         goal,
         tools,
-        memoryHints: memHits.map((m) => m.text),
+        memoryHints: boundedHints(memHits),
         priorAttempt: { what: "prior plan", why: `user steered: ${steer}` },
         onUsage: onUsage("planner"),
       });
       for (const e of drain()) yield e;
       yield { t: "thought", agent: "planner", text: plan.rationale, at: Date.now() };
       stepIdx = 0;
+      stepRetries = 0;
       continue;
     }
 
@@ -215,13 +283,14 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
       plan = await makePlan({
         goal,
         tools,
-        memoryHints: memHits.map((m) => m.text),
+        memoryHints: boundedHints(memHits),
         priorAttempt: { what: `working on: ${oldGoal.slice(0, 80)}`, why: "user switched objective" },
         onUsage: onUsage("planner"),
       });
       for (const e of drain()) yield e;
       yield { t: "thought", agent: "planner", text: plan.rationale, at: Date.now() };
       stepIdx = 0;
+      stepRetries = 0;
       continue;
     }
 
@@ -243,7 +312,7 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
       chaos,
       emit: (e) => {
         if (e.kind === "scratchpad" && typeof (e.data as { text?: string }).text === "string") {
-          scratch.push((e.data as { text: string }).text);
+          pushScratch(scratch, (e.data as { text: string }).text);
         }
         if (e.kind === "final_answer" && typeof (e.data as { text?: string }).text === "string") {
           finalAnswerText = (e.data as { text: string }).text;
@@ -269,27 +338,32 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const fbs = registry.fallbacks(call.tool);
-      if (fbs.length > 0) {
-        const fb = fbs[0];
-        yield { t: "recover", reason: msg, strategy: `switching to fallback tool: ${fb.name}`, at: Date.now() };
+      result = { ok: false, error: msg };
+      // Try EVERY same-tag fallback in order until one succeeds. Previously
+      // only fbs[0] was attempted, so a tag with several fallbacks (e.g.
+      // web_search → [serp, duckduckgo, wiki]) gave up after the first miss.
+      for (const fb of fbs) {
+        yield { t: "recover", reason: result.error ?? msg, strategy: `switching to fallback tool: ${fb.name}`, at: Date.now() };
         try {
           const fbCall = await pickToolCall({
             goal,
             stepIntent: step.intent + ` (use ${fb.name} instead of ${call.tool})`,
             tools: [fb],
             scratch,
-            lastError: msg,
+            lastError: result.error ?? msg,
             onUsage: onUsage("executor"),
           });
           for (const e of drain()) yield e;
           yield { t: "tool_call", name: fb.name, args: fbCall.args, at: Date.now() };
           const r2 = await registry.execute(fb.name, fbCall.args, ctx);
-          result = r2.ok ? { ok: true, data: r2.data } : { ok: false, error: r2.error };
+          if (r2.ok) {
+            result = { ok: true, data: r2.data };
+            break;
+          }
+          result = { ok: false, error: r2.error };
         } catch (e2) {
           result = { ok: false, error: e2 instanceof Error ? e2.message : String(e2) };
         }
-      } else {
-        result = { ok: false, error: msg };
       }
     }
 
@@ -333,7 +407,7 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
 
     if (result.ok) {
       consecutiveFailures = 0;
-      scratch.push(`${call.tool}: ${summary}`);
+      pushScratch(scratch, `${call.tool}: ${summary}`);
       // Short-circuit on final_answer
       if (call.tool === "final_answer" && finalAnswerText) {
         break;
@@ -347,14 +421,28 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
         plan = await makePlan({
           goal,
           tools,
-          memoryHints: memHits.map((m) => m.text),
+          memoryHints: boundedHints(memHits),
           priorAttempt: { what: call.tool, why: result.error ?? "unknown failure" },
           onUsage: onUsage("planner"),
         });
         for (const e of drain()) yield e;
         stepIdx = 0;
+        stepRetries = 0;
         consecutiveFailures = 0;
         continue;
+      }
+      // Both replans spent and the plan is STILL failing. Don't grind through
+      // the remaining steps re-failing and burning LLM calls (and risking
+      // maxDuration) — abort and synthesize a best-effort answer from whatever
+      // partial results we have. Graceful degradation > silent timeout.
+      if (replans >= 2 && consecutiveFailures >= 2) {
+        yield {
+          t: "recover",
+          reason: `${consecutiveFailures} failures after ${replans} replans exhausted`,
+          strategy: "aborting plan; synthesizing best-effort answer from partial results",
+          at: Date.now(),
+        };
+        break;
       }
     }
 
@@ -387,17 +475,40 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
       plan = await makePlan({
         goal,
         tools,
-        memoryHints: memHits.map((m) => m.text),
+        memoryHints: boundedHints(memHits),
         priorAttempt: { what: "previous plan drifted", why: verdict.critique },
         onUsage: onUsage("planner"),
       });
       for (const e of drain()) yield e;
       stepIdx = 0;
+      stepRetries = 0;
+      continue;
+    }
+
+    // Critic says the step intent isn't satisfied yet but the SAME approach can
+    // recover — re-run this step (do NOT advance) up to the retry budget, and
+    // feed the critique into scratch so the executor adapts its next tool call.
+    // Previously "retry" fell straight through to stepIdx+=1, silently skipping
+    // the unsatisfied step.
+    if (verdict.verdict === "retry" && stepRetries < MAX_STEP_RETRIES) {
+      stepRetries += 1;
+      const fixHint = verdict.fix ? ` Fix: ${verdict.fix}` : "";
+      pushScratch(
+        scratch,
+        `critic[retry ${stepRetries}/${MAX_STEP_RETRIES}] step "${step.intent}" not satisfied — ${verdict.critique}.${fixHint}`.trim(),
+      );
+      yield {
+        t: "recover",
+        reason: `critic verdict=retry (drift=${verdict.driftScore.toFixed(2)}): ${verdict.critique}`,
+        strategy: `re-attempting step ${stepIdx + 1} (${stepRetries}/${MAX_STEP_RETRIES})`,
+        at: Date.now(),
+      };
       continue;
     }
 
     stepIdx += 1;
     stepsCompleted += 1;
+    stepRetries = 0;
   }
 
   yield { t: "phase", phase: "done", at: Date.now() };

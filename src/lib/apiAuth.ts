@@ -24,14 +24,19 @@
 import type { NextRequest } from "next/server";
 import { createHash } from "node:crypto";
 import type { ZodError } from "zod";
-import { getServerSession, deriveTenant } from "@/lib/session";
+import { getServerSession } from "@/lib/session";
 import { clientIp } from "@/lib/rateLimit";
 import { env } from "@/lib/env";
 
 export type ResolvedTenant = {
   tenantId: string;
-  /** Where the tenant came from. UI can show a chip "guest" vs "signed-in". */
-  source: "session" | "anon-ip" | "fallback";
+  /**
+   * Where the tenant came from. UI can show a chip "guest" vs "signed-in".
+   * "client" = honored from a reserved test prefix or the public guest tenant
+   * supplied by the caller — NOT an authenticated session. Never conflate the
+   * two: a client-supplied tenant is not proof of ownership.
+   */
+  source: "session" | "client" | "anon-ip" | "fallback";
   email?: string;
 };
 
@@ -60,7 +65,10 @@ const GUEST_TENANT = "delrio_demo";
  *   3. per-IP anon tenant             → isolated guest scope
  *   4. env DELRIO_TENANT_ID fallback  → only when above all fail (dev/test)
  */
-export async function resolveTenant(req: NextRequest, opts?: { bodyTenantId?: string }): Promise<ResolvedTenant> {
+export async function resolveTenant(
+  req: NextRequest,
+  opts?: { bodyTenantId?: string; intent?: "read" | "write" },
+): Promise<ResolvedTenant> {
   const session = await getServerSession();
   if (session) {
     return { tenantId: session.tenantId, source: "session", email: session.email };
@@ -78,8 +86,42 @@ export async function resolveTenant(req: NextRequest, opts?: { bodyTenantId?: st
     req.nextUrl?.searchParams?.get("tenantId") ||
     undefined;
   const candidate = opts?.bodyTenantId || headerTenant || queryTenant || "";
-  if (candidate && (TEST_TENANT_RE.test(candidate) || candidate === GUEST_TENANT)) {
-    return { tenantId: candidate, source: "session" };
+  // Fail closed: default to "write" so a client-supplied `delrio_demo` is NOT
+  // honored unless the route explicitly opts into a public-demo read with
+  // `intent: "read"`. This protects every mutation route — current and future
+  // — from a `?tenantId=delrio_demo` write poisoning the shared seed, without
+  // needing each one to remember to pass intent:"write". Reserved test
+  // prefixes (qa_/demo_/…) are still honored regardless of intent.
+  const intent = opts?.intent ?? "write";
+  if (candidate) {
+    const isTest = TEST_TENANT_RE.test(candidate);
+    // The guest tenant (delrio_demo) is SHARED, public seed data. Honor it for
+    // reads (anyone may view the demo memories) but NEVER as a write/delete
+    // target from client input — otherwise any anonymous caller could wipe or
+    // poison the shared demo (`/api/memory/delete {all:true}`) or pollute the
+    // Memory Browser everyone sees. Guest writes fall through to the per-IP
+    // anon scope below, so each visitor mutates only their own copy.
+    const isGuestRead = candidate === GUEST_TENANT && intent === "read";
+    if (isTest) {
+      // M5 · isolate reserved test/judge scopes PER-CALLER. Previously every
+      // caller who passed the same reserved tenant (e.g. two judges both using
+      // `judge_hydra2026` from the shared magic-link token) read AND wrote one
+      // shared memory bag — a cross-user data bleed. Fold the per-IP hash into
+      // the scope for BOTH read and write so each caller gets an isolated,
+      // self-consistent view. (Same IP = same scope, so a single judge's own
+      // session stays coherent across requests.)
+      const ip = clientIp(req) || "unknown";
+      if (ip && ip !== "unknown") {
+        const h = createHash("sha256").update("anon:" + ip).digest("hex").slice(0, 8);
+        return { tenantId: `${candidate}__${h}`, source: "client" };
+      }
+      return { tenantId: candidate, source: "client" };
+    }
+    if (isGuestRead) {
+      // GUEST_TENANT (delrio_demo) is the SHARED public seed bag — intentionally
+      // world-readable, already write-protected above. Not per-caller isolated.
+      return { tenantId: candidate, source: "client" };
+    }
   }
   const ip = clientIp(req) || "unknown";
   if (ip && ip !== "unknown") {
@@ -87,6 +129,44 @@ export async function resolveTenant(req: NextRequest, opts?: { bodyTenantId?: st
     return { tenantId: `anon_${h}`, source: "anon-ip" };
   }
   return { tenantId: env.DELRIO_TENANT_ID || "delos_guest", source: "fallback" };
+}
+
+/**
+ * Is this run's owning tenant one whose runs are intentionally shareable as a
+ * public permalink? Seed/demo + reserved test/judge/qa scopes are part of the
+ * public demo story (anyone with the link may view them). Real user runs
+ * (session `t_*`/`u_*` and per-IP `anon_*`) are NOT shareable — reading those
+ * cross-tenant is the BOLA the run-log routes must reject. Used by
+ * /api/run-log + /api/run-log/[runId] to gate by ownership without breaking
+ * the shareable demo run permalink.
+ */
+export function isShareableRunTenant(tenantId: string): boolean {
+  if (!tenantId) return false;
+  return tenantId === "demo-tenant" || tenantId === GUEST_TENANT || TEST_TENANT_RE.test(tenantId);
+}
+
+/**
+ * Trusted base origin for links we generate server-side and hand to a third
+ * party (magic-link emails, OAuth redirect_uri). MUST NOT be derived from the
+ * request Host header — a forged `Host: evil.com` would otherwise poison a
+ * victim's magic link into pointing at the attacker's domain (host-header
+ * injection → account takeover once the victim clicks and the real token
+ * lands on attacker infra).
+ *
+ * Order: explicit APP_BASE_URL / NEXT_PUBLIC_SITE_URL → Vercel-provided
+ * production/deployment URL (set by the platform, not the client) → finally
+ * the request origin (dev/localhost, where the Host is trusted).
+ */
+export function canonicalBaseUrl(req: NextRequest): string {
+  const configured =
+    process.env.APP_BASE_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "") ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  if (configured) return configured.replace(/\/+$/, "");
+  return new URL(req.url).origin;
 }
 
 /**

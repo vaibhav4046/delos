@@ -62,8 +62,12 @@ export async function POST(req: NextRequest) {
   // Google Drive REST API · `q` filters by name contains; orderBy lists
   // recent first. Skips the trash, folders, and shortcuts so the result
   // is just the user's actual documents.
+  // Escape backslash FIRST, then single-quote · per Google Drive query syntax
+  // both are special inside a quoted string. Escaping only `'` left a trailing
+  // `\` able to escape our own closing quote and alter the query structure.
+  const qEsc = parsed.data.q.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   const q = parsed.data.q
-    ? `name contains '${parsed.data.q.replace(/'/g, "\\'")}' and trashed = false and mimeType != 'application/vnd.google-apps.folder'`
+    ? `name contains '${qEsc}' and trashed = false and mimeType != 'application/vnd.google-apps.folder'`
     : "trashed = false and mimeType != 'application/vnd.google-apps.folder'";
   const params = new URLSearchParams({
     q,

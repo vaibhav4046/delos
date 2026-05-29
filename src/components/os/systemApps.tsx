@@ -1,38 +1,20 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Icons from "lucide-react";
 import type { RunEvent } from "@/lib/types";
 import type { AppSpec } from "@/lib/appSpec";
-import { AgentConstellation } from "@/components/AgentConstellation";
 import { getModelOverrides } from "@/lib/useModelOverrides";
 import { getTemperature } from "@/lib/useTemperature";
 import { getIdentity, renderIdentityPreamble } from "@/lib/useIdentity";
 import { getMcpServers } from "@/lib/useMcpServers";
 import { getTenantId } from "@/lib/useTenant";
 import { estimateCost } from "@/lib/cost";
-import { processEventsForAchievements, awardAppBuilt } from "@/lib/achievements";
+import { awardAppBuilt } from "@/lib/achievements";
 import { useSpeechToText, speak, getVoicePrefs, speechSupported } from "@/lib/useSpeech";
 import { onIntent, broadcastAgent } from "@/lib/intentBus";
 import { bumpCounters } from "@/components/os/CounterStrip";
 import { enhanceBuildPrompt } from "@/lib/appPromptEnhancer";
-
-function totals(events: RunEvent[]) {
-  let pin = 0;
-  let pout = 0;
-  let calls = 0;
-  let llmMs = 0;
-  let cost = 0;
-  for (const e of events) {
-    if (e.t === "usage") {
-      pin += e.promptTokens;
-      pout += e.completionTokens;
-      llmMs += e.ms;
-      calls += 1;
-      cost += estimateCost(e.model, e.promptTokens, e.completionTokens);
-    }
-  }
-  return { pin, pout, calls, llmMs, cost };
-}
+import { pushDelcodePayload } from "@/components/os/DelCodeApp";
 
 // del-terminal — CRT-style CLI shell. Black background, phosphor-green
 // text, blinking cursor, ASCII banner, command history (↑↓), tab-complete.
@@ -91,7 +73,10 @@ const NEOFETCH = [
 ];
 
 const APP_IDS = [
-  "assistant","identity","cohort","arena","voice","cowork",
+  // `cohort` + `cowork` dropped · neither maps to a SYSTEM_APP anymore (Cohort
+  // retired; Cowork absorbed into Del Assistant), so `launch cohort/cowork`
+  // used to print "↗ launched" yet spawn no window. Don't advertise dead ids.
+  "assistant","identity","arena","voice",
   "builder","codebase","cores","mission",
   "ingest","terminal","browser","marketplace","analytics",
   "files","notes","calendar","calc","sysinfo",
@@ -128,6 +113,8 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   useEffect(() => {
+    // Mirror the live voice transcript into the input while idle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (stt.transcript && !running) setInput(stt.transcript);
   }, [stt.transcript, running]);
 
@@ -288,7 +275,7 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
       case "open": {
         if (!rest) { push({ kind: "stderr", text: "usage: launch <app>" }); break; }
         if (!APP_IDS.includes(rest)) { push({ kind: "stderr", text: `unknown app: ${rest}` }); break; }
-        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { app: rest } }));
+        window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: rest } }));
         push({ kind: "stdout", text: `↗ launched ${rest}` });
         break;
       }
@@ -375,9 +362,11 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
         break;
       }
       case "theme": {
-        const next = (Math.floor(Math.random() * 15) + 1).toString();
-        window.dispatchEvent(new CustomEvent("delos-cycle-wallpaper"));
-        push({ kind: "stdout", text: `▒ wallpaper cycled (${next})` });
+        // Event name must match the /os listener (delos-wallpaper-cycle).
+        // Was delos-cycle-wallpaper — word order swapped — so this was a
+        // no-op that still printed a fake random index.
+        window.dispatchEvent(new CustomEvent("delos-wallpaper-cycle"));
+        push({ kind: "stdout", text: "▒ wallpaper cycled" });
         break;
       }
       case "exit":
@@ -596,38 +585,6 @@ function TermOutput({ line, base }: { line: TermOut; base: number }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="card-pixel py-1 px-2">
-      <div className="font-pixel text-sm" style={{ color: "var(--accent)" }}>{value}</div>
-      <div className="text-[10px] text-[color:var(--muted)] uppercase tracking-wider">{label}</div>
-    </div>
-  );
-}
-
-function TermLine({ ev, base }: { ev: RunEvent; base: number }) {
-  const ts = ((ev.at - base) / 1000).toFixed(2) + "s";
-  const tag = (cls: string, label: string) => (
-    <span className={`pill ${cls} mr-1`} style={{ fontSize: 9, padding: "0 4px" }}>{label}</span>
-  );
-  switch (ev.t) {
-    case "phase": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-info", ev.phase)} <span className="text-[color:var(--muted)]">{ev.note ?? ""}</span></div>;
-    case "thought": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-muted", ev.agent)} {ev.text}</div>;
-    case "tool_call": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-info", "→")} <span style={{ color: "var(--accent)" }}>{ev.name}</span></div>;
-    case "tool_result": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag(ev.ok ? "pill-ok" : "pill-bad", ev.ok ? "✓" : "✗")} {ev.name}</div>;
-    case "recover": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-ok", "1-UP")} {ev.strategy}</div>;
-    case "adapt": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-warn", "WARP")} {ev.reason}</div>;
-    case "subagent": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag(ev.status === "done" ? "pill-ok" : ev.status === "fail" ? "pill-bad" : "pill-warn", `sub ${ev.status}`)} <span style={{ color: "var(--accent)" }}>{ev.id.slice(-5)}</span> <span className="text-[color:var(--muted)]">{ev.result ?? ev.goal.slice(0, 60)}</span></div>;
-    case "usage": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-muted", "llm")} <span style={{ color: "var(--accent)" }}>{ev.role}</span> <span className="text-[color:var(--muted)]">{ev.model}</span> <span style={{ color: "var(--fg)" }}>{ev.promptTokens}→{ev.completionTokens}t</span> <span className="text-[color:var(--muted)]">{ev.ms}ms</span></div>;
-    case "answer": return <div className="my-1 pl-2 border-l-2" style={{ borderColor: "var(--accent)", color: "var(--fg)" }}>{tag("pill-info", "answer")} {ev.text}</div>;
-    case "memory_write": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-info", "★")} save-state</div>;
-    case "memory_recall": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-info", "recall")} {ev.hits} hits</div>;
-    case "metric": return <div className="text-[color:var(--muted)]"><span>{ts} </span>{tag("pill-muted", "m")} {ev.key}={ev.value}</div>;
-    case "error": return <div><span className="text-[color:var(--muted)]">{ts} </span>{tag("pill-bad", "ERR")} <span style={{ color: "var(--danger)" }}>{ev.message}</span></div>;
-    default: return null;
-  }
-}
-
 // Strip run-log metric metadata from displayed text.
 // Removes lines like "tokens=1247 drift=0.08 ms=520" that polluted
 // MissionControl display in QA run 2026-05-25.
@@ -801,6 +758,7 @@ export function NotesApp() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem("delos.notes");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (raw) setItems(JSON.parse(raw));
     } catch {}
   }, []);
@@ -927,10 +885,12 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
   // capture + phonetic correction also work here.
   const builderStt = useSpeechToText();
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (builderStt.transcript && !busy) {
       setPrompt(enhanceBuildPrompt(builderStt.transcript).slice(0, 1500));
       builderStt.setTranscript("");
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [builderStt.transcript]);
   const micActive = builderStt.state === "listening" || builderStt.state === "recording";
@@ -1214,8 +1174,10 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
                 // buttons know which project to export.
                 const pid = (ev.projectId ?? (ev.project as { id?: string } | undefined)?.id) as string | undefined;
                 if (pid) {
+                  // DelCode toolbar reads this global to know which project to
+                  // export. (A `delos-codegen-done` CustomEvent used to fire
+                  // here too, but nothing ever listened for it — removed.)
                   (globalThis as unknown as { __delos_current_project_id?: string }).__delos_current_project_id = pid;
-                  window.dispatchEvent(new CustomEvent("delos-codegen-done", { detail: { projectId: pid } }));
                 }
               } else if (ev.t === "error") {
                 streamErr = String(ev.message ?? "stream error");
@@ -1321,6 +1283,33 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
     { key: "mount", label: "mount" },
     { key: "done", label: "done" },
   ];
+  // Split-view gate · show the inline DelCode preview whenever a production
+  // build is streaming or has produced a project — INDEPENDENT of the
+  // `productionMode` toggle. Ambitious prompts auto-promote to the streaming
+  // path via `useProduction` (build()) without ever flipping the toggle, so
+  // gating the preview on `productionMode` hid successful auto-builds (toast
+  // said "N files" but the pane never appeared). streamingFiles/lastProject
+  // are set ONLY by the production streaming path, so this is the precise gate.
+  const showBuiltPanel = streamingFiles.length > 0 || !!lastProject;
+  // Open the full DelCode IDE on the CURRENT build. Re-pushes the project so
+  // the IDE shows THIS build whether it mounts fresh (consumeDelcodePending
+  // reads the global on mount) or is already open (the delos-codegen-load
+  // listener swaps its files). The buttons previously only launched the
+  // window, so an already-open IDE — or one falling back to stale localStorage
+  // — showed old/sample files instead of the freshly generated project.
+  function openDelCodeWithProject() {
+    // Prefer the finalized project; fall back to the in-flight stream so the
+    // button works mid-build too. pushDelcodePayload handles all the delivery
+    // redundancy (global + localStorage + retried event), so we just compute
+    // the freshest payload and launch/focus the IDE window.
+    const proj =
+      (lastProject?.files?.length ? lastProject : null) ??
+      (streamingFiles.length > 0 ? { name: "Generated project", files: streamingFiles } : null);
+    if (proj?.files?.length) {
+      pushDelcodePayload({ files: proj.files, name: proj.name });
+    }
+    window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "codebase" } }));
+  }
   return (
     <div className="flex h-full" style={{ minHeight: 480 }}>
       {/* Left pane · existing VibeCode wizard / prompt / checklist. Width
@@ -1330,11 +1319,8 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
       className="p-3 space-y-3 text-xs overflow-y-auto"
       style={{
         paddingBottom: 96,
-        flex: productionMode && (streamingFiles.length > 0 || lastProject) ? "0 0 440px" : "1 1 100%",
-        borderRight:
-          productionMode && (streamingFiles.length > 0 || lastProject)
-            ? "1px solid var(--surface-2)"
-            : "none",
+        flex: showBuiltPanel ? "0 0 440px" : "1 1 100%",
+        borderRight: showBuiltPanel ? "1px solid var(--surface-2)" : "none",
       }}
     >
       {/* paddingBottom keeps the BUILD APP / REFINE controls clear of the
@@ -1585,6 +1571,15 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
           {productionMode ? "→ DelCode IDE · streamed multi-file build" : "→ DelOS widget · single-file DSL spec"}
         </span>
       </div>
+      {/* When the toggle is OFF, ambitious prompts still auto-promote to the
+          streaming multi-file path (see build()'s shouldAutoProduction). The
+          pill alone would imply "off = always widget", so surface the real
+          behavior persistently — not only via the transient build toast. */}
+      {!productionMode && (
+        <div className="font-mono mt-1" style={{ fontSize: 9, color: "var(--muted)", opacity: 0.8 }}>
+          auto-promotes to multi-file when the prompt is ambitious · flip ON to force it
+        </div>
+      )}
 
       {/* Pre-build wizard · only visible when productionMode is on. Lets the
           user pick a UI style + scaffolding tier BEFORE the agent starts
@@ -1683,11 +1678,7 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
                   ★ PROJECT FILES · {fileChecklist.filter((r) => r.status === "done" || r.status === "retried").length}/{fileChecklist.length}
                 </div>
                 <button
-                  onClick={() =>
-                    window.dispatchEvent(
-                      new CustomEvent("delos-launch-app", { detail: { id: "codebase" } }),
-                    )
-                  }
+                  onClick={openDelCodeWithProject}
                   className="pill pill-info cursor-pointer"
                   style={{ fontSize: 9, padding: "2px 8px" }}
                   title="Jump to DelCode IDE to read the generated source"
@@ -1949,18 +1940,19 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
         </div>
       )}
     </div>
-    {/* Right pane · inline DelCode preview · ONLY when productionMode +
-        we have something to show. File tree on the left of this pane,
-        active file content on the right. Click a row to focus that file.
+    {/* Right pane · inline DelCode preview · shown whenever a production
+        build is streaming or has landed a project (toggle-independent, see
+        showBuiltPanel). File tree on the left of this pane, active file
+        content on the right. Click a row to focus that file.
         2026-05-25 ask · "DelCode to be added in the route of VibeCode". */}
-    {productionMode && (streamingFiles.length > 0 || lastProject) && (
+    {showBuiltPanel && (
       <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "var(--bg)" }}>
         <div className="flex items-center justify-between px-2 py-1" style={{ background: "var(--surface)", borderBottom: "1px solid var(--surface-2)" }}>
           <span className="font-pixel text-[10px] tracking-widest" style={{ color: "var(--accent)" }}>
             {"</>"} DELCODE INLINE · {(streamingFiles.length || (lastProject?.files?.length ?? 0))} files
           </span>
           <button
-            onClick={() => window.dispatchEvent(new CustomEvent("delos-launch-app", { detail: { id: "codebase" } }))}
+            onClick={openDelCodeWithProject}
             className="pill pill-info"
             style={{ fontSize: 9, padding: "1px 7px", cursor: "pointer" }}
             title="Open full DelCode IDE in its own window"

@@ -27,7 +27,10 @@ export async function POST(req: NextRequest) {
   if (rawBody && typeof rawBody === "object" && typeof (rawBody as Record<string, unknown>).tenantId === "string") {
     bodyTenantId = (rawBody as Record<string, unknown>).tenantId as string;
   }
-  const { tenantId } = await resolveTenant(req, { bodyTenantId });
+  // intent:"write" — a client-supplied `delrio_demo` must NOT resolve to the
+  // shared demo tenant for a delete; it falls through to per-IP anon scope so
+  // an anonymous caller can only wipe their own copy, never the public seed.
+  const { tenantId } = await resolveTenant(req, { bodyTenantId, intent: "write" });
   if (all) {
     const removed = clearLocalMemories(tenantId);
     return Response.json({ ok: true, removed, tenantId, mode: "all" });

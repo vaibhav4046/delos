@@ -12,6 +12,17 @@ function hashToken(t: string): string {
   return createHash("sha256").update(t + getSecret()).digest("hex").slice(0, 32);
 }
 
+// Process-local single-use guard. HydraDB recall is semantic + eventually
+// consistent, so the durable AUTH_CONSUMED check can miss a replay that lands
+// within milliseconds (or before the write propagates). A synchronous
+// check-and-set on this Set closes the same-instance TOCTOU window
+// deterministically; the durable record still covers cross-instance.
+function consumedTokens(): Set<string> {
+  const G = globalThis as unknown as { __delos_consumed_tokens?: Set<string> };
+  if (!G.__delos_consumed_tokens) G.__delos_consumed_tokens = new Set<string>();
+  return G.__delos_consumed_tokens;
+}
+
 function signSession(payload: { sub: string; iat: number; exp: number }): string {
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const sig = createHmac("sha256", getSecret())
@@ -50,6 +61,16 @@ export async function GET(req: NextRequest) {
   // Magic links live 15 min, so without this check an attacker who captures
   // the URL (browser history, referrer leak, screen share) can mint multiple
   // sessions until natural expiry.
+  //
+  // Fast deterministic guard first: synchronous check-and-set on the
+  // process-local set closes the same-instance replay race before any await.
+  const consumed = consumedTokens();
+  if (consumed.has(tokenHash)) {
+    return Response.redirect(`${url.origin}/auth?error=token_already_used`, 302);
+  }
+  consumed.add(tokenHash);
+
+  // Durable cross-instance check (semantic recall, eventually consistent).
   const consumedHits = await safeRecall({
     tenantId: env.DELRIO_TENANT_ID,
     query: `AUTH_CONSUMED hash=${tokenHash}`,

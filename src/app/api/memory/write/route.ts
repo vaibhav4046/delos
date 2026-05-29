@@ -33,7 +33,9 @@ export const runtime = "nodejs";
 
 const Req = z.object({
   text: z.string().min(1).max(2000),
-  tags: z.array(z.string()).default([]),
+  // Bound each tag AND the tag count · an unbounded `["A".repeat(1e5)]` would
+  // otherwise pass straight through the dedup/sanitize path and bloat storage.
+  tags: z.array(z.string().max(64)).max(32).default([]),
   tenantId: z.string().min(1).max(120).optional(),
   // Caller can hint the source — used by VoiceApp store_memory to tag
   // "voice-memory" instead of the generic "memory-write" default so the

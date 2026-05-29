@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 // Temperature persisted to localStorage. Sent with every /api/run + /api/quick-agent call.
 // Default 0.7 — Vercel AI SDK default. Range 0.0–1.5.
@@ -31,18 +31,14 @@ export function setTemperature(t: number) {
   } catch {}
 }
 
+function subscribe(cb: () => void) {
+  window.addEventListener("delos-temperature-changed", cb);
+  return () => window.removeEventListener("delos-temperature-changed", cb);
+}
+
 export function useTemperature(): [number, (t: number) => void] {
-  const [t, setT] = useState<number>(DEFAULT_TEMP);
-  useEffect(() => {
-    setT(getTemperature());
-    function onChange(e: Event) {
-      const d = (e as CustomEvent).detail as { t: number };
-      setT(d.t);
-    }
-    window.addEventListener("delos-temperature-changed", onChange as EventListener);
-    return () => window.removeEventListener("delos-temperature-changed", onChange as EventListener);
-  }, []);
-  return [t, (next) => { setTemperature(next); setT(next); }];
+  const t = useSyncExternalStore(subscribe, getTemperature, () => DEFAULT_TEMP);
+  return [t, setTemperature];
 }
 
 export const TEMP_PRESETS: Array<{ label: string; value: number; tone: string }> = [

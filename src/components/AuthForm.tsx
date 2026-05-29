@@ -43,11 +43,13 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [sent, setSent] = useState(false);
   const [devLink, setDevLink] = useState<string | null>(null);
   const [sentVia, setSentVia] = useState<string | null>(null);
-  const [sendErrorKind, setSendErrorKind] = useState<string | null>(null);
+  const [, setSendErrorKind] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [probing, setProbing] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    // Mount-only: surface the OAuth ?error= param as a user-facing message.
+    /* eslint-disable react-hooks/set-state-in-effect */
     const u = new URL(window.location.href);
     const e = u.searchParams.get("error");
     if (e?.startsWith("ms_token_")) {
@@ -79,6 +81,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
     } else if (e) {
       setError(`Sign-in error: ${e}`);
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   async function submit(ev: React.FormEvent) {
@@ -144,6 +147,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         }, 100);
         return;
       }
+      // eslint-disable-next-line react-hooks/immutability
       window.location.href = p.init;
     } catch (e) {
       setError((e as Error).message);

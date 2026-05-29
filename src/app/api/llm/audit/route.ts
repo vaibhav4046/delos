@@ -15,14 +15,61 @@ const G = globalThis as unknown as {
 
 const AUDIT_TTL_MS = 15 * 60_000;
 
+// Audit ONLY models the product actually offers (the curated MODEL_CATALOG),
+// so the health count reflects real availability instead of noise. Maverick +
+// Kimi were removed from the picker as "paid-only on this org" yet were still
+// audited here — they failed every probe and dragged the pill to a permanent
+// "3/6", making a fully-working cascade look degraded. Now every probed model
+// is a real, free-tier offering. Gemini Pro is intentionally NOT probed: it
+// shares Google's per-project free quota with Flash, so one Google probe
+// (Flash) is a faithful signal for the whole provider and we don't burn two of
+// the ~20 daily requests per audit.
 const MODELS_TO_AUDIT = [
   "groq:openai/gpt-oss-120b",
   "groq:openai/gpt-oss-20b",
-  "groq:meta-llama/llama-4-maverick-17b-128e-instruct",
-  "groq:moonshotai/kimi-k2-instruct-0905",
+  "groq:meta-llama/llama-4-scout-17b-16e-instruct",
   "mistral:mistral-large-latest",
+  "mistral:mistral-small-latest",
   "google:gemini-2.5-flash",
 ];
+
+// Friendly provider names keyed by the model-string prefix. Used to roll
+// per-model probe rows up into provider-level health for the top-bar pill.
+const PROVIDER_NAMES: Record<string, string> = {
+  groq: "Groq",
+  mistral: "Mistral",
+  google: "Gemini",
+  nim: "NIM",
+};
+
+function providerOf(model: string): string {
+  const prefix = model.split(":")[0];
+  return PROVIDER_NAMES[prefix] ?? prefix;
+}
+
+// Roll per-model results up to provider health: a provider is healthy if ANY
+// of its models answered. This is what the pill shows — users care whether a
+// provider can serve, not whether every individual SKU is up. Robust to single
+// flaky models and to free-tier daily quotas on one model of a multi-model
+// provider.
+function summarizeProviders(
+  results: Array<{ model: string; ok: boolean }>,
+): Array<{ provider: string; healthy: boolean; healthyModels: number; totalModels: number }> {
+  const byProvider = new Map<string, { healthyModels: number; totalModels: number }>();
+  for (const r of results) {
+    const p = providerOf(r.model);
+    const acc = byProvider.get(p) ?? { healthyModels: 0, totalModels: 0 };
+    acc.totalModels += 1;
+    if (r.ok) acc.healthyModels += 1;
+    byProvider.set(p, acc);
+  }
+  return [...byProvider.entries()].map(([provider, v]) => ({
+    provider,
+    healthy: v.healthyModels > 0,
+    healthyModels: v.healthyModels,
+    totalModels: v.totalModels,
+  }));
+}
 
 // Map a provider prefix to the env var that holds its key. Used to give
 // callers an explicit "missing_key" signal instead of a generic timeout/
@@ -78,7 +125,12 @@ export async function GET(req: NextRequest) {
   const force = req.nextUrl.searchParams.get("force") === "1";
   const cached = G.__delos_llm_audit;
   if (!force && cached && Date.now() - cached.at < AUDIT_TTL_MS) {
-    return Response.json({ ok: true, cachedAt: cached.at, results: cached.results });
+    return Response.json({
+      ok: true,
+      cachedAt: cached.at,
+      results: cached.results,
+      providers: summarizeProviders(cached.results),
+    });
   }
   const targets = [...MODELS_TO_AUDIT];
   if (isNimEnabled()) {
@@ -101,6 +153,10 @@ export async function GET(req: NextRequest) {
     // `healthy` over MODELS_TO_AUDIT.
     healthy: results.filter((r) => r.ok).map((r) => r.model),
     unhealthy: results.filter((r) => !r.ok).map((r) => ({ model: r.model, err: r.err, missingKey: r.missingKey })),
+    // WIN-2 · provider-level rollup for the top-bar pill. A provider counts as
+    // healthy if ANY of its models answered, so the pill reflects "can this
+    // provider serve?" rather than per-SKU flakiness.
+    providers: summarizeProviders(results),
   });
 }
 

@@ -12,12 +12,17 @@ import { motion } from "framer-motion";
 // right edge, matching the v2.0 layout — no migration shock.
 type WidgetId = "clock" | "weather" | "crypto" | "fx";
 type WidgetLayout = { x: number; y: number; visible: boolean };
-const WIDGET_LAYOUT_KEY = "delos.widgets.layout.v1";
+// v2 · decluttered defaults. Crypto + FX shipped ON in v1, which made the
+// desktop read as a generic "finance widget demo" and buried the actual
+// product (agents building apps). Now only Clock + Weather show by default;
+// crypto/fx are one click away in the + menu. Key bumped v1→v2 so the clean
+// layout reaches returning users too, not just fresh sessions.
+const WIDGET_LAYOUT_KEY = "delos.widgets.layout.v2";
 const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayout> = {
   clock:   { x: 0, y: 60,  visible: true },
   weather: { x: 0, y: 140, visible: true },
-  crypto:  { x: 0, y: 222, visible: true },
-  fx:      { x: 0, y: 304, visible: true },
+  crypto:  { x: 0, y: 222, visible: false },
+  fx:      { x: 0, y: 304, visible: false },
 };
 
 function loadLayout(): Record<WidgetId, WidgetLayout> {
@@ -129,23 +134,14 @@ function loadNotes(): StickyNote[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return defaultNotes();
+    // No default tutorial sticky — the WelcomeMat already greets the user, so a
+    // second "Welcome to DelOS" note was redundant clutter on first paint. New
+    // users get a clean desktop; the + chip (bottom-right) discovers stickies.
+    if (!raw) return [];
     return JSON.parse(raw) as StickyNote[];
   } catch {
-    return defaultNotes();
+    return [];
   }
-}
-
-function defaultNotes(): StickyNote[] {
-  return [
-    {
-      id: "demo-1",
-      text: "★ Welcome to DelOS\n\nDrag this note. Edit it. Right-click for more.\n\nClick + for a new sticky.",
-      x: 24,
-      y: 80,
-      color: "yellow",
-    },
-  ];
 }
 
 function saveNotes(n: StickyNote[]) {
@@ -160,8 +156,12 @@ export function DesktopWidgets() {
   const [addMenu, setAddMenu] = useState(false);
 
   useEffect(() => {
+    // Mount-only hydration from localStorage · keeps SSR/first paint on the
+    // empty defaults to avoid a hydration mismatch.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setNotes(loadNotes());
     setLayout(loadLayout());
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   function setWidgetLayout(id: WidgetId, next: WidgetLayout) {
@@ -173,6 +173,8 @@ export function DesktopWidgets() {
   }
 
   useEffect(() => {
+    // First clock tick on mount so SSR markup stays static.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTime(new Date());
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(t);

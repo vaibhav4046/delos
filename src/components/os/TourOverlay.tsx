@@ -71,6 +71,8 @@ export function TourOverlay() {
     const dismissed = sessionStorage.getItem("delos.tour.dismissed");
     if (dismissed) return;
     const saved = Number(sessionStorage.getItem(STORAGE_KEY) ?? "0");
+    // Mount-only restore of the saved tour step from sessionStorage.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStep(Math.max(0, Math.min(STEPS.length - 1, saved)));
     // Tiny delay so /os DOM mounts targets
     const t = setTimeout(() => setActive(true), 600);

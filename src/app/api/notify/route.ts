@@ -7,13 +7,19 @@ import { zodErr, resolveTenant } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
-const Req = z.object({
-  title: z.string().min(1).max(140).optional(),
-  message: z.string().min(1).max(2000).optional(),
-  text: z.string().min(1).max(2000).optional(),
-  tone: z.enum(["ok", "info", "warn", "bad", "system"]).optional(),
-  tenantId: z.string().max(120).optional(),
-});
+const Req = z
+  .object({
+    title: z.string().min(1).max(140).optional(),
+    message: z.string().min(1).max(2000).optional(),
+    text: z.string().min(1).max(2000).optional(),
+    tone: z.enum(["ok", "info", "warn", "bad", "system"]).optional(),
+    tenantId: z.string().max(120).optional(),
+  })
+  // Empty body `{}` used to pass (all optional) and enqueue a useless
+  // "(no message)" notification. Require some actual content.
+  .refine((d) => Boolean(d.message || d.text || d.title), {
+    message: "notify requires at least one of: message, text, title",
+  });
 
 const G = globalThis as unknown as {
   __delos_notifs_server?: Array<{ id: string; tenantId: string; title?: string; message: string; tone: string; at: number }>;
@@ -31,7 +37,7 @@ export async function POST(req: NextRequest) {
     bodyTenantId = (rawBody as Record<string, unknown>).tenantId as string;
   }
   const { tenantId } = await resolveTenant(req, { bodyTenantId });
-  const message = data.message ?? data.text ?? "(no message)";
+  const message = data.message ?? data.text ?? data.title ?? "(no message)";
   const id = `nx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   queue.push({
     id,

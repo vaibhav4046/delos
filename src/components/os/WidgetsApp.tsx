@@ -20,12 +20,16 @@ export function WidgetsApp() {
   const [draftMinutes, setDraftMinutes] = useState(30);
 
   useEffect(() => {
+    // Mount-only hydration from localStorage · setState in an effect keeps the
+    // SSR/first-paint defaults stable and avoids a hydration mismatch.
+    /* eslint-disable react-hooks/set-state-in-effect */
     try {
       const raw = localStorage.getItem(REMINDERS_KEY);
       if (raw) setReminders(JSON.parse(raw));
       const cs = localStorage.getItem(CLOCK_STYLE_KEY) as ClockStyle | null;
       if (cs) setClockStyle(cs);
     } catch {}
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   // 1Hz tick
@@ -74,6 +78,9 @@ export function WidgetsApp() {
     };
     saveReminders([r, ...reminders]);
     setDraft("");
+    // Wake ReminderEngine now · without this it only notices on its 20s
+    // poll, so short reminders fire late.
+    window.dispatchEvent(new CustomEvent("delos-reminder-added"));
     pushNotif({ text: `Reminder set · ${text} in ${draftMinutes}m`, tone: "info", source: "reminder" });
   }
 
@@ -307,6 +314,7 @@ function weekNumber(d: Date): number {
 }
 
 function ReminderRow({ r, onToggle, onRemove }: { r: Reminder; onToggle: (id: string) => void; onRemove: (id: string) => void }) {
+  // eslint-disable-next-line react-hooks/purity
   const overdue = !r.done && r.dueAt < Date.now();
   return (
     <div className="group flex items-center gap-2" style={{ padding: "6px 8px", background: "var(--surface)", border: "1px solid var(--surface-2)", borderRadius: 3 }}>

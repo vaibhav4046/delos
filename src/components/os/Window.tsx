@@ -3,6 +3,8 @@ import { useRef, useState, useEffect } from "react";
 import * as Icons from "lucide-react";
 import { motion, useDragControls } from "framer-motion";
 import { AppErrorBoundary } from "./ErrorBoundary";
+import { usePullToRefresh } from "@/lib/usePullToRefresh";
+import { haptic } from "@/lib/mobile";
 
 // Snap targets — half-screen edges, quarter-screen corners, full top/bottom.
 // Wired up to Win+arrow shortcuts and drag-to-edge detection.
@@ -59,6 +61,15 @@ export function Window({
   const [snapMenuOpen, setSnapMenuOpen] = useState(false);
   const [resizing, setResizing] = useState(false);
   const snapHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Mobile-exclusive: pull-to-refresh on the window's scroll body. Touch-only
+  // (no-op with a mouse), at-top-only (won't fight scrolling), fires the same
+  // refresh as the titlebar ↻ button + a light haptic tick.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const { pull, refreshing } = usePullToRefresh(scrollRef, () => {
+    haptic("success");
+    onRefresh();
+  });
 
   useEffect(() => {
     const t = setTimeout(() => setPhase("shown"), 250);
@@ -221,7 +232,7 @@ export function Window({
             <IconCmp size={14} color="currentColor" />
             <span className="font-pixel text-sm tracking-wider truncate">{win.title.toUpperCase()}</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 window-controls">
             <button onClick={onRefresh} className="w-5 h-5 flex items-center justify-center hover:bg-black/20" aria-label="Refresh" title="Refresh">
               <Icons.RotateCw size={11} color="currentColor" />
             </button>
@@ -254,6 +265,7 @@ export function Window({
           </div>
         </div>
         <div
+          ref={scrollRef}
           className="flex-1 overflow-auto"
           style={{
             background: "var(--surface)",
@@ -266,8 +278,40 @@ export function Window({
             minHeight: 0,
             minWidth: 0,
             position: "relative",
+            // Anchor overscroll so the pull-to-refresh gesture owns the top.
+            overscrollBehaviorY: "contain",
           }}
         >
+          {/* Mobile pull-to-refresh affordance — overlays the top of the
+              scroller, grows with the pull, spins while refreshing. Hidden
+              entirely on desktop (hook never engages with a mouse). */}
+          {(pull > 0 || refreshing) && (
+            <div
+              aria-hidden
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: Math.max(pull, refreshing ? 40 : 0),
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+                overflow: "hidden",
+                zIndex: 5,
+                color: "var(--accent)",
+                background: "linear-gradient(to bottom, rgba(var(--surface-rgb),0.9), transparent)",
+              }}
+            >
+              <Icons.RotateCw
+                size={18}
+                color="currentColor"
+                className={refreshing ? "animate-spin" : ""}
+                style={refreshing ? undefined : { transform: `rotate(${pull * 3}deg)`, opacity: Math.min(1, pull / 64) }}
+              />
+            </div>
+          )}
           <AppErrorBoundary appName={win.title}>{win.content}</AppErrorBoundary>
         </div>
 

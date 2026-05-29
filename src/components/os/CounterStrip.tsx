@@ -42,6 +42,10 @@ export function CounterStrip() {
     // with sensible ambient defaults so the first frame the judge sees is
     // a real-looking counter strip, not an obvious skeleton. /api/stats
     // and delos-counters increments overwrite within seconds.
+    // Mount-only hydration · setState in an effect is intentional so SSR and
+    // the first client paint both render ZERO (see note above), then this
+    // hydrates from storage/seed. Lazy init here previously caused React #418.
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (initial.agents === 0 && initial.requests === 0 && initial.tokens === 0) {
       const seed: Counters = { agents: 12, requests: 47, tokens: 91234, usd: 0.018 };
       setC(seed);
@@ -51,6 +55,7 @@ export function CounterStrip() {
       setC(initial);
       setSeeded(true);
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
     function onInc(e: Event) {
       const d = (e as CustomEvent).detail as Partial<Counters>;
       setC((prev) => {

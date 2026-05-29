@@ -30,6 +30,8 @@ const EDGES: Array<[NodeKey, NodeKey]> = [
 
 export function AgentConstellation({ events, compact = false }: { events: RunEvent[]; compact?: boolean }) {
   const recent = useMemo(() => events.slice(-12), [events]);
+  // Render-time clock — drives the relative "active Xs ago" pulse below.
+  // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
 
   // Pull dynamic model labels from usage events — first usage per role wins

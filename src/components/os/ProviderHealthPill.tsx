@@ -14,6 +14,7 @@ type Audit = {
   healthy?: string[];
   unhealthy?: Array<{ model: string; err?: string }>;
   results?: Array<{ model: string; ok: boolean; err?: string }>;
+  providers?: Array<{ provider: string; healthy: boolean; healthyModels: number; totalModels: number }>;
 };
 
 export function ProviderHealthPill({ onOpen }: { onOpen?: () => void }) {
@@ -43,14 +44,19 @@ export function ProviderHealthPill({ onOpen }: { onOpen?: () => void }) {
     };
   }, []);
 
-  // /api/llm/audit returns { results: [{model, ok, err?}, ...] } · derive
-  // healthy/total from results when present, fall back to legacy healthy[]/unhealthy[]
-  // shape if a future endpoint version returns that instead.
-  const resultsHealthy = data?.results?.filter((r) => r.ok).length;
-  const healthy = resultsHealthy ?? data?.healthy?.length ?? 0;
-  const total =
-    (data?.results?.length ?? 0) ||
-    (data?.healthy?.length ?? 0) + (data?.unhealthy?.length ?? 0);
+  // The pill is provider-centric: it answers "how many LLM providers can serve
+  // right now?", not "is every individual model SKU up?". The audit returns a
+  // `providers` rollup (a provider is healthy if ANY of its models answered),
+  // which is what we show. Fall back to the per-model `results` count only for
+  // an older audit payload that predates the rollup.
+  const provs = data?.providers;
+  const healthy = provs
+    ? provs.filter((p) => p.healthy).length
+    : (data?.results?.filter((r) => r.ok).length ?? data?.healthy?.length ?? 0);
+  const total = provs
+    ? provs.length
+    : (data?.results?.length ?? 0) ||
+      (data?.healthy?.length ?? 0) + (data?.unhealthy?.length ?? 0);
   const allHealthy = total > 0 && healthy === total;
   const fallbackActive = total > 0 && healthy < total;
 
@@ -63,14 +69,17 @@ export function ProviderHealthPill({ onOpen }: { onOpen?: () => void }) {
   const label = !data
     ? "PROVIDERS"
     : allHealthy
-      ? `${healthy} PROVIDERS HEALTHY`
-      : `${healthy}/${total} HEALTHY · CASCADE`;
+      ? `${healthy} PROVIDER${healthy === 1 ? "" : "S"} HEALTHY`
+      : `${healthy}/${total} PROVIDERS · CASCADE`;
 
+  // Name the down providers in the tooltip so the cue is actionable instead of
+  // just a count (e.g. "Gemini unhealthy · cascade routing around").
+  const downNames = provs?.filter((p) => !p.healthy).map((p) => p.provider) ?? [];
   const title = !data
-    ? "Probing 6-provider LLM cascade · Groq + Mistral + Gemini + NIM + Cerebras + Bytez + OpenRouter"
+    ? "Probing LLM provider cascade · Groq + Mistral + Gemini"
     : allHealthy
       ? `${total} providers healthy · cascade ready to handle outages`
-      : `${total - healthy} provider${total - healthy === 1 ? "" : "s"} unhealthy · cascade routing around. Click for Terminal to inspect.`;
+      : `${downNames.join(", ") || `${total - healthy} provider${total - healthy === 1 ? "" : "s"}`} unhealthy · cascade routing around. Click for Terminal to inspect.`;
 
   return (
     <button

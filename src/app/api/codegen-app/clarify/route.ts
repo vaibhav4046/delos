@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
     } else {
       raw = await runQuickAgent({ prompt, systemOverride: SYSTEM });
     }
-  } catch (e) {
+  } catch {
     // On planner failure, default to "skip clarify" so the user isn't blocked
     return Response.json({ clarify: false, playbook: domain?.key ?? "generic", note: "planner_unavailable" });
   }

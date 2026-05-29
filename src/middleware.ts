@@ -18,6 +18,14 @@ function applySecurityHeaders(res: NextResponse, pathname: string): NextResponse
   // API + image generation responses skip CSP because the LLM provider
   // fetches and SSE streams need full network reach.
   if (!pathname.startsWith("/api") && !pathname.includes("opengraph-image") && !pathname.includes("twitter-image")) {
+    // `unsafe-eval` is only needed by Turbopack's dev HMR runtime. A production
+    // Next 16 build never evals app code, so we drop it in prod to shrink the
+    // XSS blast radius (an injected <script> can't `eval`/`new Function` a
+    // payload). Dev keeps it so hot-reload works.
+    const isDev = process.env.NODE_ENV !== "production";
+    const scriptSrc = isDev
+      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://va.vercel-scripts.com"
+      : "script-src 'self' 'unsafe-inline' https://va.vercel-scripts.com";
     res.headers.set(
       "Content-Security-Policy",
       [
@@ -25,7 +33,7 @@ function applySecurityHeaders(res: NextResponse, pathname: string): NextResponse
         // Inline style needed for dynamic theme colors + tailwind v4 runtime
         "style-src 'self' 'unsafe-inline'",
         // Next 16 + React 19 still emit inline script for hydration map
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://va.vercel-scripts.com",
+        scriptSrc,
         "img-src 'self' data: blob: https:",
         "font-src 'self' data: https://fonts.gstatic.com",
         // SSE streams + provider fetches go through /api · so leave network connect open

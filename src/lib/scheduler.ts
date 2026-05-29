@@ -1,6 +1,9 @@
-// Scheduled actions engine · in-memory + persisted via the local fallback
-// pattern. Runs a single tick interval that checks all scheduled actions
-// for fire time, dispatches the action, and re-arms if it's recurring.
+// Scheduled actions engine · in-memory store keyed by globalThis so HMR and
+// warm-Lambda reuse don't lose state. Firing is DRIVEN EXTERNALLY: the in-OS
+// ScheduleTicker (client) POSTs /api/schedule/tick every 45s, which walks due
+// actions and dispatches them. We deliberately do NOT run a server-side
+// setInterval — serverless functions freeze between requests, so an in-process
+// timer would never fire reliably. recordFire() re-arms recurring actions.
 //
 // Action kinds:
 //   - draft_email · stages a Gmail draft via /api/connectors/gmail/draft
@@ -38,10 +41,23 @@ export type ScheduledAction = {
 
 const G = globalThis as unknown as {
   __delos_scheduled?: Map<string, ScheduledAction>;
-  __delos_scheduler_tick?: ReturnType<typeof setInterval>;
 };
 G.__delos_scheduled ??= new Map();
 const store = G.__delos_scheduled;
+
+// Drop disabled one-shot actions that already fired more than RETAIN_FIRED_MS
+// ago. recordFire() disables one-shots after they run but left them in the Map
+// forever; over a long-lived process they accumulate. Recurring actions and
+// still-armed one-shots are always kept.
+const RETAIN_FIRED_MS = 60 * 60_000; // keep fired one-shots 1h for the history UI
+function pruneFired() {
+  const now = Date.now();
+  for (const [id, a] of store) {
+    if (!a.enabled && !a.everyMs && a.lastRunAt && now - a.lastRunAt > RETAIN_FIRED_MS) {
+      store.delete(id);
+    }
+  }
+}
 
 export function listActions(tenantId: string): ScheduledAction[] {
   return [...store.values()]
@@ -54,6 +70,7 @@ export function getAction(id: string): ScheduledAction | undefined {
 }
 
 export function addAction(input: Omit<ScheduledAction, "id" | "createdAt" | "nextRunAt" | "enabled" | "history">): ScheduledAction {
+  pruneFired();
   const id = `sa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const now = Date.now();
   const nextRunAt = input.runAt ?? (input.everyMs ? now + input.everyMs : now);

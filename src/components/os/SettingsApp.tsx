@@ -138,7 +138,7 @@ function ConnectorsTab() {
         <div className="font-pixel text-[10px] tracking-widest mb-1" style={{ color: "var(--accent)" }}>★ WHY THIS BEATS OAUTH</div>
         <ul className="font-mono space-y-0.5" style={{ fontSize: 10, color: "var(--muted)" }}>
           <li>· Works on day one. No app registration, no redirect URI list, no callback domain whitelisting.</li>
-          <li>· Token scoped to YOU only. DelOS does not see other users' data.</li>
+          <li>· Token scoped to YOU only. DelOS does not see other users&apos; data.</li>
           <li>· Easy to revoke — drop the token at the source, DelOS lookups start failing closed.</li>
           <li>· OAuth flow still available — when env credentials are set, /auth/signin shows the provider buttons.</li>
         </ul>
@@ -166,6 +166,8 @@ function CursorTab() {
               {c.id === "system" ? (
                 <span className="font-pixel text-xs text-[color:var(--muted)]">[ native ]</span>
               ) : (
+                // Fixed 48px decorative SVG preview — next/image adds no value here.
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={c.id === "delos" ? "/cursor.svg" : c.id === "classic" ? "/cursor-classic.svg" : "/cursor-neon.svg"}
                   alt={c.label}

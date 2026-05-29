@@ -37,7 +37,7 @@ const TEMPLATES: Array<{
 
 export function ScheduleApp() {
   const [actions, setActions] = useState<ScheduledAction[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
 
   async function load() {
@@ -52,6 +52,8 @@ export function ScheduleApp() {
   }
 
   useEffect(() => {
+    // Initial fetch + 10s poll; load() flips the loading flag synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     const tid = setInterval(load, 10_000);
     return () => clearInterval(tid);
@@ -91,7 +93,7 @@ export function ScheduleApp() {
       const j = (await r.json().catch(() => ({}))) as { result?: { note?: string } };
       pushNotif({ text: r.ok ? `Action fired · ${j.result?.note ?? "ok"}` : "Action failed", tone: r.ok ? "ok" : "bad", source: "schedule" });
       load();
-    } catch (e) {
+    } catch {
       pushNotif({ text: "Action failed", tone: "bad", source: "schedule" });
     }
   }

@@ -12,7 +12,7 @@ import { sendMail, renderMagicLinkEmail } from "@/lib/mail";
 import { getSecret } from "@/lib/session";
 import { createHash, randomBytes } from "node:crypto";
 
-import { zodErr } from "@/lib/apiAuth";
+import { zodErr, canonicalBaseUrl } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 
 const bodySchema = z.object({
@@ -120,8 +120,9 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const url = new URL(req.url);
-  const base = `${url.protocol}//${url.host}`;
+  // Build the verify link from a trusted canonical origin, NOT the request
+  // Host header (host-header injection → magic-link ATO). See canonicalBaseUrl.
+  const base = canonicalBaseUrl(req);
   const link = `${base}/api/auth/verify?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
 
   console.log("[auth] magic link issued:", link);
@@ -166,18 +167,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // If real email send succeeded we hide the link. If it failed (or no provider),
-  // fall back to devLink so the user / judges can still get in.
-  const surfaceDevLink = (exposeDev && !hasEmailSender) || !!sendError;
+  // SECURITY: the verify link is a bearer credential. Only EVER expose it when the
+  // deploy explicitly opts in (`exposeDev` = dev, or DELOS_EXPOSE_MAGIC_LINK=1 for
+  // judges). A failed email send must NEVER leak the link in production — that was
+  // an account-takeover vector: attacker POSTs a victim's email, the send fails
+  // (e.g. domain_not_verified), and the one-click link comes back in the response.
+  // In dev/expose mode we still surface it when there's no sender OR the send failed
+  // so the flow stays usable. On a prod send-failure we surface only the safe error
+  // *kind* (a small enum, never the raw provider string or link).
+  const surfaceDevLink = exposeDev && (!hasEmailSender || !!sendError);
 
   return Response.json({
     ok: true,
     email,
     expiresAt,
     sentVia,
-    // sendErrorKind is a small enum the UI can render a friendly message from —
-    // never leaks raw provider strings (which can contain account-owner email).
-    sendErrorKind: surfaceDevLink ? sendErrorKind : undefined,
+    // Safe enum the UI renders a friendly message from — never the raw provider
+    // string/link. Surfaced whenever a send was attempted and failed.
+    sendErrorKind: sendErrorKind ?? undefined,
     devLink: surfaceDevLink ? link : undefined,
   });
 }

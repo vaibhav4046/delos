@@ -22,6 +22,7 @@ import { buildDomainPlaybook, scoreCoverage, applyCoveragePatch } from "@/lib/co
 import { classifyInjection } from "@/lib/security/injection-classifier";
 import { normalizeInputField } from "@/lib/apiField";
 import { storeProject, slugifyName } from "@/lib/codegenProjectStore";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -102,7 +103,7 @@ function normalizeLanguage(raw: string | undefined, path: string): CanonLang {
   return "text";
 }
 
-async function callJson(prompt: string, system: string, maxTokens: number): Promise<string> {
+async function callJson(prompt: string, system: string, maxTokens: number, signal?: AbortSignal): Promise<string> {
   // Provider cascade · Cerebras (sub-second) → Groq → Mistral → Gemini.
   // Each provider lives in its own rate-limit bucket on its own org so
   // one being drained doesn't bleed into another.
@@ -125,6 +126,7 @@ async function callJson(prompt: string, system: string, maxTokens: number): Prom
             max_tokens: maxTokens,
             response_format: { type: "json_object" },
           }),
+          signal,
         });
         if (!r.ok) throw new Error(`cerebras ${r.status}`);
         const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
@@ -148,6 +150,7 @@ async function callJson(prompt: string, system: string, maxTokens: number): Prom
           max_tokens: maxTokens,
           response_format: { type: "json_object" },
         }),
+        signal,
       });
       if (!r.ok) throw new Error(`groq ${r.status}`);
       const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
@@ -172,6 +175,7 @@ async function callJson(prompt: string, system: string, maxTokens: number): Prom
                 responseMimeType: "application/json",
               },
             }),
+            signal,
           },
         );
         if (!r.ok) throw new Error(`gemini ${r.status}`);
@@ -199,6 +203,7 @@ async function callJson(prompt: string, system: string, maxTokens: number): Prom
             max_tokens: maxTokens,
             response_format: { type: "json_object" },
           }),
+          signal,
         });
         if (!r.ok) throw new Error(`mistral ${r.status}`);
         const j = (await r.json()) as { choices: Array<{ message: { content: string } }> };
@@ -208,12 +213,16 @@ async function callJson(prompt: string, system: string, maxTokens: number): Prom
   }
   let lastErr: Error | null = null;
   for (const p of providers) {
+    if (signal?.aborted) throw new Error("timeout");
     try {
       const raw = await p.call();
       JSON.parse(raw); // validate
       return raw;
     } catch (e) {
       lastErr = e as Error;
+      // Caller aborted (file timeout) — stop the cascade rather than retrying
+      // the next provider against an already-aborted signal.
+      if (signal?.aborted) throw lastErr;
       console.warn(`[codegen-stream] ${p.name} failed: ${lastErr.message.slice(0, 120)}`);
     }
   }
@@ -234,10 +243,11 @@ export async function POST(req: NextRequest) {
   const normalized = normalizeInputField<Record<string, unknown>>(rawBody);
   const parsed = bodySchema.safeParse(normalized.body);
   if (!parsed.success) {
-    return new Response(JSON.stringify({ ok: false, error: parsed.error.message }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    // Route through the shared zodErr helper · emits the uniform
+    // {error:"validation_failed", issues:[{path,msg}]} envelope instead of the
+    // raw multiline ZodError blob (CWE-209 info-disclosure) every other route
+    // already avoids.
+    return zodErr(parsed.error);
   }
   // B17 · prompt-injection guard.
   const inj = classifyInjection(parsed.data.prompt);
@@ -251,7 +261,10 @@ export async function POST(req: NextRequest) {
   const stack = parsed.data.stack ?? "nextjs";
   const tier = parsed.data.tier ?? "production";
   const uiStyle = parsed.data.uiStyle ?? "modern-saas";
-  const tenantId = parsed.data.tenantId || env.DELRIO_TENANT_ID;
+  // Resolve server-side · the stream persists the generated project to memory
+  // under this tenant (safeAddMemory ×3 below). A body tenantId is honored only
+  // for reserved test prefixes, never as an arbitrary write target (BOLA).
+  const { tenantId } = await resolveTenant(req, { bodyTenantId: parsed.data.tenantId, intent: "write" });
   const startedAt = Date.now();
   const isOverDeadline = () => Date.now() - startedAt > DEADLINE_MS;
 
@@ -468,12 +481,21 @@ Output JSON only:
           // First attempt · full prompt + 30s budget against the full
           // provider cascade.
           async function callOnce(p: string, sys: string, maxTok: number, budgetMs: number): Promise<string> {
-            return Promise.race([
-              callJson(p, sys, maxTok),
-              new Promise<string>((_, reject) =>
-                setTimeout(() => reject(new Error(`file timeout ${budgetMs}ms`)), budgetMs),
-              ),
-            ]);
+            // Abort the underlying provider fetch on timeout instead of just
+            // losing a Promise.race (which left the fetch running to completion).
+            // Preserve the original "file timeout" message so the retry branch
+            // below behaves exactly as before.
+            const ac = new AbortController();
+            let timedOut = false;
+            const timer = setTimeout(() => { timedOut = true; ac.abort(); }, budgetMs);
+            try {
+              return await callJson(p, sys, maxTok, ac.signal);
+            } catch (e) {
+              if (timedOut) throw new Error(`file timeout ${budgetMs}ms`);
+              throw e;
+            } finally {
+              clearTimeout(timer);
+            }
           }
           try {
             const raw = await callOnce(

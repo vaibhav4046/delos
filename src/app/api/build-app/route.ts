@@ -2,14 +2,13 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { buildAppFromPrompt } from "@/lib/agents/appBuilder";
 import { safeAddMemory } from "@/lib/hydra";
-import { env } from "@/lib/env";
 import { withModels, type ModelOverrides, type ModelKey } from "@/lib/llm";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { classifyInjection } from "@/lib/security/injection-classifier";
 import { normalizeInputField } from "@/lib/apiField";
 import { detectDomain } from "@/lib/codegenPlaybooks";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -69,7 +68,10 @@ export async function POST(req: NextRequest) {
   const overrides: ModelOverrides | undefined = parsed.data.models
     ? Object.fromEntries(Object.entries(parsed.data.models).filter(([, v]) => v) as Array<[string, ModelKey]>)
     : undefined;
-  const tenantId = parsed.data.tenantId || env.DELRIO_TENANT_ID;
+  // Resolve server-side · build-app persists the generated app to memory under
+  // this tenant. A body-supplied tenantId is only honored for reserved test
+  // prefixes (never an arbitrary write target) — otherwise BOLA write.
+  const { tenantId } = await resolveTenant(req, { bodyTenantId: parsed.data.tenantId, intent: "write" });
   try {
     // Best-effort prior-spec coercion. We don't re-validate against
     // appSpecSchema here — appBuilder injects this into the LLM context
@@ -80,7 +82,7 @@ export async function POST(req: NextRequest) {
       parsed.data.previousSpec && typeof parsed.data.previousSpec === "object"
         ? (parsed.data.previousSpec as Parameters<typeof buildAppFromPrompt>[1]) // type narrowing below
         : undefined;
-    let spec = await withModels(overrides, () =>
+    const spec = await withModels(overrides, () =>
       buildAppFromPrompt(parsed.data.prompt, previousSpec ? { previousSpec: previousSpec as never } : undefined),
     );
     // F15 · sanitize spec.name · strip code-fences, HTML tags, cap 80 chars.

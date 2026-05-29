@@ -116,7 +116,15 @@ export function Dock({
   // reveal-strip. Throttles to rAF so movement stays cheap on slow machines.
   // When autoHide is false (welcome mat, no windows) dock stays revealed.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!autoHide) { setRevealed(true); return; }
+    // Touch devices have no hover, so the bottom-edge reveal strip can never
+    // fire — the dock would slide off and strand the user. Pin it open on
+    // coarse pointers (phones/tablets) so the app row is always reachable.
+    if (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches) {
+      setRevealed(true);
+      return;
+    }
     let raf = 0;
     let lastY = 9999;
     const onPointer = (e: PointerEvent) => {

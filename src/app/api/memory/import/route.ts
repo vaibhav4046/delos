@@ -1,10 +1,9 @@
 import { safeAddMemory, ensureTenant } from "@/lib/hydra";
-import { env } from "@/lib/env";
 import { z } from "zod";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
-import { getServerSession } from "@/lib/session";
+import { NextRequest } from "next/server";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -25,7 +24,7 @@ const Req = z.object({
 const IMPORT_LIMIT_PER_MIN = 4;
 const IMPORT_WINDOW_MS = 60_000;
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const ip = clientIp(req);
   const lim = rateLimit(`memimport:ip:${ip}`, IMPORT_LIMIT_PER_MIN, IMPORT_WINDOW_MS);
   if (!lim.ok) {
@@ -37,10 +36,11 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const parsed = Req.safeParse(body);
   if (!parsed.success) return zodErr(parsed.error);
-  // Lock writes to the caller's session tenant. Unauth callers can't write
-  // into other tenants' memory by passing a chosen tenantId.
-  const session = await getServerSession();
-  const tenantId = session?.tenantId || parsed.data.tenantId || env.DELRIO_TENANT_ID;
+  // Lock writes to the caller's *resolved* tenant (session → reserved-test →
+  // per-IP anon). resolveTenant defaults intent:"write", so an unauth caller
+  // passing someone else's tenantId in the body is IGNORED — closes the BOLA
+  // import vector where an anon POST could inject memories into a victim tenant.
+  const { tenantId } = await resolveTenant(req, { bodyTenantId: parsed.data.tenantId, intent: "write" });
   const { entries, hydradb, local } = parsed.data;
   await ensureTenant(tenantId);
 

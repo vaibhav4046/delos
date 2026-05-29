@@ -99,11 +99,31 @@ function detectLang(path: string): Lang {
 type DelcodeIncoming = { files: Array<{ path: string; content: string }>; name?: string };
 const G = globalThis as unknown as { __delos_delcode_pending?: DelcodeIncoming | null };
 G.__delos_delcode_pending ??= null;
+// Bulletproof handoff · used by VibeCode's "OPEN DELCODE" / "FULL IDE" buttons
+// to load THIS build into the IDE no matter its state. Three redundant layers
+// so the IDE can never fall back to stale sample/junk files:
+//   1. global pending  → a FRESH-mounting IDE reads it in loadFiles()
+//   2. localStorage     → if the global is ever missed, loadFiles() reads the
+//                         persisted workspace, which we overwrite with THIS
+//                         project (keeps OPEN_KEY coherent with the new files)
+//   3. event + retries  → swaps an ALREADY-OPEN IDE; retried across mount
+//                         latency so a slow-spawning window still catches it
 export function pushDelcodePayload(p: DelcodeIncoming) {
+  if (typeof window === "undefined" || !p?.files?.length) return;
   G.__delos_delcode_pending = p;
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("delos-codegen-load", { detail: p }));
-  }
+  try {
+    const fs: DelFile[] = p.files.map((f) => ({ path: f.path, content: f.content, dirty: false }));
+    localStorage.setItem(STORE_KEY, JSON.stringify(fs));
+    localStorage.setItem(
+      OPEN_KEY,
+      JSON.stringify({ open: fs.slice(0, 4).map((f) => f.path), active: fs[0]?.path ?? null }),
+    );
+  } catch {}
+  const fire = () => window.dispatchEvent(new CustomEvent("delos-codegen-load", { detail: p }));
+  fire();
+  requestAnimationFrame(fire);
+  setTimeout(fire, 160);
+  setTimeout(fire, 450);
 }
 function consumeDelcodePending(): DelcodeIncoming | null {
   const p = G.__delos_delcode_pending;
@@ -147,6 +167,10 @@ export function DelCodeApp() {
   const termBodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    // Mount-only hydration from the in-browser FS + localStorage · setState in
+    // an effect is intentional (gated by `hydrated` so the save effect below
+    // doesn't clobber the user's files before this restore runs).
+    /* eslint-disable react-hooks/set-state-in-effect */
     const fs = loadFiles();
     setFiles(fs);
     try {
@@ -170,6 +194,7 @@ export function DelCodeApp() {
       }
     }
     setHydrated(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   useEffect(() => {
@@ -394,7 +419,6 @@ export function DelCodeApp() {
             .replace(/\b(while|for|do)\s*\(/g, "$1 (")
             .replace(/(\bwhile\b|\bfor\b)\s*\(([^)]+)\)\s*\{/g, "$1 ($2) { if (__t++ > 1e6) throw new Error('loop limit · 1M iters'); ")
             .replace(/\bdo\s*\{/g, "do { if (__t++ > 1e6) throw new Error('loop limit · 1M iters'); ");
-          // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
           const fn = new Function(`let __t = 0; let __out = []; const console = { log: (...a) => __out.push(a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(" ")) }; ${guarded}; return __out.join("\\n");`);
           const out = String(fn());
           if (out) out.split("\n").forEach((l) => termPush("out", l));

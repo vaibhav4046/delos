@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const STORE_KEY = "delos.tenantId.v1";
 
@@ -23,22 +23,16 @@ export function setTenantId(next: string) {
   } catch {}
 }
 
+// Sync across windows · changing tenant in Settings must propagate to an
+// open Cowork / Memory window. Module-level so the subscription is stable.
+function subscribe(cb: () => void) {
+  window.addEventListener("delos-tenant-changed", cb);
+  return () => window.removeEventListener("delos-tenant-changed", cb);
+}
+
 export function useTenantId(): [string, (next: string) => void] {
-  const [v, setV] = useState("");
-  useEffect(() => {
-    setV(getTenantId() ?? "");
-  }, []);
-  return [
-    v,
-    (next) => {
-      const t = next.trim();
-      if (typeof window !== "undefined") {
-        try {
-          if (t) localStorage.setItem(STORE_KEY, t);
-          else localStorage.removeItem(STORE_KEY);
-        } catch {}
-      }
-      setV(t);
-    },
-  ];
+  // Setter routes through setTenantId so the change is persisted AND
+  // broadcast; the subscribe listener re-reads the snapshot on dispatch.
+  const v = useSyncExternalStore(subscribe, () => getTenantId() ?? "", () => "");
+  return [v, setTenantId];
 }

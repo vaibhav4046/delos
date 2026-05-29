@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 const STORE_KEY = "delos.theme.v1";
 export type Theme = "dark" | "light";
@@ -27,24 +27,17 @@ export function setTheme(t: Theme) {
   } catch {}
 }
 
+function subscribe(cb: () => void) {
+  window.addEventListener("delos-theme-changed", cb);
+  return () => window.removeEventListener("delos-theme-changed", cb);
+}
+
 export function useTheme(): [Theme, (t: Theme) => void] {
-  const [t, setT] = useState<Theme>("dark");
+  const t = useSyncExternalStore(subscribe, read, (): Theme => "dark");
+  // apply() is a DOM write (not setState) so it can live in an effect keyed on
+  // the snapshot; covers first-mount hydration + cross-window broadcasts.
   useEffect(() => {
-    const v = read();
-    setT(v);
-    apply(v);
-    function onChange(e: Event) {
-      const d = (e as CustomEvent).detail as { theme: Theme };
-      setT(d.theme);
-    }
-    window.addEventListener("delos-theme-changed", onChange as EventListener);
-    return () => window.removeEventListener("delos-theme-changed", onChange as EventListener);
-  }, []);
-  return [
-    t,
-    (next) => {
-      setTheme(next);
-      setT(next);
-    },
-  ];
+    apply(t);
+  }, [t]);
+  return [t, setTheme];
 }

@@ -3,6 +3,7 @@ import { Wordmark, Logo } from "@/components/Logo";
 import { HeroTerminal } from "@/components/HeroTerminal";
 import { InteractiveMac } from "@/components/InteractiveMac";
 import { LiveMetricsLine } from "@/components/LiveMetricsLine";
+import { InstallButton } from "@/components/InstallButton";
 import { getSiteStats, type SiteStats } from "@/lib/stats";
 
 // Landing reads counts from the same source /api/stats serves so numbers
@@ -163,6 +164,8 @@ function Hero({ apps }: { apps: number }) {
             <Link href="/os?guest=1" className="btn-pixel success magnet" style={{ fontSize: 13, padding: "10px 16px" }}>
               ★ LAUNCH DELOS →
             </Link>
+            {/* PWA install — dispatches `delos-install`; self-hides once installed. */}
+            <InstallButton style={{ fontSize: 13, padding: "10px 16px" }} />
             <Link href="/docs" className="btn-pixel ghost hidden sm:inline-flex" style={{ fontSize: 13, padding: "10px 16px" }}>
               DOCS
             </Link>
@@ -494,57 +497,6 @@ function Stack() {
   );
 }
 
-function PricingTeaser() {
-  const tiers = [
-    { name: "Free", price: "$0", tag: "Hackathon", lines: ["All 4 pillars", "Bundled MCP", "Voice agents", "7 LLMs", "PWA + extensions", "Self-host"] },
-    { name: "Pro", price: "$19", tag: "per month", featured: true, lines: ["Everything in Free", "Hosted HydraDB", "ElevenLabs key passthrough", "Priority Groq quota", "Email support", "Custom domain"] },
-    { name: "Enterprise", price: "Custom", tag: "Contact", lines: ["Everything in Pro", "SSO + audit logs", "Private MCP fleet", "SLA", "On-prem Tauri", "Dedicated success"] },
-  ];
-  return (
-    <section
-      className="border-y-2 py-16 sm:py-20"
-      style={{ background: "var(--surface)", borderColor: "var(--surface-2)" }}
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="mb-10 max-w-3xl">
-          <span className="pill pill-muted" style={{ fontSize: 10 }}>★ PRICING</span>
-          <h2 className="font-pixel text-3xl sm:text-4xl mt-4 mb-3 tracking-wider">pricing.</h2>
-          <p className="text-[color:var(--muted)] text-sm sm:text-base">Self-host free forever. Pay only if you want it managed.</p>
-        </div>
-        <div className="grid md:grid-cols-3 gap-3 sm:gap-4">
-          {tiers.map((t) => (
-            <div
-              key={t.name}
-              className="card-pixel"
-              style={{
-                borderColor: t.featured ? "var(--accent)" : "var(--surface-2)",
-                boxShadow: t.featured
-                  ? "0 0 0 2px var(--bg), 0 0 0 4px var(--accent), 8px 8px 0 var(--shadow)"
-                  : undefined,
-              }}
-            >
-              <div className="flex items-baseline justify-between">
-                <h3 className="font-pixel text-xl sm:text-2xl tracking-wider" style={{ color: t.featured ? "var(--accent)" : "var(--fg)" }}>
-                  {t.name}
-                </h3>
-                {t.featured && <span className="pill pill-info" style={{ fontSize: 9 }}>★ POPULAR</span>}
-              </div>
-              <div className="font-pixel text-3xl sm:text-4xl mt-2" style={{ color: "var(--accent)" }}>{t.price}</div>
-              <div className="text-[10px] text-[color:var(--muted)] tracking-wider uppercase mt-1">{t.tag}</div>
-              <ul className="mt-4 space-y-1 text-xs sm:text-sm">
-                {t.lines.map((l) => <li key={l} className="flex gap-2"><span style={{ color: "var(--success)" }}>✓</span> {l}</li>)}
-              </ul>
-              <Link href="/pricing" className={`btn-pixel ${t.featured ? "" : "ghost"} mt-4 w-full justify-center`} style={{ fontSize: 12 }}>
-                {t.name === "Enterprise" ? "CONTACT" : "GET STARTED"}
-              </Link>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function Faq() {
   return (
     <section className="max-w-3xl mx-auto px-4 sm:px-6 py-16 sm:py-20">
@@ -585,6 +537,10 @@ function FinalCta() {
         <div className="flex justify-center gap-2 sm:gap-3 flex-wrap">
           <Link href="/os?guest=1" className="btn-pixel success magnet" style={{ fontSize: 14, padding: "12px 22px" }}>
             ★ LAUNCH DELOS →
+          </Link>
+          <InstallButton style={{ fontSize: 14, padding: "12px 22px" }} />
+          <Link href="/install" className="btn-pixel ghost" style={{ fontSize: 14, padding: "12px 22px" }}>
+            HOW TO INSTALL
           </Link>
           <Link href="/docs" className="btn-pixel ghost" style={{ fontSize: 14, padding: "12px 22px" }}>
             READ THE DOCS

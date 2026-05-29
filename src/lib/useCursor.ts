@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 export type CursorStyle = "delos" | "classic" | "neon" | "system";
 
@@ -35,24 +35,17 @@ export function setCursor(c: CursorStyle) {
   } catch {}
 }
 
+function subscribe(cb: () => void) {
+  window.addEventListener("delos-cursor-changed", cb);
+  return () => window.removeEventListener("delos-cursor-changed", cb);
+}
+
 export function useCursor(): [CursorStyle, (c: CursorStyle) => void] {
-  const [c, setC] = useState<CursorStyle>("delos");
+  const c = useSyncExternalStore(subscribe, getCursor, (): CursorStyle => "delos");
+  // apply() is a DOM write (not setState) so it can live in an effect keyed on
+  // the snapshot; covers first-mount hydration + cross-window broadcasts.
   useEffect(() => {
-    const v = getCursor();
-    setC(v);
-    apply(v);
-    function onChange(e: Event) {
-      const d = (e as CustomEvent).detail as { cursor: CursorStyle };
-      setC(d.cursor);
-    }
-    window.addEventListener("delos-cursor-changed", onChange as EventListener);
-    return () => window.removeEventListener("delos-cursor-changed", onChange as EventListener);
-  }, []);
-  return [
-    c,
-    (next) => {
-      setCursor(next);
-      setC(next);
-    },
-  ];
+    apply(c);
+  }, [c]);
+  return [c, setCursor];
 }

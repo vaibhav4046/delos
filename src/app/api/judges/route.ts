@@ -1,18 +1,32 @@
 import { NextResponse } from "next/server";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
 // Magic-link route for hackathon judges.
 // Tokens defined via DELRIO_JUDGE_TOKENS env var as comma-separated values.
-// Fallback: "hydra2026" (rotate after demo).
-
+// M4 · NO hardcoded fallback in production. The old in-source defaults
+// ("hydra2026,…") were public, short, and non-rotating, so anyone reading the
+// repo could mint a full /os guest session. In prod, an unset/blank env means
+// there are NO valid judge tokens (every request 403s) until a real, random
+// (≥32-char) secret is configured. Dev keeps a throwaway token for local demos.
 function getValidTokens(): Set<string> {
-  const raw = process.env.DELRIO_JUDGE_TOKENS ?? "hydra2026,judge-demo,delrio-finalist";
+  const raw = (process.env.DELRIO_JUDGE_TOKENS ?? "").trim();
+  if (!raw) {
+    if (process.env.NODE_ENV === "production") return new Set();
+    return new Set(["dev-judge-token"]);
+  }
   return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
 }
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
+  // M4 · per-IP throttle. Judge tokens are bearer secrets; rate-limiting makes
+  // brute-forcing the token space against this endpoint uneconomic.
+  const rl = rateLimit(`judges:ip:${clientIp(req)}`, 10, 60_000);
+  if (!rl.ok) {
+    return new Response("Too many requests", { status: 429, headers: rl.headers });
+  }
   const token = url.searchParams.get("token") ?? "";
   const tokens = getValidTokens();
   if (!token || !tokens.has(token)) {
@@ -23,6 +37,17 @@ export async function GET(req: Request) {
   }
 
   const res = NextResponse.redirect(new URL("/os?tour=1&judge=1", url));
+  // The `/os` middleware gate only honors `delos_session` / `delos_guest`.
+  // Without this the judge magic-link would bounce straight to /auth/signin,
+  // breaking the entire judges' entry path. Grant the same trust tier as the
+  // existing anonymous guest bypass so the redirect actually lands on /os.
+  res.cookies.set("delos_guest", "1", {
+    path: "/",
+    sameSite: "lax",
+    secure: true,
+    httpOnly: false,
+    maxAge: 86400,
+  });
   // 24h judge session
   res.cookies.set("delrio_role", "judge", {
     httpOnly: false,

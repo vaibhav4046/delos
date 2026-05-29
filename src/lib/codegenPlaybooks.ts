@@ -11,7 +11,6 @@
 // triggers a repair pass that appends a "Coverage Patch" file embedding
 // the missing concepts as live UI surfaces.
 
-import type { z } from "zod";
 
 export type CodegenFile = {
   path: string;

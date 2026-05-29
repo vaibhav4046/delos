@@ -38,6 +38,8 @@ export default function RunReplayPage({ params }: { params: Promise<{ runId: str
       if (cached) {
         const r = JSON.parse(cached) as RunRecord;
         if (r.events && r.events.length > 0) {
+          // Mount-only hydration from the localStorage run-log cache.
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setRecord(r);
           return;
         }
@@ -59,7 +61,6 @@ export default function RunReplayPage({ params }: { params: Promise<{ runId: str
     stopRef.current = false;
     setPlayed([]);
     const events = record.events;
-    const base = events[0]?.at ?? Date.now();
     for (let i = 0; i < events.length; i++) {
       if (stopRef.current) break;
       const ev = events[i];

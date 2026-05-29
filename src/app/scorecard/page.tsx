@@ -29,7 +29,7 @@ const ROWS: Row[] = [
   { track: "Bonus · AI-OS", feature: "DelOS — 24 desktop apps", where: "/os", href: "/os", status: "🟢" },
   { track: "Bonus · AI-OS", feature: "Del Doom · 10 levels · raycaster", where: "/os doom app", status: "🟢" },
   { track: "Bonus · AI-OS", feature: "Del Assistant · Claude-style chat", where: "src/components/os/DelAssistant.tsx", status: "🟢" },
-  { track: "Bonus · AI-OS", feature: "Cowork · autonomous task agent", where: "src/components/os/CoworkApp.tsx", status: "🟢" },
+  { track: "Bonus · AI-OS", feature: "Cowork mode · autonomous agent (in Del Assistant)", where: "src/components/os/DelAssistant.tsx", status: "🟢" },
   { track: "Bonus · AI-OS", feature: "Cohort council (3+ models race)", where: "/api/cohort", status: "🟢" },
   { track: "Bonus · Voice", feature: "Whisper STT via Groq", where: "/api/stt", status: "🟢" },
   { track: "Bonus · Voice", feature: "ElevenLabs TTS + browser fallback", where: "/api/tts", status: "🟡" },
@@ -44,7 +44,10 @@ const ROWS: Row[] = [
   { track: "Bonus · Surfaces", feature: "Chrome extension (MV3) — landing + download", where: "/extension", href: "/extension", status: "🟢" },
   { track: "Bonus · Surfaces", feature: "Capacitor iOS + Android wrap", where: "capacitor.config.ts", status: "🟡" },
   { track: "Bonus · Surfaces", feature: "Tauri desktop wrap", where: "src-tauri/", status: "🟡" },
-  { track: "Bonus · Surfaces", feature: "PWA installable — manifest + SW controlling /os", where: "/manifest.webmanifest", status: "🟢" },
+  { track: "Bonus · Surfaces", feature: "PWA — installable app (manifest + maskable icons + shortcuts)", where: "/install", href: "/install", status: "🟢" },
+  { track: "Bonus · Surfaces", feature: "Offline-ready — service worker shell cache + offline fallback", where: "public/sw.js", status: "🟢" },
+  { track: "Bonus · Surfaces", feature: "Share-to-DelOS — Web Share Target → Del Assistant", where: "/share", href: "/share", status: "🟢" },
+  { track: "Bonus · Surfaces", feature: "Mobile extras — haptics, wake-lock, native share, pull-to-refresh", where: "src/lib/mobile.ts", status: "🟢" },
 ];
 
 export default function Scorecard() {

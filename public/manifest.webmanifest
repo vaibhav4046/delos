@@ -1,21 +1,36 @@
 {
+  "id": "/os",
   "name": "Del Rio — Agents Under Pressure",
   "short_name": "DelOS",
   "description": "Browser-OS where multi-agent orchestration is wired in by default — memory, tools, recovery, adaptation. Agents build the apps live.",
-  "start_url": "/os",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/os?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#0f0f1b",
-  "theme_color": "#fbc531",
+  "theme_color": "#0f0f1b",
   "orientation": "any",
   "categories": ["productivity", "utilities", "developer"],
+  "launch_handler": { "client_mode": "navigate-existing" },
   "icons": [
-    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" },
-    { "src": "/logo.svg", "type": "image/svg+xml", "sizes": "512x512", "purpose": "any" }
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "/icon-maskable-192.png", "type": "image/png", "sizes": "192x192", "purpose": "maskable" },
+    { "src": "/icon-maskable-512.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" },
+    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" }
   ],
   "shortcuts": [
-    { "name": "Launch DelOS", "url": "/os", "icons": [{ "src": "/icon.svg", "sizes": "any" }] },
-    { "name": "Chaos Demo", "url": "/play", "icons": [{ "src": "/icon.svg", "sizes": "any" }] },
-    { "name": "Live Feed", "url": "/live", "icons": [{ "src": "/icon.svg", "sizes": "any" }] }
-  ]
+    { "name": "Launch DelOS", "short_name": "DelOS", "url": "/os", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Del Assistant", "short_name": "Assistant", "url": "/os?app=assistant", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Chaos Demo", "short_name": "Play", "url": "/play", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Live Feed", "short_name": "Live", "url": "/live", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  }
 }

@@ -51,17 +51,18 @@ export function Boot({ onDone, appsCount = 27 }: { onDone: () => void; appsCount
 
   // 20 static dust particles — randomised once on mount so each boot is
   // visually distinct without re-rendering positions per frame.
-  const dust = useMemo(
-    () =>
-      Array.from({ length: 24 }).map(() => ({
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        size: 1 + Math.random() * 2,
-        delay: Math.random() * 1.4,
-        dur: 2.4 + Math.random() * 1.6,
-      })),
-    [],
-  );
+  const dust = useMemo(() => {
+    // Seeded once on mount; render-time randomness is the intended behavior.
+    /* eslint-disable react-hooks/purity */
+    return Array.from({ length: 24 }).map(() => ({
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: 1 + Math.random() * 2,
+      delay: Math.random() * 1.4,
+      dur: 2.4 + Math.random() * 1.6,
+    }));
+    /* eslint-enable react-hooks/purity */
+  }, []);
 
   return (
     <motion.div

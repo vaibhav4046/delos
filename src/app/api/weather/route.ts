@@ -33,6 +33,19 @@ type CacheVal = {
 };
 const CACHE = new Map<string, CacheVal>();
 const TTL_MS = 5 * 60_000;
+const MAX_CACHE_ENTRIES = 500;
+
+// Bound cache memory · evict the oldest insertion when full. A Map preserves
+// insertion order so the first key is the oldest. Without this, a probe (or
+// real traffic) hitting many distinct lat/lon pairs would grow the cache
+// without limit for the life of the warm Lambda.
+function cacheSet(key: string, val: CacheVal) {
+  if (CACHE.size >= MAX_CACHE_ENTRIES && !CACHE.has(key)) {
+    const oldest = CACHE.keys().next().value;
+    if (oldest !== undefined) CACHE.delete(oldest);
+  }
+  CACHE.set(key, val);
+}
 
 function cacheKey(lat: number, lon: number): string {
   return `${lat.toFixed(2)}:${lon.toFixed(2)}`;
@@ -248,7 +261,13 @@ export async function GET(req: NextRequest) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     const ipLoc = await ipFallback(req);
     if (!ipLoc) {
-      return Response.json({ error: "no location" }, { status: 502 });
+      // No coords, no resolvable city, no edge/IP geo → we can't process the
+      // request as given. That's 422 (unprocessable), not 502 (bad gateway):
+      // nothing upstream failed, the request simply carried no usable location.
+      return Response.json(
+        { error: "no_location", hint: "Pass ?lat=&lon= or ?city=" },
+        { status: 422 },
+      );
     }
     lat = ipLoc.lat;
     lon = ipLoc.lon;
@@ -297,7 +316,7 @@ export async function GET(req: NextRequest) {
           : ((await reverseGeocode(lat, lon)) ?? { city: "", region: "", country: "" });
         const city = geo.city || "Your location";
         if (geo.city) {
-          CACHE.set(key, {
+          cacheSet(key, {
             at: Date.now(),
             tempC: wttr.tempC,
             apparentC: wttr.apparentC,
@@ -425,7 +444,7 @@ export async function GET(req: NextRequest) {
     // Only cache when we actually resolved a real city · placeholder
     // would poison subsequent requests for 5 min.
     if (geo.city) {
-      CACHE.set(key, {
+      cacheSet(key, {
         at: Date.now(),
         tempC,
         apparentC,

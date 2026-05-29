@@ -11,6 +11,7 @@
 // when streaming is unavailable.
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { resolveTenant } from "@/lib/apiAuth";
 import { runQuickAgent } from "@/lib/agents/quick";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { isNimEnabled, nimChat, NIM_MODELS } from "@/lib/llm/providers/nim";
@@ -241,19 +242,30 @@ export async function POST(req: NextRequest) {
   // so the user sees a plan in <15 s every time. Groq fallback is fast.
   try {
     if (isNimEnabled()) {
-      const nimPromise = nimChat({
-        model: NIM_MODELS.nemotronSuper49b,
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: userMsg },
-        ],
-        temperature: 0.2,
-        max_tokens: 900,
-      });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("nim_timeout")), 12_000),
-      );
-      const r = await Promise.race([nimPromise, timeoutPromise]);
+      // Abort the NIM fetch on timeout (nimChat threads signal → fetch) instead
+      // of leaving a 30-90s cold-start request running after we've already
+      // fallen back to Groq. Timer cleared if NIM answers in time.
+      const nimAc = new AbortController();
+      let nimTimer: ReturnType<typeof setTimeout> | undefined;
+      const r = await Promise.race([
+        nimChat({
+          model: NIM_MODELS.nemotronSuper49b,
+          messages: [
+            { role: "system", content: SYSTEM },
+            { role: "user", content: userMsg },
+          ],
+          temperature: 0.2,
+          max_tokens: 900,
+          signal: nimAc.signal,
+        }),
+        new Promise<never>((_, reject) => {
+          nimTimer = setTimeout(() => {
+            nimAc.abort();
+            reject(new Error("nim_timeout"));
+          }, 12_000);
+        }),
+      ]);
+      if (nimTimer) clearTimeout(nimTimer);
       raw = r.text;
       planner = NIM_MODELS.nemotronSuper49b;
     }
@@ -307,11 +319,14 @@ export async function POST(req: NextRequest) {
     }
   }
   // EXT-MEM-1 · sync every successful browse plan into Hydra memory so the OS
-  // MemoryDashboard shows what the extension did. Tenant comes from request
-  // body (extension `state.cfg.tenantId`); fall back to `delrio_demo` so
-  // anonymous extension users still see their history on the same dashboard.
-  // Honors writeGuard, sanitize, and the source enum (`browser-search`).
-  const tenantId = (parsed.data.tenantId && String(parsed.data.tenantId).trim()) || "delrio_demo";
+  // MemoryDashboard shows what the extension did.
+  // BOLA · resolve the tenant server-side (session → reserved test prefix →
+  // per-IP anon) instead of trusting the body's tenantId verbatim. A client-
+  // supplied `delrio_demo` resolves to per-IP anon scope for this WRITE, so an
+  // anonymous extension user poisons only their own memory — never the shared
+  // public demo dashboard everyone sees. Honors writeGuard + sanitize below.
+  const bodyTenantId = parsed.data.tenantId ? String(parsed.data.tenantId).trim() : undefined;
+  const { tenantId } = await resolveTenant(req, { bodyTenantId, intent: "write" });
   async function persistRun(finalText: string, planLength: number) {
     try {
       const summary = [

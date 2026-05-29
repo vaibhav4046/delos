@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>DelOS — offline</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: #0f0f1b;
+      color: #f4f4f5;
+      font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+      display: flex; align-items: center; justify-content: center;
+      padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+      text-align: center;
+    }
+    .wrap { max-width: 420px; }
+    img { width: 72px; height: 72px; image-rendering: pixelated; border-radius: 16px; }
+    h1 { font-size: 20px; margin: 20px 0 8px; color: #fbc531; letter-spacing: 0.05em; }
+    p { font-size: 13px; line-height: 1.6; color: #a1a1aa; margin: 0 0 22px; }
+    button {
+      font: inherit; font-size: 13px; cursor: pointer;
+      background: #fbc531; color: #1b1b2e; border: 0; border-radius: 10px;
+      padding: 12px 22px; font-weight: 600; letter-spacing: 0.03em;
+      min-height: 44px;
+    }
+    button:active { transform: translateY(1px); }
+    .hint { margin-top: 16px; font-size: 11px; color: #71717a; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <img src="/icon.svg" alt="DelOS" />
+    <h1>You're offline</h1>
+    <p>DelOS needs a connection for live agents, memory recall, and tools. The app shell is cached — reconnect to pick up where you left off.</p>
+    <button onclick="location.reload()">Retry connection</button>
+    <div class="hint">Cached shell · DelOS PWA</div>
+  </div>
+  <script>
+    // Auto-retry the moment the device comes back online.
+    window.addEventListener("online", function () { location.reload(); });
+  </script>
+</body>
+</html>

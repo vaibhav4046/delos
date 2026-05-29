@@ -23,12 +23,20 @@ const SEED = [
   { text: "Memory recall hit — agent searching 'how did we handle context flood last time' surfaced this very entry via graph traversal. Saved 2 retry cycles. Demonstrates cross-run learning.", tags: ["learning", "recall-meta"], goalFamily: "recall" },
 ];
 
+// Only demo / guest / reserved-test scopes get the canned seed graph. Seeding
+// a real signed-in user tenant (u_*) or a per-IP anon tenant re-introduces the
+// brutal-QA P0 "Memory not trustworthy — recall returned seeded demo memories,
+// not my facts": the user opens Memory Browser and sees 12 fake research runs
+// instead of their own pinned facts, and those seeds then pollute recall.
+// Judges/guests resolve to `delrio_demo` (or a demo_/qa_/judge_/hack_/test_
+// prefix) and still get a populated browser; everyone else starts clean.
+function isSeedableTenant(tenantId: string): boolean {
+  return tenantId === "delrio_demo" || /^(demo|qa|test|judge|hack)_/i.test(tenantId);
+}
+
 async function autoSeedIfEmpty(tenantId: string) {
-  // Auto-seed for ANY tenant on first hit when memory store is empty
-  // so the Memory Browser never lands on a sad "NO MEMORIES YET"
-  // empty state during a judge demo. Was gated to demo_/anon_ only
-  // which left fresh user tenants (u_*) empty (round 5 brutal-QA).
   // Reseeding is one-shot per tenant per warm lambda.
+  if (!isSeedableTenant(tenantId)) return;
   if (G.__delrioSeededTenants?.has(tenantId)) return;
   G.__delrioSeededTenants?.add(tenantId);
   if (getLocalFallback(tenantId).length > 0) return;
@@ -53,7 +61,9 @@ export async function GET(req: NextRequest) {
   // prefixes (qa_/demo_/test_/judge_/hack_) are honored via ?tenant= so QA
   // reruns can isolate scope without an account. resolveTenant enforces
   // the prefix; arbitrary tenantIds still get the anon-IP scope.
-  const { tenantId, source } = await resolveTenant(req);
+  // intent:"read" — Memory Browser serves the public `delrio_demo` seed to
+  // anyone, so honor a client-supplied guest tenant for this read.
+  const { tenantId, source } = await resolveTenant(req, { intent: "read" });
   const topKParam = req.nextUrl.searchParams.get("topK");
   const topK = topKParam ? Math.max(1, Math.min(50, Number(topKParam))) : 12;
   await autoSeedIfEmpty(tenantId);
@@ -107,7 +117,8 @@ export async function POST(req: NextRequest) {
   } catch {}
   // B12 · accept `input` alias for `query`.
   const q = (body.input ?? body.query ?? "recent runs").slice(0, 240);
-  const { tenantId, source } = await resolveTenant(req);
+  // intent:"read" — recall is a read path; honor the public demo tenant.
+  const { tenantId, source } = await resolveTenant(req, { intent: "read" });
   const topK = Math.max(1, Math.min(50, Number(body.topK ?? 12)));
   await autoSeedIfEmpty(tenantId);
   let hits = await safeRecall({ tenantId, query: q, topK });

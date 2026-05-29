@@ -14,6 +14,7 @@ const ROUTES = [
   "/docs",
   "/status",
   "/extension",
+  "/install",
   "/leaderboard",
   "/pitch",
   "/ask",

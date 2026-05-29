@@ -7,7 +7,7 @@
 // POST   /api/schedule/run-now      · fire one action immediately (separate route)
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { addAction, listActions, removeAction, type ScheduledActionKind } from "@/lib/scheduler";
+import { addAction, listActions, removeAction, getAction, type ScheduledActionKind } from "@/lib/scheduler";
 import { resolveTenant, zodErr } from "@/lib/apiAuth";
 import { safeAddMemory } from "@/lib/hydra";
 
@@ -72,6 +72,15 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return Response.json({ error: "id required" }, { status: 400 });
+  // BOLA fix: verify the caller owns this action before deleting. Previously
+  // any caller could DELETE ?id=<anyId> and remove another tenant's scheduled
+  // action by guessing/enumerating ids. Return 404 for BOTH "missing" and
+  // "not yours" so ids can't be probed for cross-tenant existence.
+  const { tenantId } = await resolveTenant(req);
+  const existing = getAction(id);
+  if (!existing || existing.tenantId !== tenantId) {
+    return Response.json({ error: "not_found" }, { status: 404 });
+  }
   const removed = removeAction(id);
   if (!removed) return Response.json({ error: "not_found" }, { status: 404 });
   return Response.json({ ok: true, id });

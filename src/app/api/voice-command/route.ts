@@ -55,6 +55,24 @@ const intentEnum = z.enum([
   "close_window",
   "navigate",
   "answer",
+  // M23 · productivity intents the deterministic parser AND the client
+  // dispatcher already handle, but which were missing from this enum — so
+  // the LLM classifier could never emit them. A "remind me to…" the regex
+  // missed got force-fit into answer/unknown instead of set_reminder.
+  // Raw external connector intents (gmail_send, github_create_repo, …) are
+  // intentionally NOT here: those only arise from the deterministic connector
+  // envelope below, which carries the approval gating. Letting the LLM emit
+  // them directly would bypass that gate.
+  "draft_email",
+  "read_email",
+  "create_note",
+  "schedule_action",
+  "set_reminder",
+  "create_event",
+  "parse_pdf",
+  "open_gdrive",
+  "store_memory",
+  "clear_memory",
   "compound",
   "unknown",
 ]);
@@ -64,6 +82,8 @@ const appEnum = z.enum([
   "oss", "analytics", "files", "notes", "calendar", "calc", "sysinfo",
   "snake", "tictactoe", "memory", "minesweeper", "game2048", "doom",
   "settings", "about", "claude", "chatgpt", "perplexity",
+  // M23 · app ids the rich intents route to (reminders/schedule/notifs/recall).
+  "widgets", "schedule", "notifications", "memoryBrowser",
 ]);
 const actionSchema = z.object({
   intent: intentEnum,
@@ -198,7 +218,11 @@ export async function POST(req: NextRequest) {
         return null;
       })();
       if (connectorMatch) {
-        const envVar = ({ gmail: "GMAIL_CLIENT_ID", notion: "NOTION_CLIENT_ID", github: "GITHUB_CLIENT_ID", gdrive: "GMAIL_CLIENT_ID" } as Record<string, string>)[connectorMatch.provider];
+        // Canonical env vars · must match what the connector handlers read
+        // (GOOGLE_CLIENT_ID for gmail/gdrive, NOTION_INTEGRATION_TOKEN, GITHUB_TOKEN).
+        // The old map used GMAIL_/NOTION_/GITHUB_CLIENT_ID which are read nowhere,
+        // so `connected` was always false and voice never reported a live connector.
+        const envVar = ({ gmail: "GOOGLE_CLIENT_ID", notion: "NOTION_INTEGRATION_TOKEN", github: "GITHUB_TOKEN", gdrive: "GOOGLE_CLIENT_ID" } as Record<string, string>)[connectorMatch.provider];
         const connected = envVar ? Boolean(process.env[envVar]) : false;
         // VP-6 · build a "best-effort compose URL" so voice draft email
         // actually opens Gmail with prefilled fields in a new tab, even
@@ -393,6 +417,18 @@ Map this to ONE action. Available intents:
   ALWAYS use this for phrases like "recall my last X", "what did I X yesterday",
   "show me my previous Y", "what was the winner of the last cohort", "find
   my mission about Z", "do I have a note on W". payload = the search subject.
+- set_reminder: "remind me to call Andy in 2 hours", "remind me at 3pm to ship".
+  payload = JSON {"text": "<thing>", "minutes": <number>}.
+- create_event: add a calendar event — "schedule lunch Friday at 1pm", "book a
+  sync with Andy tomorrow 4pm". payload = the full event sentence verbatim.
+- schedule_action: recurring automation — "set up a daily email digest",
+  "schedule a weekly research mission". payload = the full sentence.
+- store_memory: "remember that <fact>", "note that <fact>". payload = the fact.
+- clear_memory: "clear / wipe my memory" — DESTRUCTIVE. payload = "all".
+- parse_pdf: "parse / read that pdf". payload = the verbatim request.
+- draft_email / read_email: Gmail compose or inbox summary. payload = the request.
+- create_note: "make a note about X" / "write this to notion". payload = the note.
+- open_gdrive: "show my google drive". no payload.
 - change_wallpaper: cycle wallpaper. no payload.
 - close_window: close focused window. no payload.
 - navigate: navigate to a route. payload = "/", "/play", "/memory", "/os".
@@ -418,24 +454,33 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
     // Vercel HTML 504 page. 11s leaves ~4s headroom for network + response.
     // generateJsonWithFallback hops Groq → Mistral-large → Mistral-small →
     // Gemini-flash on rate-limit, so default voice path survives a dry Groq.
-    const llmCall = withModels(overrides, () =>
-      generateJsonWithFallback({
-        primary: models.executor,
-        fallbacks: models.fallbackChain,
-        schema: actionSchema,
-        prompt,
-        temperature: 0.1,
-      }),
-    );
     // Hard 8s timeout — well under route's 10s maxDuration so we always
     // return JSON, not Vercel's HTML 504 page. The deterministic parser
     // above already covers the common path; this is best-effort for novel.
+    // The timeout now ABORTS the provider cascade (not just loses the race),
+    // so a slow voice call stops burning Groq/Mistral quota the instant we
+    // give up on it. Timer is cleared if the LLM wins.
+    const voiceAc = new AbortController();
+    let voiceTimer: ReturnType<typeof setTimeout> | undefined;
     const obj = await Promise.race([
-      llmCall,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("voice_command_timeout")), 8_000),
+      withModels(overrides, () =>
+        generateJsonWithFallback({
+          primary: models.executor,
+          fallbacks: models.fallbackChain,
+          schema: actionSchema,
+          prompt,
+          temperature: 0.1,
+          abortSignal: voiceAc.signal,
+        }),
       ),
+      new Promise((_, reject) => {
+        voiceTimer = setTimeout(() => {
+          voiceAc.abort();
+          reject(new Error("voice_command_timeout"));
+        }, 8_000);
+      }),
     ]);
+    if (voiceTimer) clearTimeout(voiceTimer);
     // VP-1 · LLM path · trust LLM's own intent unless it returned 'compound' AND chain ≥2
     const llmChain = (obj as { chain?: unknown[] }).chain;
     const llmCompound = (obj as { intent?: string }).intent === "compound" && Array.isArray(llmChain) && llmChain.length >= 2;

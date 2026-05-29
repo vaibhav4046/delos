@@ -20,11 +20,20 @@ const KEY_SHORTCUTS: Array<{ keys: string; desc: string }> = [
 const STORAGE_KEY = "delos.shortcuts.sticky.v1";
 
 export function ShortcutsSticky() {
-  const [mode, setMode] = useState<"open" | "pill" | "hidden">("open");
+  // Default to the slim "pill", not the full yellow panel. The expanded panel
+  // (240px, bright yellow, bottom-left) dominated first paint and read as
+  // clutter next to the welcome mat + widgets. The pill keeps the affordance
+  // one click away; ⌘ / still opens the full shortcuts modal.
+  const [mode, setMode] = useState<"open" | "pill" | "hidden">("pill");
   useEffect(() => {
+    // Mount-only hydration from localStorage · setState in an effect (not a
+    // lazy initializer) so SSR and the first client paint both render the
+    // "pill" default, avoiding a hydration mismatch. Restore any persisted
+    // mode (a user who expanded it last session sees it expanded again).
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw === "pill" || raw === "hidden") setMode(raw);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (raw === "open" || raw === "pill" || raw === "hidden") setMode(raw);
     } catch {}
   }, []);
   function persist(m: "open" | "pill" | "hidden") {

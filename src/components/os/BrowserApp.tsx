@@ -136,6 +136,9 @@ export function BrowserApp() {
   const currentQuery = useMemo(() => extractSearchQuery(url), [url]);
 
   useEffect(() => {
+    // Mount-only hydration from localStorage · keeps SSR/first paint on the
+    // empty defaults to avoid a hydration mismatch.
+    /* eslint-disable react-hooks/set-state-in-effect */
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
@@ -144,6 +147,7 @@ export function BrowserApp() {
         if (v.history?.length) setHistory(v.history);
       }
     } catch {}
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   // Voice intent: { kind: "browser.search", query: "..." }
@@ -394,6 +398,8 @@ function SearchView({
   onRunQuery: (q: string) => void;
 }) {
   const [draft, setDraft] = useState(query);
+  // Keep the local draft in sync when the query prop changes.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setDraft(query); }, [query]);
 
   return (

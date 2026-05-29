@@ -4,9 +4,8 @@
 // surface metadata + the SOURCE path so the client knows where to read from.
 
 import { NextRequest } from "next/server";
-import { env } from "@/lib/env";
-import { getServerSession } from "@/lib/session";
 import { safeRecall } from "@/lib/hydra";
+import { resolveTenant } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
@@ -24,10 +23,11 @@ type VirtualEntry = {
 };
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const queryTenant = url.searchParams.get("tenantId");
-  const session = await getServerSession();
-  const tenantId = session?.tenantId || queryTenant || env.DELRIO_TENANT_ID;
+  // Resolve server-side · this lists the tenant's desktop index + connected
+  // sources. Trusting ?tenantId let an anon caller read another tenant's file
+  // listing and connector inventory (BOLA read). resolveTenant is session-first
+  // and only honors a query tenantId for reserved test prefixes / guest read.
+  const { tenantId } = await resolveTenant(req, { intent: "read" });
 
   const out: VirtualEntry[] = [];
 

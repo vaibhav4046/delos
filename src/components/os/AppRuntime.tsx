@@ -305,25 +305,99 @@ function NodeR({
   }
 }
 
-// Lightweight HTML sanitizer · removes the high-risk attack surface for
-// dangerouslySetInnerHTML while keeping the layout primitives a brand
-// clone needs (style, class, data-*, href/src to https URLs).
-function sanitizeHtml(html: string): string {
+// HTML sanitizer for the `html` escape-hatch node. AppSpecs can originate
+// from the LLM path, so the markup is untrusted and must be sanitized before
+// it reaches dangerouslySetInnerHTML.
+//
+// Two layers:
+//   1. A regex pre-pass that strips script/style bodies and dangerous tags.
+//      This is the SSR baseline (no DOM available) and also a cheap fast-path.
+//   2. A DOM allowlist pass (client only). Parsing with the browser's own
+//      HTMLParser canonicalizes the markup — defeating mutation-XSS and
+//      entity-encoded bypasses (e.g. `jav&#x09;ascript:`), because attribute
+//      values are read back already entity-decoded. Anything not on the tag /
+//      attribute allowlist is dropped.
+//
+// A regex-only sanitizer is known-bypassable, so the DOM pass is what we rely
+// on for safety; the regex pass is defense-in-depth for the (in practice never
+// hit) server-render path where these windowed apps don't yet exist.
+
+const ALLOWED_TAGS = new Set([
+  "a", "abbr", "article", "aside", "b", "blockquote", "br", "button", "canvas",
+  "caption", "code", "col", "colgroup", "dd", "div", "dl", "dt", "em", "figure",
+  "figcaption", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "i",
+  "img", "input", "label", "li", "main", "mark", "nav", "ol", "option", "p",
+  "picture", "pre", "section", "select", "small", "source", "span", "strong",
+  "sub", "sup", "s", "table", "tbody", "td", "textarea", "tfoot", "th", "thead",
+  "time", "tr", "u", "ul",
+]);
+
+const ALLOWED_ATTR =
+  /^(class|id|style|title|alt|src|srcset|href|width|height|colspan|rowspan|type|placeholder|value|name|role|tabindex|disabled|checked|selected|readonly|maxlength|min|max|step|for|aria-[\w-]+|data-[\w-]+)$/i;
+
+function safeUrlAttr(value: string): boolean {
+  const v = value.trim().toLowerCase();
+  if (v.startsWith("javascript:") || v.startsWith("vbscript:")) return false;
+  // Allow data: only for images (brand clones inline small logos as data URIs);
+  // block data:text/html and any other data: payload that can run script.
+  if (v.startsWith("data:") && !v.startsWith("data:image/")) return false;
+  return true;
+}
+
+function sanitizeDom(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const walk = (parent: Element) => {
+    for (const child of Array.from(parent.children)) {
+      const tag = child.tagName.toLowerCase();
+      if (!ALLOWED_TAGS.has(tag)) {
+        child.remove();
+        continue;
+      }
+      for (const attr of Array.from(child.attributes)) {
+        const name = attr.name.toLowerCase();
+        if (!ALLOWED_ATTR.test(name)) {
+          child.removeAttribute(attr.name);
+          continue;
+        }
+        if ((name === "href" || name === "src" || name === "srcset") && !safeUrlAttr(attr.value)) {
+          child.removeAttribute(attr.name);
+          continue;
+        }
+        // CSS can smuggle script via expression() / javascript: in url().
+        if (name === "style" && /(expression\s*\(|javascript:|vbscript:|@import|<\/?\w)/i.test(attr.value)) {
+          child.removeAttribute(attr.name);
+        }
+      }
+      walk(child);
+    }
+  };
+  walk(doc.body);
+  return doc.body.innerHTML;
+}
+
+function regexStrip(html: string): string {
   let s = String(html || "");
-  // Strip whole tag bodies for things that should never appear in app
-  // layouts. Script tags + their content go first so onerror-pattern
-  // payloads can't survive in a removed-tag context.
   s = s.replace(/<\s*script\b[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "");
   s = s.replace(/<\s*style\b[^>]*>[\s\S]*?<\s*\/\s*style\s*>/gi, "");
   s = s.replace(/<\s*(iframe|object|embed|link|meta|form|svg|math)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "");
-  s = s.replace(/<\s*(iframe|object|embed|link|meta)\b[^>]*\/?>/gi, "");
-  // Remove on* event-handler attributes (onclick, onerror, onload, ...).
+  s = s.replace(/<\s*(iframe|object|embed|link|meta|svg|math)\b[^>]*\/?>/gi, "");
   s = s.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "");
   s = s.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "");
   s = s.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "");
-  // Refuse javascript: / vbscript: / data:text/html URLs.
   s = s.replace(/\b(href|src)\s*=\s*"\s*(javascript|vbscript|data\s*:\s*text\/html)[^"]*"/gi, '$1="#"');
   s = s.replace(/\b(href|src)\s*=\s*'\s*(javascript|vbscript|data\s*:\s*text\/html)[^']*'/gi, "$1='#'");
   return s;
+}
+
+function sanitizeHtml(html: string): string {
+  const pre = regexStrip(html);
+  if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+    return pre; // SSR baseline — windowed apps don't render server-side anyway.
+  }
+  try {
+    return sanitizeDom(pre);
+  } catch {
+    return pre;
+  }
 }
 

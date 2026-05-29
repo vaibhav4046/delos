@@ -112,7 +112,6 @@ export function MemoryGraph({
       }
     }
     return { nodes: ns, edges: es };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [memories, width, height]);
 
   // Hand-rolled force simulation · spring along edges, charge repulsion,

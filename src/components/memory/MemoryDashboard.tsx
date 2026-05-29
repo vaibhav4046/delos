@@ -164,6 +164,9 @@ export function MemoryDashboard({
 
   // Initial load + tenant change.
   useEffect(() => {
+    // load() flips setLoading synchronously before awaiting — intentional data
+    // fetch on mount / tenant change, not derived render state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load(query);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant]);
@@ -314,6 +317,7 @@ export function MemoryDashboard({
           tenant <code style={{ color: "var(--accent)" }}>{tenant ?? "anon"}</code>
         </span>
         <span className="font-mono" style={{ fontSize: 10, color: "var(--muted)" }}>
+          {/* eslint-disable-next-line react-hooks/purity */}
           {hits.length} hits · {local.length} local · {lastSync ? "synced " + Math.max(0, Math.round((Date.now() - lastSync) / 1000)) + "s ago" : "syncing…"}
         </span>
       </div>
@@ -421,7 +425,7 @@ export function MemoryDashboard({
         <section className="space-y-2">
           <h3 className="font-pixel text-[11px] tracking-widest flex items-center gap-2" style={{ color: "var(--accent)" }}>
             <Icons.Sparkles size={12} /> RECALL HITS
-            <span className="font-mono text-[10px]" style={{ color: "var(--muted)" }}>· semantic match for "{query || "recent"}"</span>
+            <span className="font-mono text-[10px]" style={{ color: "var(--muted)" }}>· semantic match for &quot;{query || "recent"}&quot;</span>
           </h3>
           <div className="space-y-1.5">
             {hits.slice(0, 8).map((h, i) => (

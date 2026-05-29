@@ -9,6 +9,8 @@ import { HydraPanel } from "@/components/HydraPanel";
 import type { ChaosKind, RunEvent } from "@/lib/types";
 import { AgentConstellation } from "@/components/AgentConstellation";
 import { getModelOverrides } from "@/lib/useModelOverrides";
+import { useWakeLock } from "@/lib/useWakeLock";
+import { shareContent, haptic } from "@/lib/mobile";
 
 const PRESETS = [
   {
@@ -41,17 +43,28 @@ export default function PlayPage() {
   const [shareCopied, setShareCopied] = useState(false);
   const ctrlRef = useRef<AbortController | null>(null);
 
+  // Keep the screen awake while a mission streams — a phone left on the run
+  // view won't dim/lock mid-orchestration. No-ops on desktop / unsupported.
+  useWakeLock(running);
+
   function copyShare() {
     if (!shareRun) return;
-    const fallback = () => window.prompt("Copy this share link:", shareRun.url);
-    if (!navigator.clipboard?.writeText) {
-      fallback();
-      return;
-    }
-    navigator.clipboard.writeText(shareRun.url).then(() => {
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 1800);
-    }).catch(fallback);
+    haptic("tap");
+    // Mobile: open the native share sheet so the run link can go straight to
+    // Messages/WhatsApp/etc. Desktop / unsupported: fall back to clipboard,
+    // then to a manual copy prompt.
+    void shareContent({
+      title: "DelOS run replay",
+      text: "Watch this multi-agent run replay on DelOS:",
+      url: shareRun.url,
+    }).then((result) => {
+      if (result === "shared" || result === "copied") {
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 1800);
+      } else if (result === "failed" && !navigator.share) {
+        window.prompt("Copy this share link:", shareRun.url);
+      }
+    });
   }
 
   async function run() {

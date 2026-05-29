@@ -27,8 +27,12 @@ export function CommandPalette({
 
   useEffect(() => {
     if (open) {
+      // Reset search state each time the palette opens (state adjustment on a
+      // prop change) — setState here is intentional.
+      /* eslint-disable react-hooks/set-state-in-effect */
       setQuery("");
       setIdx(0);
+      /* eslint-enable react-hooks/set-state-in-effect */
       setTimeout(() => inputRef.current?.focus(), 30);
     }
   }, [open]);
@@ -42,6 +46,8 @@ export function CommandPalette({
   }, [query, commands]);
 
   useEffect(() => {
+    // Clamp the highlighted index when the filtered list shrinks.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (idx >= filtered.length) setIdx(0);
   }, [filtered.length, idx]);
 

@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   if (!lim.ok) return Response.json({ ok: false, error: "rate limited" }, { status: 429, headers: lim.headers });
   const parsed = Req.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return zodErr(parsed.error);
-  const { tenantId, source } = await resolveTenant(req);
+  const { tenantId } = await resolveTenant(req);
   // Demo simulator · same shape as gmail-draft. Default ON so guest
   // judges see a happy-path "page created" response without OAuth.
   // Same demo-fallback shape as gmail/draft · was gated on `source !==

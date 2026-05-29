@@ -1,16 +1,22 @@
+import { NextRequest } from "next/server";
 import { generateText } from "ai";
 import { resolveModel } from "@/lib/llm";
 import { safeAddMemory, ensureTenant } from "@/lib/hydra";
-import { env } from "@/lib/env";
+import { sanitizeProviderError } from "@/lib/agents/jsonGen";
 import { z } from "zod";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const Req = z.object({
   topic: z.string().min(2).max(120),
-  tenantId: z.string().default(env.DELRIO_TENANT_ID),
+  // Accepted but NOT trusted for the write · resolveTenant only honors a body
+  // tenantId carrying a reserved test prefix (qa_/demo_/…); real users are
+  // scoped by their signed session. Previously this default fed straight into
+  // safeAddMemory, letting any caller write into ANY tenant's graph (BOLA).
+  tenantId: z.string().optional(),
   depth: z.enum(["brief", "standard", "deep"]).default("standard"),
 });
 
@@ -29,10 +35,18 @@ async function groundWithWiki(topic: string): Promise<string | null> {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  // M3 · paid LLM route (up to a 1200-word generation + memory write) —
+  // per-IP throttle to stop unauthenticated quota/cost exhaustion.
+  const rl = rateLimit(`wiki:ip:${clientIp(req)}`, 8, 60_000);
+  if (!rl.ok) {
+    return Response.json({ ok: false, error: "rate_limited" }, { status: 429, headers: rl.headers });
+  }
   const parsed = Req.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return zodErr(parsed.error);
-  const { topic, tenantId, depth } = parsed.data;
+  const { topic, depth } = parsed.data;
+  // Resolve tenant server-side — never write under a body-supplied tenantId.
+  const { tenantId } = await resolveTenant(req, { bodyTenantId: parsed.data.tenantId, intent: "write" });
   await ensureTenant(tenantId);
 
   // Ground with Wikipedia if available
@@ -65,7 +79,11 @@ Output ONLY the markdown article. No preamble.`;
     });
     article = r.text.trim();
   } catch (e) {
-    return Response.json({ ok: false, error: (e as Error).message }, { status: 500 });
+    // M11 · never return the raw provider error — it leaks quota windows, org
+    // ids, and upstream request ids. Map to a stable enum + 429 on quota.
+    const reason = sanitizeProviderError((e as Error).message);
+    const status = reason === "rate_limited" ? 429 : 500;
+    return Response.json({ ok: false, error: reason }, { status });
   }
 
   // Persist as wiki memory

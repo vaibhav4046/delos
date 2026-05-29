@@ -33,8 +33,8 @@ export function MarketplaceApp() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     (async () => {
+      setLoading(true);
       const out: ToolInfo[] = [];
       try {
         const r = await fetch("/api/tools/list");

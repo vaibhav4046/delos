@@ -73,8 +73,10 @@ export function InteractiveMac() {
     return () => clearInterval(t);
   }, []);
 
-  // Clock — first tick on mount so SSR HTML stays static.
+  // Clock — first tick on mount so SSR HTML stays static (lazy init would
+  // bake a server timestamp into the markup and mismatch on hydration).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTime(new Date());
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(t);
@@ -129,6 +131,7 @@ export function InteractiveMac() {
       return;
     }
     zRef.current += 1;
+    // eslint-disable-next-line react-hooks/purity
     const id = `w-${app}-${Date.now()}`;
     setWins((p) => [
       ...p,

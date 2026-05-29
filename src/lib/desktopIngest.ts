@@ -91,7 +91,8 @@ export function saveIndex(handleName: string, files: IndexedFile[]) {
   try {
     const payload = { root: handleName, indexedAt: Date.now(), files };
     localStorage.setItem(STORE_KEY, JSON.stringify(payload));
-    window.dispatchEvent(new CustomEvent("delos-desktop-indexed", { detail: { count: files.length, root: handleName } }));
+    // (A `delos-desktop-indexed` CustomEvent used to fire here, but no
+    // surface ever listened for it — removed as a dead channel.)
   } catch {}
 }
 

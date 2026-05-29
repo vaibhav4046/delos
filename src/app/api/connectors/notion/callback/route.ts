@@ -2,9 +2,9 @@
 // Stores token in HydraDB as a tenant-scoped credential record.
 // On success, redirects user back to /os with toast confirmation.
 
-import { env } from "@/lib/env";
 import { safeAddMemory } from "@/lib/hydra";
 import { NextRequest } from "next/server";
+import { resolveTenant } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
@@ -67,8 +67,13 @@ export async function GET(req: NextRequest) {
   // and included in LLM context. Encrypt and stash in metadata.
   const { encryptSecret, redactToken } = await import("@/lib/secrets");
   const tokenCipher = encryptSecret(tokens.access_token);
+  // SECURITY: bind the OAuth token to the caller's resolved tenant (session →
+  // per-IP anon), NEVER the shared `delrio_demo` seed tenant. Previously the
+  // token landed in the shared tenant, letting any other guest resolving there
+  // drive Notion actions with the victim's credential (cross-tenant reuse).
+  const { tenantId } = await resolveTenant(req, { intent: "write" });
   await safeAddMemory({
-    tenantId: env.DELRIO_TENANT_ID,
+    tenantId,
     text: `NOTION_CREDENTIAL workspace=${tokens.workspace_name ?? "unknown"} bot=${tokens.bot_id ?? "?"} token=${redactToken(tokens.access_token)}`,
     metadata: {
       connector: "notion",

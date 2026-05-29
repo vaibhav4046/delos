@@ -44,7 +44,9 @@ function toast(text: string, tone: "ok" | "warn" | "info" = "ok") {
 // blank window. Intent bus expects `kind` field, not `type`.
 const INTENT_MAP: Record<string, { kind: string; key: string } | undefined> = {
   builder: { kind: "builder.build", key: "prompt" },
-  cohort: { kind: "cohort.run", key: "goal" },
+  // M7 · cohort retired → run_cohort now routes here so the assistant fields
+  // the "race the models" query instead of launching a deleted app.
+  assistant: { kind: "assistant.ask", key: "text" },
   terminal: { kind: "terminal.run", key: "goal" },
   // Memory Browser listens for memory.search · was wired to "memory" which
   // resolves to MemoryMatchGame (the card-flip game). QA finding.
@@ -92,7 +94,8 @@ export function VoiceWakeMount() {
               launchApp("builder", enhanceBuildPrompt(j.payload ?? "").slice(0, 1500));
               break;
             case "run_cohort":
-              launchApp("cohort", j.payload);
+              // M7 · Cohort app removed — assistant answers the query instead.
+              launchApp("assistant", j.payload);
               break;
             case "recall_memory":
               // Memory Browser, not Memory Match game.
@@ -114,8 +117,15 @@ export function VoiceWakeMount() {
               window.dispatchEvent(new CustomEvent("delos-voice-action", { detail: j }));
               break;
             case "unknown":
-            default:
               toast(`voice · didn't understand "${d.phrase.slice(0, 40)}"`, "warn");
+              break;
+            default:
+              // Rich intent (set_reminder, create_event, draft_email,
+              // store_memory, …) the wake-word switch doesn't special-case.
+              // Hand it to the OS dispatcher (fireVoiceStep), which now routes
+              // every intent to its surface — so wake-word rich commands aren't
+              // misreported as "didn't understand" (M8 sibling path).
+              window.dispatchEvent(new CustomEvent("delos-voice-action", { detail: j }));
               break;
           }
           if (reply) {
@@ -147,7 +157,7 @@ export function VoiceWakeMount() {
         letterSpacing: 1,
       }}
     >
-      ● voice wake {listening ? "active" : "idle"} · say "delos …"
+      ● voice wake {listening ? "active" : "idle"} · say &quot;delos …&quot;
     </div>
   );
 }

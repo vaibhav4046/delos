@@ -12,8 +12,18 @@ async function probe(name: string, url: string, init?: RequestInit, ttl = 4500):
     const tm = setTimeout(() => ctrl.abort(), ttl);
     const r = await fetch(url, { ...init, signal: ctrl.signal });
     clearTimeout(tm);
-    const ok = r.ok || r.status === 401 || r.status === 403; // 401/403 still means provider is alive
-    return { name, ok, ms: Date.now() - t0, reason: ok ? undefined : `status ${r.status}` };
+    if (r.ok) return { name, ok: true, ms: Date.now() - t0 };
+    // 429 = reachable but throttled. Provider is up and the cascade will fail
+    // over to the next one, so don't flap the dashboard red on a transient cap.
+    if (r.status === 429) return { name, ok: true, ms: Date.now() - t0, reason: "throttled (429)" };
+    // M13 · 401/403 means the credentials were REJECTED. The endpoint is
+    // reachable but UNUSABLE for real generation. The old code counted these
+    // as "alive", so a revoked/expired/missing key showed green while every
+    // actual LLM call 401'd — a green board during a total outage. Report down.
+    if (r.status === 401 || r.status === 403) {
+      return { name, ok: false, ms: Date.now() - t0, reason: `auth_failed (${r.status})` };
+    }
+    return { name, ok: false, ms: Date.now() - t0, reason: `status ${r.status}` };
   } catch (e) {
     return { name, ok: false, ms: Date.now() - t0, reason: (e as Error).message.slice(0, 80) };
   }

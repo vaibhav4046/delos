@@ -1,4 +1,9 @@
 "use client";
+/* eslint-disable react-hooks/purity, react-hooks/refs --
+   DEL DOOM is an imperative canvas game engine: the render loop reads/writes
+   mutable refs (player/enemy/projectile state) and calls Date.now() for frame
+   timing every tick by design. The React Compiler purity/refs rules don't model
+   this pattern; disabling them file-wide is intentional, not a latent bug. */
 import { useEffect, useRef, useState } from "react";
 import * as Icons from "lucide-react";
 
@@ -610,12 +615,14 @@ export function DoomGame() {
   }
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     try {
       const h = Number(localStorage.getItem(HIGH_KEY) ?? 0);
       if (h > 0) setHighScore(h);
       const savedDiff = localStorage.getItem(DIFF_KEY);
       if (savedDiff && DIFFICULTIES.find((d) => d.id === savedDiff)) setDiffId(savedDiff as DifficultyId);
     } catch {}
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   function ensureAudio() {
@@ -1919,7 +1926,7 @@ export function DoomGame() {
                   final: {stateRef.current.score} · high: {highScore} · reached L{levelIdx + 1} on {dCur.short}
                 </div>
                 <div className="text-[10px] font-mono mb-3 text-center max-w-sm" style={{ color: "var(--muted)" }}>
-                  Tip: switch weapons (1-7), don't fight cyberdemons with a pistol, and watch for lava tiles (orange).
+                  Tip: switch weapons (1-7), don&apos;t fight cyberdemons with a pistol, and watch for lava tiles (orange).
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => reset(0)} className="btn-pixel danger">▶ NEW GAME</button>

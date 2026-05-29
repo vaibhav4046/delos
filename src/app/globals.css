@@ -1503,3 +1503,51 @@ svg.lucide,
 .window-dots .d.r { background: #ff5f57; }
 .window-dots .d.y { background: #febc2e; }
 .window-dots .d.g { background: #28c840; }
+
+/* ============================================================
+   MOBILE / PWA — safe-area insets + touch-target floors.
+   env() resolves to 0 on desktop, so every rule below is a no-op
+   there. Targets the installed-app + phone/tablet web experience.
+   ============================================================ */
+
+/* Notch-aware OS chrome. The header hugs the top inset; the desktop
+   <main> padding grows by the same insets so windows + dock never
+   tuck under the notch or the home indicator. */
+.delos-root header[data-tour="hero"] {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  padding-left: max(0.5rem, env(safe-area-inset-left));
+  padding-right: max(0.5rem, env(safe-area-inset-right));
+}
+.delos-root main[aria-label="DelOS desktop"] {
+  padding-top: calc(3rem + env(safe-area-inset-top));
+  padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+}
+
+/* Dock floats above the home indicator. NOTE: the legacy `.dock` rules
+   above never matched — the real dock element is [data-app-dock]. */
+[data-app-dock] {
+  padding-bottom: calc(0.375rem + env(safe-area-inset-bottom)) !important;
+  max-width: calc(100vw - 0.5rem - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
+}
+
+/* Touch-target floors. A coarse pointer = a finger; WCAG 2.5.5 + Apple
+   HIG want ≥44px. Enlarges dock icons + window title controls on phones
+   AND touch tablets (≥640px, which the max-width:640 block misses). */
+@media (pointer: coarse) {
+  [data-app-dock] .dock-icon {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .window-controls button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  /* Dock hover-close × is unreachable without hover — make it a real,
+     always-tappable target on touch. */
+  [data-app-dock] .group > button[aria-label^="Close"] {
+    width: 24px;
+    height: 24px;
+    font-size: 14px;
+    opacity: 1 !important;
+  }
+}

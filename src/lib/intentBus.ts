@@ -5,11 +5,11 @@
 export type AppIntent =
   | { kind: "terminal.run"; goal: string }
   | { kind: "builder.build"; prompt: string }
-  | { kind: "codebase.build"; prompt: string }
-  | { kind: "cohort.run"; goal: string }
+  // M7 · `cohort.run` retired — the Cohort app was removed from the product
+  // and its component deleted. The run_cohort voice intent now routes to the
+  // assistant, so nothing emits or listens for this kind anymore.
   | { kind: "assistant.ask"; text: string }
-  | { kind: "memory.search"; query: string }
-  | { kind: "voice.toast"; text: string };
+  | { kind: "memory.search"; query: string };
 
 export function emitIntent(intent: AppIntent) {
   if (typeof window === "undefined") return;

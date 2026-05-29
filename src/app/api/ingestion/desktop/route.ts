@@ -6,7 +6,7 @@ import { NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { safeAddMemory } from "@/lib/hydra";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 
 const fileSchema = z.object({
@@ -30,7 +30,10 @@ export async function POST(req: NextRequest) {
     return zodErr(parsed.error);
   }
   const { root, count, digest, tenantId } = parsed.data;
-  const tid = tenantId || env.DELRIO_TENANT_ID;
+  // Resolve server-side · a body-supplied tenantId is only honored for reserved
+  // test prefixes, never as an arbitrary write target (BOLA). Was written
+  // directly, so any caller could index file metadata into any tenant's graph.
+  const { tenantId: tid } = await resolveTenant(req, { bodyTenantId: tenantId, intent: "write" });
 
   // Persist digest summary (paths + sizes) in HydraDB for cross-device recall + agent context.
   const fileLines = digest

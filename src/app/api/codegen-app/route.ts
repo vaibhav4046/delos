@@ -26,19 +26,12 @@ import { classifyInjection } from "@/lib/security/injection-classifier";
 import { normalizeInputField } from "@/lib/apiField";
 import { storeProject, slugifyName } from "@/lib/codegenProjectStore";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
 // Codegen is the heaviest paid path. Cap to keep one attacker from draining
 // the shared Groq TPM budget. 6/min is well above a legit user's cadence;
 // the 429 below already kicks in earlier when Groq TPM is hit.
 const CODEGEN_LIMIT_PER_MIN = 6;
 const CODEGEN_WINDOW_MS = 60_000;
-
-// Default model: llama-4-scout-17b on Groq. Free-tier-confirmed available,
-// 30K TPM, decent code. Kimi K2 + maverick-128e are gated behind paid tier
-// for this account. Gemini 2.5 Flash steps in as first fallback because
-// its code quality + 1M-token-per-day quota dwarfs Mistral-small's free
-// allowance.
-const DEFAULT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
 // Free-tier Groq models we cascade through on TPD/429. Order = best code
 // quality first, but each has its own daily token bucket — so when 120b
@@ -525,102 +518,6 @@ function normalizeLanguage(raw: string | undefined, path: string): CanonLang {
 
 type FilePlan = z.infer<typeof planSchema>;
 
-function slugifyProjectName(prompt: string): string {
-  const slug = prompt
-    .toLowerCase()
-    .replace(/^\s*(build|make|create|generate)\s+(me\s+)?(a|an|the)?\s*/i, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 42);
-  return slug || "delrio-generated-app";
-}
-
-function shouldUseFastProject(prompt: string, isBrandClone: boolean): boolean {
-  if (isBrandClone) return false;
-  return /\b(crm|dashboard|cockpit|command\s+center|workspace|ops|operations|investor|clinical|regulatory|legal|tutor|pipeline|follow[-\s]?up|export|risk|queue)\b/i.test(prompt);
-}
-
-function escapeTsxText(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/{/g, "&#123;")
-    .replace(/}/g, "&#125;");
-}
-
-function makeFastProject(userPrompt: string, stackHint: string): CodegenProject {
-  const name = slugifyProjectName(userPrompt);
-  const title = name
-    .split("-")
-    .filter(Boolean)
-    .slice(0, 5)
-    .map((w) => w[0].toUpperCase() + w.slice(1))
-    .join(" ") || "Generated Workspace";
-  const domainTerms = Array.from(new Set(
-    userPrompt
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length >= 4 && !["build", "real", "with", "must", "forms", "data", "mock", "next", "queue"].includes(w)),
-  )).slice(0, 12);
-  const dataTerms = domainTerms.length >= 6 ? domainTerms : [...domainTerms, "pipeline", "follow-up", "risk", "export", "summary", "owner"].slice(0, 8);
-  const promptCopy = escapeTsxText(userPrompt).slice(0, 260);
-  const files: CodegenProject["files"] = [
-    {
-      path: "package.json",
-      language: "json",
-      content: JSON.stringify({
-        scripts: { dev: "next dev", build: "next build", start: "next start" },
-        dependencies: { "@types/react": "latest", "next": "16.2.6", "react": "19.2.4", "react-dom": "19.2.4", "typescript": "latest" },
-        devDependencies: {},
-      }, null, 2),
-    },
-    {
-      path: "app/page.tsx",
-      language: "tsx",
-      content: `"use client";\n\nimport { useMemo, useState } from "react";\nimport { records, stages, type RecordItem } from "./data/mockData";\nimport { scoreCommitment, summarizePortfolio } from "./lib/scoring";\nimport PipelineBoard from "./components/PipelineBoard";\nimport ProfilePanel from "./components/ProfilePanel";\nimport ActionQueue from "./components/ActionQueue";\n\nexport default function Page() {\n  const [items, setItems] = useState<RecordItem[]>(records);\n  const [selectedId, setSelectedId] = useState(records[0].id);\n  const [filter, setFilter] = useState("all");\n  const selected = items.find((item) => item.id === selectedId) ?? items[0];\n  const visible = filter === "all" ? items : items.filter((item) => item.stage === filter);\n  const summary = useMemo(() => summarizePortfolio(items), [items]);\n\n  function addFollowUp(id: string, text: string) {\n    setItems((current) => current.map((item) => item.id === id ? { ...item, nextAction: text, history: [text, ...item.history] } : item));\n  }\n\n  function advanceStage(id: string) {\n    setItems((current) => current.map((item) => {\n      if (item.id !== id) return item;\n      const idx = stages.indexOf(item.stage);\n      const stage = stages[Math.min(idx + 1, stages.length - 1)];\n      return { ...item, stage, probability: scoreCommitment(item, stage) };\n    }));\n  }\n\n  return (\n    <main className="min-h-screen bg-slate-950 text-slate-100">\n      <section className="border-b border-slate-800 bg-slate-900/80 px-6 py-5">\n        <div className="flex flex-wrap items-end justify-between gap-4">\n          <div>\n            <p className="text-xs uppercase tracking-[0.24em] text-cyan-300">DelRio generated workspace</p>\n            <h1 className="mt-2 text-3xl font-semibold">${title}</h1>\n            <p className="mt-2 max-w-3xl text-sm text-slate-300">${promptCopy}</p>\n          </div>\n          <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">\n            <Metric label="records" value={summary.total.toString()} />\n            <Metric label="active" value={summary.active.toString()} />\n            <Metric label="avg score" value={summary.averageScore.toString()} />\n            <Metric label="due this week" value={summary.dueSoon.toString()} />\n          </div>\n        </div>\n      </section>\n      <section className="grid gap-5 px-6 py-6 xl:grid-cols-[1.2fr_0.8fr]">\n        <div className="space-y-5">\n          <div className="flex flex-wrap gap-2">\n            <button onClick={() => setFilter("all")} className={tabClass(filter === "all")}>All</button>\n            {stages.map((stage) => <button key={stage} onClick={() => setFilter(stage)} className={tabClass(filter === stage)}>{stage}</button>)}\n          </div>\n          <PipelineBoard items={visible} selectedId={selected.id} onSelect={setSelectedId} onAdvance={advanceStage} />\n        </div>\n        <div className="space-y-5">\n          <ProfilePanel item={selected} onAddFollowUp={addFollowUp} />\n          <ActionQueue items={items} onSelect={setSelectedId} />\n        </div>\n      </section>\n    </main>\n  );\n}\n\nfunction Metric({ label, value }: { label: string; value: string }) {\n  return <div className="rounded border border-slate-700 bg-slate-900 px-4 py-3"><div className="text-xs uppercase text-slate-400">{label}</div><div className="text-xl font-semibold text-cyan-200">{value}</div></div>;\n}\n\nfunction tabClass(active: boolean) {\n  return active ? "rounded bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950" : "rounded border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:border-cyan-400";\n}\n`,
-    },
-    {
-      path: "app/data/mockData.ts",
-      language: "typescript",
-      content: `export const stages = ["sourced", "meeting", "diligence", "commit", "closed"] as const;\nexport type Stage = typeof stages[number];\n\nexport type RecordItem = {\n  id: string;\n  name: string;\n  stage: Stage;\n  owner: string;\n  source: string;\n  probability: number;\n  nextAction: string;\n  dueDate: string;\n  notes: string;\n  tags: string[];\n  history: string[];\n};\n\nconst tags = ${JSON.stringify(dataTerms)};\n\nexport const records: RecordItem[] = Array.from({ length: 9 }, (_, index) => ({\n  id: "rec-" + (index + 1),\n  name: ["Northstar Capital", "Blue River Labs", "Cedar Health", "Orbit Legal", "Signal Ventures", "Atlas Partners", "Helio Learning", "Foundry Ops", "Summit Compliance"][index],\n  stage: stages[index % stages.length],\n  owner: ["Varun", "Andy", "Anna"][index % 3],\n  source: ["warm intro", "conference", "operator referral", "inbound", "advisor"][index % 5],\n  probability: 42 + index * 5,\n  nextAction: ["send recap", "book follow-up", "update risk note", "draft email", "prepare export"][index % 5],\n  dueDate: "2026-05-" + String(26 + (index % 4)).padStart(2, "0"),\n  notes: "Tracks " + tags[index % tags.length] + " with owner accountability and weekly summary context.",\n  tags: [tags[index % tags.length], tags[(index + 3) % tags.length]],\n  history: ["Initial context captured", "Scoring model updated", "Follow-up reminder queued"],\n}));\n`,
-    },
-    {
-      path: "app/lib/scoring.ts",
-      language: "typescript",
-      content: `import { stages, type RecordItem, type Stage } from "../data/mockData";\n\nexport function scoreCommitment(item: RecordItem, stage: Stage) {\n  const stageBoost = stages.indexOf(stage) * 12;\n  const actionBoost = item.nextAction.toLowerCase().includes("follow") ? 6 : 2;\n  return Math.min(99, Math.max(5, item.probability + stageBoost + actionBoost));\n}\n\nexport function summarizePortfolio(items: RecordItem[]) {\n  const total = items.length;\n  const active = items.filter((item) => item.stage !== "closed").length;\n  const dueSoon = items.filter((item) => item.dueDate <= "2026-05-29").length;\n  const averageScore = Math.round(items.reduce((sum, item) => sum + item.probability, 0) / Math.max(1, items.length));\n  return { total, active, dueSoon, averageScore };\n}\n\nexport function exportCsv(items: RecordItem[]) {\n  const header = "name,stage,owner,source,probability,nextAction,dueDate";\n  const rows = items.map((item) => [item.name, item.stage, item.owner, item.source, item.probability, item.nextAction, item.dueDate].join(","));\n  return [header, ...rows].join("\\n");\n}\n`,
-    },
-    {
-      path: "app/components/PipelineBoard.tsx",
-      language: "tsx",
-      content: `import { stages, type RecordItem } from "../data/mockData";\n\nexport default function PipelineBoard({ items, selectedId, onSelect, onAdvance }: { items: RecordItem[]; selectedId: string; onSelect: (id: string) => void; onAdvance: (id: string) => void }) {\n  return (\n    <div className="grid gap-3 lg:grid-cols-5">\n      {stages.map((stage) => (\n        <section key={stage} className="min-h-72 rounded border border-slate-800 bg-slate-900/70 p-3">\n          <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold uppercase text-slate-300">{stage}</h2><span className="rounded bg-slate-800 px-2 py-1 text-xs text-cyan-200">{items.filter((item) => item.stage === stage).length}</span></div>\n          <div className="space-y-3">\n            {items.filter((item) => item.stage === stage).map((item) => (\n              <button key={item.id} onClick={() => onSelect(item.id)} className={(selectedId === item.id ? "border-cyan-300 bg-cyan-950/50" : "border-slate-700 bg-slate-950/60") + " w-full rounded border p-3 text-left"}>\n                <div className="font-semibold text-slate-100">{item.name}</div>\n                <div className="mt-1 text-xs text-slate-400">{item.source} - {item.owner}</div>\n                <div className="mt-2 h-2 rounded bg-slate-800"><div className="h-2 rounded bg-cyan-400" style={{ width: item.probability + "%" }} /></div>\n                <div className="mt-2 flex items-center justify-between text-xs"><span>{item.probability}%</span><span>{item.dueDate}</span></div>\n                <span onClick={(event) => { event.stopPropagation(); onAdvance(item.id); }} className="mt-3 block rounded bg-slate-800 px-2 py-1 text-center text-xs text-cyan-200">Advance</span>\n              </button>\n            ))}\n          </div>\n        </section>\n      ))}\n    </div>\n  );\n}\n`,
-    },
-    {
-      path: "app/components/ProfilePanel.tsx",
-      language: "tsx",
-      content: `"use client";\n\nimport { useState } from "react";\nimport type { RecordItem } from "../data/mockData";\n\nexport default function ProfilePanel({ item, onAddFollowUp }: { item: RecordItem; onAddFollowUp: (id: string, text: string) => void }) {\n  const [draft, setDraft] = useState("");\n  const emailDraft = "Hi " + item.name + ", sharing a concise follow-up on " + item.nextAction + " with context from our latest notes.";\n  return (\n    <section className="rounded border border-slate-800 bg-slate-900 p-4">\n      <div className="flex items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">{item.name}</h2><p className="text-sm text-slate-400">{item.stage} - {item.source}</p></div><span className="rounded bg-cyan-400 px-3 py-1 text-sm font-semibold text-slate-950">{item.probability}%</span></div>\n      <p className="mt-4 text-sm text-slate-300">{item.notes}</p>\n      <div className="mt-4 flex flex-wrap gap-2">{item.tags.map((tag) => <span key={tag} className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300">{tag}</span>)}</div>\n      <label className="mt-5 block text-xs uppercase text-slate-400">Next follow-up</label>\n      <textarea value={draft} onChange={(event) => setDraft(event.target.value)} className="mt-2 h-24 w-full rounded border border-slate-700 bg-slate-950 p-3 text-sm text-slate-100" />\n      <div className="mt-3 flex gap-2"><button onClick={() => { if (draft.trim()) { onAddFollowUp(item.id, draft.trim()); setDraft(""); } }} className="rounded bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950">Save follow-up</button><button onClick={() => setDraft(emailDraft)} className="rounded border border-slate-700 px-3 py-2 text-sm text-slate-200">Draft email</button></div>\n      <div className="mt-5 rounded bg-slate-950 p-3 text-xs text-slate-300"><strong className="text-slate-100">History</strong>{item.history.map((entry) => <div key={entry} className="mt-2">- {entry}</div>)}</div>\n    </section>\n  );\n}\n`,
-    },
-    {
-      path: "app/components/ActionQueue.tsx",
-      language: "tsx",
-      content: `import type { RecordItem } from "../data/mockData";\nimport { exportCsv } from "../lib/scoring";\n\nexport default function ActionQueue({ items, onSelect }: { items: RecordItem[]; onSelect: (id: string) => void }) {\n  const csv = exportCsv(items);\n  return (\n    <section className="rounded border border-slate-800 bg-slate-900 p-4">\n      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Next-action queue</h2><span className="text-xs text-slate-400">CSV ready</span></div>\n      <div className="mt-4 space-y-3">{items.slice(0, 6).map((item) => <button key={item.id} onClick={() => onSelect(item.id)} className="w-full rounded border border-slate-800 bg-slate-950 p-3 text-left text-sm"><div className="font-medium text-slate-100">{item.nextAction}</div><div className="mt-1 text-xs text-slate-400">{item.name} - {item.owner} - {item.dueDate}</div></button>)}</div>\n      <textarea readOnly value={csv} className="mt-4 h-40 w-full rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs text-slate-300" />\n    </section>\n  );\n}\n`,
-    },
-    {
-      path: "README.md",
-      language: "markdown",
-      content: `# ${title}\n\nGenerated for: ${userPrompt}\n\n## Features\n\n- Interactive stage pipeline with selected record details\n- Profile panel with meeting notes, follow-up reminders, and email drafting\n- Commitment scoring and due-date action queue\n- CSV export surface for weekly updates\n- Mock data tailored to these domain terms: ${dataTerms.join(", ")}\n\n## Run\n\nnpm install\nnpm run dev\n`,
-    },
-  ];
-  return {
-    name,
-    description: `${title} generated as a reliable fast-path project for ${stackHint.split("+")[0].trim()}.`,
-    stack: stackHint,
-    files,
-    runInstructions: "npm install && npm run dev",
-    notes: ["Fast-path project returned before provider timeout", "No external APIs required", "All data is inline mock data"],
-  };
-}
 
 export async function POST(req: NextRequest) {
   const ip = clientIp(req);
@@ -650,7 +547,9 @@ export async function POST(req: NextRequest) {
   }
   const userPrompt = parsed.data.prompt;
   const stack = parsed.data.stack ?? "nextjs";
-  const tenantId = parsed.data.tenantId || env.DELRIO_TENANT_ID;
+  // Resolve server-side · persists the generated project to memory under this
+  // tenant. Body tenantId honored only for reserved test prefixes (else BOLA).
+  const { tenantId } = await resolveTenant(req, { bodyTenantId: parsed.data.tenantId, intent: "write" });
   const startedAt = Date.now();
   const isOverDeadline = () => Date.now() - startedAt > DEADLINE_MS;
 

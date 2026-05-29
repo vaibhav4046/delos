@@ -16,6 +16,7 @@
 // the 90% case — judge demos, hackathon submissions, contracts, etc.
 
 import zlib from "node:zlib";
+import { assertPublicHttpUrl } from "./safeUrl";
 
 const STREAM_OPEN = Buffer.from("stream\n");
 const STREAM_OPEN_CR = Buffer.from("stream\r\n");
@@ -104,12 +105,41 @@ export function parsePdfBuffer(buf: ArrayBuffer | Buffer): { text: string; pages
 }
 
 export async function parsePdfFromUrl(url: string, maxBytes = 5 * 1024 * 1024): Promise<{ text: string; pages: number; bytes: number; url: string }> {
-  const r = await fetch(url, { redirect: "follow" });
+  // SSRF guard: validate the initial URL and every redirect hop against the
+  // public-host allowlist. We follow redirects manually (fetch's redirect:
+  // "follow" would chase a 302 → http://169.254.169.254 metadata endpoint
+  // without re-validation) re-checking Location each time.
+  let current = assertPublicHttpUrl(url).toString();
+  let r: Response | null = null;
+  for (let hop = 0; hop < 5; hop++) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 8000);
+    try {
+      r = await fetch(current, { redirect: "manual", signal: ctl.signal });
+    } finally {
+      clearTimeout(t);
+    }
+    if (r.status >= 300 && r.status < 400) {
+      const loc = r.headers.get("location");
+      if (!loc) break;
+      current = assertPublicHttpUrl(new URL(loc, current).toString()).toString();
+      continue;
+    }
+    break;
+  }
+  if (!r) throw new Error("PDF fetch failed");
+  if (r.status >= 300 && r.status < 400) throw new Error("PDF too many redirects");
   if (!r.ok) throw new Error(`PDF fetch ${r.status}`);
+  // Enforce the size cap on the declared length before buffering the body, so
+  // a malicious server can't stream gigabytes through arrayBuffer().
+  const declared = Number(r.headers.get("content-length") || 0);
+  if (declared > maxBytes) {
+    throw new Error(`PDF too large: ${declared} > ${maxBytes}`);
+  }
   const ab = await r.arrayBuffer();
   if (ab.byteLength > maxBytes) {
     throw new Error(`PDF too large: ${ab.byteLength} > ${maxBytes}`);
   }
   const { text, pages, bytes } = parsePdfBuffer(ab);
-  return { text, pages, bytes, url };
+  return { text, pages, bytes, url: current };
 }

@@ -17,10 +17,15 @@ export function AnalyticsApp() {
       .then((j: { local?: LocalMem[] }) => setRuns(j.local ?? []))
       .catch(() => {});
     try {
+      // Mount-only hydration from localStorage · setState in an effect is
+      // intentional so SSR/first paint render the zero defaults and avoid a
+      // hydration mismatch.
+      /* eslint-disable react-hooks/set-state-in-effect */
       const c = JSON.parse(localStorage.getItem("delos.counters.v1") ?? '{"tools":0,"tokens":0}');
       setCounters(c);
       const a = JSON.parse(localStorage.getItem("delos.achievements.v1") ?? "[]");
       setAchievements(a);
+      /* eslint-enable react-hooks/set-state-in-effect */
     } catch {}
   }, []);
 

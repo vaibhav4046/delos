@@ -169,6 +169,8 @@ export function CalendarApp() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem("delos.calendar.v1");
+      // Mount-only hydration from localStorage before the backend sync.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (raw) setEvents(JSON.parse(raw));
     } catch {}
     syncFromBackend();
@@ -317,6 +319,8 @@ export function FileExplorerApp() {
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
+    // Mount-only hydration from the in-browser FS.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems(loadFs());
   }, []);
   useEffect(() => {
@@ -432,7 +436,7 @@ type Battery = { charging: boolean; level: number };
 
 export function SystemInfoApp() {
   const [battery, setBattery] = useState<Battery | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const navAny = navigator as unknown as { getBattery?: () => Promise<{ charging: boolean; level: number; addEventListener: (k: string, f: () => void) => void }> };

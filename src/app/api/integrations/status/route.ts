@@ -10,10 +10,14 @@ function has(name: string): boolean {
 
 export async function GET() {
   const integrations = [
-    { provider: "gmail", state: has("GMAIL_CLIENT_ID") ? "configured" : "missing" },
-    { provider: "notion", state: has("NOTION_CLIENT_ID") ? "configured" : "missing" },
-    { provider: "github", state: has("GITHUB_CLIENT_ID") ? "configured" : "missing" },
-    { provider: "gdrive", state: has("GDRIVE_CLIENT_ID") || has("GMAIL_CLIENT_ID") ? "configured" : "missing" },
+    // Env var names MUST match what the OAuth/connector handlers actually read
+    // (see src/lib/connectors/* and src/app/api/connectors/*). Previously this
+    // probed GMAIL_CLIENT_ID / NOTION_CLIENT_ID / GITHUB_CLIENT_ID / GDRIVE_CLIENT_ID
+    // — none of which are read anywhere — so every connector reported "missing".
+    { provider: "gmail", state: has("GOOGLE_CLIENT_ID") ? "configured" : "missing" },
+    { provider: "notion", state: has("NOTION_INTEGRATION_TOKEN") || has("NOTION_OAUTH_CLIENT_ID") ? "configured" : "missing" },
+    { provider: "github", state: has("GITHUB_TOKEN") ? "configured" : "missing" },
+    { provider: "gdrive", state: has("GOOGLE_CLIENT_ID") ? "configured" : "missing" },
     { provider: "groq", state: has("GROQ_API_KEY") ? "connected" : "missing" },
     { provider: "mistral", state: has("MISTRAL_API_KEY") ? "connected" : "missing" },
     { provider: "google", state: has("GOOGLE_GENERATIVE_AI_API_KEY") ? "connected" : "missing" },

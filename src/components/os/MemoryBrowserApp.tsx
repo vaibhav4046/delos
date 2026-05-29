@@ -37,6 +37,7 @@ export function MemoryBrowserApp() {
     // Re-sync after mount in case __delos_tenant was set between SSR and
     // the first effect tick (e.g. boot script populated it just after
     // hydration). Cheap idempotent · falls back to the same default.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTenant(readTenant());
   }, []);
   return (

@@ -27,7 +27,7 @@ chrome.runtime.onInstalled.addListener(() => {
       title: "Open DelOS side panel",
       contexts: ["page"],
     });
-  } catch (e) {
+  } catch {
     // Already created
   }
 });
@@ -266,7 +266,7 @@ function pageFillFn(field, value) {
   const setVal = (el, v) => {
     const proto = Object.getPrototypeOf(el);
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-    setter ? setter.call(el, v) : (el.value = v);
+    if (setter) setter.call(el, v); else el.value = v;
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
   };

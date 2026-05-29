@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 // Always-on voice wake hook.
 // Watches for wake word "delos" via Web Speech API (Chrome / Edge). On hit, fires
@@ -35,22 +35,20 @@ export function setVoiceWakeEnabled(on: boolean) {
   } catch {}
 }
 
+function subscribeVoiceWake(cb: () => void) {
+  window.addEventListener("delos-voicewake-changed", cb);
+  return () => window.removeEventListener("delos-voicewake-changed", cb);
+}
+
 export function useVoiceWake() {
-  const [enabled, setEnabled] = useState(false);
+  // `enabled` is a boolean primitive read straight from localStorage — no
+  // snapshot caching needed. The SpeechRecognition lifecycle below still uses
+  // local state/refs since it owns mutable, non-persisted runtime state.
+  const enabled = useSyncExternalStore(subscribeVoiceWake, getVoiceWakeEnabled, () => false);
   const [listening, setListening] = useState(false);
   const [lastWake, setLastWake] = useState<string | null>(null);
   const recRef = useRef<unknown>(null);
   const backoffRef = useRef(800);
-
-  useEffect(() => {
-    setEnabled(getVoiceWakeEnabled());
-    function onChange(e: Event) {
-      const d = (e as CustomEvent).detail as { on: boolean };
-      setEnabled(d.on);
-    }
-    window.addEventListener("delos-voicewake-changed", onChange as EventListener);
-    return () => window.removeEventListener("delos-voicewake-changed", onChange as EventListener);
-  }, []);
 
   useEffect(() => {
     if (!enabled) return;

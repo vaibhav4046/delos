@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const STORE_KEY = "delos.wallpaper.v2";
 
@@ -89,16 +89,12 @@ export function setWallpaper(id: string) {
   } catch {}
 }
 
+function subscribe(cb: () => void) {
+  window.addEventListener("delos-wallpaper-changed", cb);
+  return () => window.removeEventListener("delos-wallpaper-changed", cb);
+}
+
 export function useWallpaper(): [string, (id: string) => void] {
-  const [id, setId] = useState<string>(WALLPAPERS[0].id);
-  useEffect(() => {
-    setId(getWallpaper());
-    function onChange(e: Event) {
-      const d = (e as CustomEvent).detail as { id: string };
-      setId(d.id);
-    }
-    window.addEventListener("delos-wallpaper-changed", onChange as EventListener);
-    return () => window.removeEventListener("delos-wallpaper-changed", onChange as EventListener);
-  }, []);
-  return [id, (next) => { setWallpaper(next); setId(next); }];
+  const id = useSyncExternalStore(subscribe, getWallpaper, () => WALLPAPERS[0].id);
+  return [id, setWallpaper];
 }

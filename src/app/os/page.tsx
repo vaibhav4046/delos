@@ -3,12 +3,13 @@ import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import Link from "next/link";
 import * as Icons from "lucide-react";
 import { Boot } from "@/components/os/Boot";
-import { runJudgeDemo, type JudgeRunController } from "@/lib/demo/judgeScript";
+import { runJudgeDemo, type JudgeRunController, type JudgeAppKey, type JudgeIntent } from "@/lib/demo/judgeScript";
 import { JudgeDemoOverlay } from "@/components/os/JudgeDemoOverlay";
 import * as BrandIcons from "@/components/BrandIcons";
 import { Window, type WindowChild, type SnapKind } from "@/components/os/Window";
 import { ToastStack, type ToastItem } from "@/components/os/Toast";
 import { Logo } from "@/components/Logo";
+import { haptic } from "@/lib/mobile";
 // Core apps kept eager — they're on the hot path (Terminal opens from
 // the demo tour, AppBuilder is the headline killer feature). Everything
 // else is lazy so the /os initial chunk drops dramatically. QA caught
@@ -93,7 +94,7 @@ import { setTenantId as setTenantIdGlobal } from "@/lib/useTenant";
 import { useViewport } from "@/lib/useViewport";
 import { VoiceWakeMount } from "@/components/os/VoiceWakeMount";
 import { ApprovalGate } from "@/components/os/ApprovalGate";
-import { useWallpaper, WALLPAPERS, setWallpaper as setWallpaperGlobal } from "@/lib/useWallpaper";
+import { useWallpaper, WALLPAPERS, getWallpaper, setWallpaper as setWallpaperGlobal } from "@/lib/useWallpaper";
 import { useTheme } from "@/lib/useTheme";
 import { AppRuntime } from "@/components/os/AppRuntime";
 import { DesktopAmbient } from "@/components/os/DesktopAmbient";
@@ -161,10 +162,9 @@ const SYSTEM_APPS: Record<string, DockItem> = {
     id: "codebase",
     label: "DelCode",
     icon: "Code2",
-    // Was the LLM-driven CodebaseApp; the user wanted a real manual IDE
-    // (file tree + tabs + editor + integrated terminal + language libs).
-    // CodebaseApp stays in the bundle as a fallback for the codegen path
-    // but the dock entry now opens DelCode.
+    // DelCode is a real manual IDE (file tree + tabs + editor + integrated
+    // terminal + language libs). The old LLM-driven CodebaseApp/Sandpack
+    // path was retired and its dead code removed.
     spawn: () => ({ id: "codebase", title: "DelCode · IDE", icon: "Code2", width: 820, height: 580, content: <L label="DelCode"><DelCodeApp /></L> }),
   },
   // Cohort + Cowork removed from product per user request 2026-05-25.
@@ -427,6 +427,7 @@ export default function OSPage() {
   const [hintsDismissed, setHintsDismissed] = useState(false);
   useEffect(() => {
     try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (localStorage.getItem("delos.hintsDismissed") === "1") setHintsDismissed(true);
     } catch {}
   }, []);
@@ -475,6 +476,28 @@ export default function OSPage() {
       });
   }, []);
 
+  // PWA deep-links · runs once on mount.
+  //   • ?app=<key>  → manifest app-shortcut (e.g. long-press icon → Assistant)
+  //   • delos.shareTarget (sessionStorage, stashed by /share) → Web Share
+  //     Target hand-off: text/url shared from another app opens Del Assistant
+  //     pre-filled. This is a mobile-exclusive entry point.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const app = params.get("app");
+      if (app && SYSTEM_APPS[app]) spawnSystemApp(app);
+      const shared = sessionStorage.getItem("delos.shareTarget");
+      if (shared) {
+        sessionStorage.removeItem("delos.shareTarget");
+        spawnSystemApp("assistant");
+        setTimeout(() => emitIntent({ kind: "assistant.ask", text: shared }), 300);
+      }
+    } catch {
+      // best-effort — never block boot
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Listen for launch-app intents fired from OnboardingPortal, voice wake, etc.
   useEffect(() => {
     function onLaunch(e: Event) {
@@ -488,8 +511,13 @@ export default function OSPage() {
       }
     }
     function onWallpaperCycle() {
-      // Defer to wallpaper hook listener — useWallpaper picks up this event.
-      window.dispatchEvent(new CustomEvent("delos-wallpaper-next"));
+      // Cycle to the next wallpaper. Read fresh from storage so a Settings
+      // change before this fires can't cycle from a stale index. Was a no-op
+      // that re-dispatched delos-wallpaper-next — an event nothing listens
+      // for — so voice "change wallpaper" silently did nothing.
+      const current = getWallpaper();
+      const idx = WALLPAPERS.findIndex((w) => w.id === current);
+      setWallpaperGlobal(WALLPAPERS[(idx + 1) % WALLPAPERS.length].id);
     }
     window.addEventListener("delos-launch-app", onLaunch as EventListener);
     window.addEventListener("delos-close-focused", onCloseFocused as EventListener);
@@ -503,6 +531,8 @@ export default function OSPage() {
   }, [focusedId]);
 
   useEffect(() => {
+    // Seed the clock immediately, then tick every second.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
@@ -568,6 +598,7 @@ export default function OSPage() {
       setFocusedId(win.id);
       return [...prev, win];
     });
+    haptic("tap"); // mobile-exclusive tactile feedback on app launch
     pushToast(`launched ${tpl.label}`, "info");
   }
 
@@ -576,24 +607,6 @@ export default function OSPage() {
   // before kicking off a fresh sequence. Without this, mashing the
   // button would stack 30+ setTimeouts and double-fire intents.
   const judgeDemoCtl = useRef<JudgeRunController | null>(null);
-  function runDemoTour() {
-    // Hand off to the declarative state machine in lib/demo/judgeScript.
-    // Steps live there so they can be unit-tested independent of the
-    // OS shell and replayed in /demo without lifting page.tsx state.
-    // The overlay component listens on `delos-judge-card` events to
-    // render its narration card with timer + progress.
-    judgeDemoCtl.current?.cancel();
-    judgeDemoCtl.current = runJudgeDemo({
-      spawn: (app) => spawnSystemApp(app),
-      emit: (intent) => emitIntent(intent),
-      toast: (text, tone) => pushToast(text, tone ?? "ok"),
-      card: (c) => {
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("delos-judge-card", { detail: c }));
-        }
-      },
-    });
-  }
   useEffect(() => {
     function onCancel() {
       judgeDemoCtl.current?.cancel();
@@ -603,10 +616,26 @@ export default function OSPage() {
     return () => window.removeEventListener("delos-judge-cancel", onCancel);
   }, []);
 
-  // Landing page Demo button deep-links to /os?guest=1&demo=judge. On
-  // mount we auto-fire runDemoTour so a judge clicking the public demo
-  // sees the same scripted 60 second narrated walkthrough that the top
-  // bar JUDGE DEMO pill runs. Small delay lets boot + windows mount.
+  // Kick off the scripted 60-second judge demo. Builds the handler set the
+  // state machine drives: `spawn` maps each JudgeAppKey to a dock app,
+  // `emit` pipes intents through the same bus voice uses, `card` dispatches
+  // the overlay event JudgeDemoOverlay renders, `toast` pumps the corner
+  // stack. Re-invoking cancels any in-flight run first so the dozens of
+  // pending setTimeouts never stack and double-fire intents.
+  function startJudgeDemo() {
+    judgeDemoCtl.current?.cancel();
+    pushToast("judge demo · 60s · esc to stop", "info");
+    judgeDemoCtl.current = runJudgeDemo({
+      spawn: (app: JudgeAppKey) => spawnSystemApp(app),
+      emit: (intent: JudgeIntent) => emitIntent(intent),
+      card: (card) => window.dispatchEvent(new CustomEvent("delos-judge-card", { detail: card })),
+      toast: (text, tone) => pushToast(text, tone === "ok" ? "ok" : "info"),
+      onDone: () => pushToast("judge demo complete · five pillars green", "ok"),
+    });
+  }
+
+  // On mount, pre-warm cold lambdas so the first real call from a button
+  // click is already warm instead of paying a cold-start penalty.
   useEffect(() => {
     if (typeof window === "undefined") return;
     // Pre warm cold lambdas the moment the OS mounts. Fires the health
@@ -641,9 +670,6 @@ export default function OSPage() {
         cache: "no-store",
       }).catch(() => {});
     }, 1200);
-    // Judge demo URL deeplink removed alongside the in-UI buttons per
-    // hackathon UX cleanup. runDemoTour is dormant code now.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function spawnSpecWindow(spec: AppSpec) {
@@ -932,10 +958,50 @@ export default function OSPage() {
         case "navigate":
           if (step.payload) window.location.href = step.payload;
           break;
+        // M8 · rich productivity intents. These reach fireVoiceStep only as
+        // steps inside a compound chain (VoiceWakeMount forwards compound
+        // here). Before this they hit no case and were silently dropped, so
+        // "open calendar and remind me to call Andy" lost the reminder leg.
+        // Route each to its surface so the step is visible + actionable.
+        case "set_reminder":
+          if (SYSTEM_APPS["widgets"]) spawnSystemApp("widgets");
+          break;
+        case "create_event":
+          if (SYSTEM_APPS["calendar"]) spawnSystemApp("calendar");
+          break;
+        case "schedule_action":
+          if (SYSTEM_APPS["schedule"]) spawnSystemApp("schedule");
+          break;
+        case "store_memory":
+        case "clear_memory":
+          if (SYSTEM_APPS["memoryBrowser"]) spawnSystemApp("memoryBrowser");
+          break;
         case "answer":
+          // A pure-answer leg inside a compound chain (e.g. "what's the weather
+          // AND open calendar"). Atomic answers are spoken by the mic dispatcher
+          // (VoiceApp) / wake handler directly; here — only reachable as a
+          // compound sub-step — route the query to the assistant so it's
+          // actually answered instead of silently dropped.
+          if (step.payload) {
+            spawnSystemApp("assistant");
+            const text = step.payload;
+            setTimeout(() => emitIntent({ kind: "assistant.ask", text }), 250);
+          }
+          break;
         case "unknown":
         case "compound":
           // No-op for atomic steps; compound is handled by chain unrolling.
+          break;
+        default:
+          // Connector / free-text intents (draft_email, read_email, create_note,
+          // parse_pdf, open_gdrive, gmail_*, notion_*, github_*, …). Route to the
+          // assistant — its tryMcpAction pipeline fulfils them — so a compound
+          // step is never silently swallowed (M8).
+          spawnSystemApp("assistant");
+          if (step.payload) {
+            const text = step.payload;
+            setTimeout(() => emitIntent({ kind: "assistant.ask", text }), 250);
+          }
           break;
       }
     }
@@ -1002,8 +1068,6 @@ export default function OSPage() {
     ],
     [],
   );
-  const All = Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>;
-
   // Global keyboard shortcuts
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -1040,7 +1104,11 @@ export default function OSPage() {
         e.preventDefault();
         spawnSystemApp("builder");
       }
-      // ⌘⇧D demo-tour hotkey removed alongside the UI demo buttons.
+      // ⌘⇧D · launch the scripted 60-second judge demo (5-pillar tour).
+      if (isMod && e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        startJudgeDemo();
+      }
       if (isMod && e.key.toLowerCase() === "r") {
         if (focusedId) {
           e.preventDefault();
@@ -1112,6 +1180,7 @@ export default function OSPage() {
     const actions: Command[] = [
       { id: "build-app", label: "Open VibeCode", hint: "vibe-code an app", icon: "Sparkles", section: "Action", run: () => spawnSystemApp("builder") },
       { id: "assistant-ask", label: "Ask Del Assistant", hint: "draft email · create Notion page · query GitHub", icon: "Sparkles", section: "Action", run: () => spawnSystemApp("assistant") },
+      { id: "judge-demo", label: "Run judge demo (60s)", hint: "scripted 5-pillar tour · ⌘⇧D · esc to stop", icon: "Play", section: "Action", run: () => startJudgeDemo() },
       {
         id: "wallpaper-cycle",
         label: "Cycle wallpaper",
@@ -1536,9 +1605,6 @@ function WelcomeMat({
     builder: BrandIcons.BuilderSleek,
     terminal: BrandIcons.TerminalSleek,
     mission: BrandIcons.MissionSleek,
-    claude: BrandIcons.ClaudeIcon,
-    chatgpt: BrandIcons.ChatGPTIcon,
-    perplexity: BrandIcons.PerplexityIcon,
   };
   if (!visible) return null;
   const featured = order.slice(0, 12);
@@ -1555,10 +1621,16 @@ function WelcomeMat({
           WELCOME TO DEL<span style={{ color: "var(--accent)" }}>OS</span>
         </h1>
         <p
-          className="font-mono text-[11px] sm:text-xs mt-3 max-w-md mx-auto wallpaper-text-shadow wall-readable"
-          style={{ padding: "6px 12px", borderRadius: 4, display: "inline-block" }}
+          className="font-mono text-xs sm:text-sm mt-3 max-w-lg mx-auto wallpaper-text-shadow wall-readable"
+          style={{ padding: "8px 14px", borderRadius: 4, display: "inline-block", lineHeight: 1.5 }}
         >
-          browser-OS · agents build apps · ⌘K palette · drag windows
+          Describe an app in plain English — <strong>agents build it live</strong>, right here in the browser.
+        </p>
+        <p
+          className="font-mono text-[10px] sm:text-[11px] mt-2 max-w-md mx-auto wallpaper-text-shadow wall-readable"
+          style={{ padding: "4px 10px", borderRadius: 4, display: "inline-block", opacity: 0.85 }}
+        >
+          Self-healing <strong>Groq · Mistral · Gemini</strong> cascade — it routes around outages, so it never stalls.
         </p>
         <div className="mt-5 flex justify-center gap-2 flex-wrap">
           <button className="btn-pixel" style={{ background: "var(--accent)", color: "var(--on-accent)" }} onClick={() => onLaunch("builder")}>★ BUILD APP</button>
@@ -1618,7 +1690,11 @@ function Launchpad({
     terminal: BrandIcons.TerminalSleek,
     mission: BrandIcons.MissionSleek,
   };
-  useEffect(() => { if (!open) setQ(""); }, [open]);
+  useEffect(() => {
+    // Clear the search box whenever the launcher closes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!open) setQ("");
+  }, [open]);
   if (!open) return null;
   const list = order.filter((k) => apps[k].label.toLowerCase().includes(q.toLowerCase()));
   // Group into categories

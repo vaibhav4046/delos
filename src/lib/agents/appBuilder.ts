@@ -1,5 +1,5 @@
 import { models, getEffectiveTemperature } from "../llm";
-import { generateJson, generateJsonWithFallback } from "./jsonGen";
+import { generateJsonWithFallback } from "./jsonGen";
 import { appSpecSchema, type AppSpec } from "../appSpec";
 import { BUILTIN_APPS } from "../builtinApps";
 import { matchCloneTemplate } from "../clone-templates/app-clones";
@@ -1105,19 +1105,21 @@ Return ONLY the JSON object.`;
   }
 
   try {
-    const spec = await Promise.race([
-      generateJsonWithFallback({
-        primary: models.planner,
-        fallbacks: models.fallbackChain,
-        schema: appSpecSchema,
-        prompt,
-        temperature: getEffectiveTemperature(0.4),
-        maxRetries: 1,
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("llm_build_timeout_35s")), 35_000),
-      ),
-    ]);
+    // Real abort, not just a lost race · the old Promise.race rejected at 35s
+    // but left generateJsonWithFallback running (still burning provider quota +
+    // walking the cascade with nobody listening). Now the timeout aborts the
+    // signal, which short-circuits the cascade and the underlying generateText.
+    const buildAc = new AbortController();
+    const buildTimer = setTimeout(() => buildAc.abort(), 35_000);
+    const spec = await generateJsonWithFallback({
+      primary: models.planner,
+      fallbacks: models.fallbackChain,
+      schema: appSpecSchema,
+      prompt,
+      temperature: getEffectiveTemperature(0.4),
+      maxRetries: 1,
+      abortSignal: buildAc.signal,
+    }).finally(() => clearTimeout(buildTimer));
     // ─── Self-QA repair pass ─────────────────────────────────────────────
     // Runs BEFORE coverage scoring. Fixes orphan state keys, icon casing,
     // empty containers, list arrays. Errors silently swallowed — repair
@@ -1157,7 +1159,7 @@ Return ONLY the JSON object.`;
       return preserveIdentity(repairSpec(working, userPrompt, coverage.missing));
     }
     return preserveIdentity(working);
-  } catch (e) {
+  } catch {
     // Refine fail-safe · if we have the prior spec, return it UNCHANGED
     // rather than spawning a generic placeholder/domainCommand spec that
     // would destroy the user's clone (2026-05-25 brutal-QA · refining
@@ -1165,7 +1167,7 @@ Return ONLY the JSON object.`;
     // generic operational view). Caller sees the same window untouched
     // and a toast surfaces the LLM failure.
     if (opts?.previousSpec) return opts.previousSpec;
-    return placeholderSpec(userPrompt, (e as Error).message);
+    return placeholderSpec(userPrompt);
   }
 }
 
@@ -1365,7 +1367,7 @@ function repairSpec(spec: AppSpec, userPrompt: string, missing: string[]): AppSp
 // Domain-agnostic fallback app. Renders the user's prompt as the title,
 // shows a polite note explaining the LLM rate-limit, and includes a copy
 // button + a refresh suggestion. Better UX than a red toast that vanishes.
-function placeholderSpec(userPrompt: string, _errMsg: string): AppSpec {
+function placeholderSpec(userPrompt: string): AppSpec {
   // Always emits a 6-card domain-shaped app rather than the old 3-card
   // "spec scaffold offline" placeholder. Forbidden words (scaffold,
   // placeholder, offline, todo, implement later) are gone from copy.

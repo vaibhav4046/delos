@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { MCPServerConfig } from "@/lib/mcp/types";
 
 const STORE_KEY = "delos.mcpServers.v1";
@@ -38,13 +38,43 @@ function resolveUrl(url: string): string {
   return url;
 }
 
+// Cache the parsed snapshot keyed on the raw localStorage string so
+// useSyncExternalStore sees a stable reference; returns the RAW config (no
+// url resolution) to match the hook's original behavior — getMcpServers()
+// stays the resolveUrl path for non-hook callers.
+const EMPTY_ARR: MCPServerConfig[] = [];
+let cachedRaw: string | null = null;
+let cachedValue: MCPServerConfig[] = DEFAULTS;
+
+function getSnapshot(): MCPServerConfig[] {
+  if (typeof window === "undefined") return EMPTY_ARR;
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORE_KEY);
+  } catch {
+    return DEFAULTS;
+  }
+  if (raw === cachedRaw) return cachedValue;
+  cachedRaw = raw;
+  if (!raw) {
+    cachedValue = DEFAULTS;
+    return cachedValue;
+  }
+  try {
+    const v = JSON.parse(raw) as MCPServerConfig[];
+    cachedValue = v.length === 0 ? DEFAULTS : v;
+  } catch {
+    cachedValue = DEFAULTS;
+  }
+  return cachedValue;
+}
+
+function subscribe(cb: () => void) {
+  window.addEventListener("delos-mcp-changed", cb);
+  return () => window.removeEventListener("delos-mcp-changed", cb);
+}
+
 export function useMcpServers(): [MCPServerConfig[], (next: MCPServerConfig[]) => void] {
-  const [v, setV] = useState<MCPServerConfig[]>([]);
-  useEffect(() => {
-    setV(read());
-    function onChange() { setV(read()); }
-    window.addEventListener("delos-mcp-changed", onChange);
-    return () => window.removeEventListener("delos-mcp-changed", onChange);
-  }, []);
-  return [v, (next) => { write(next); setV(next); }];
+  const v = useSyncExternalStore(subscribe, getSnapshot, () => EMPTY_ARR);
+  return [v, write];
 }

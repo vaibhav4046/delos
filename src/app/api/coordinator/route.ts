@@ -4,12 +4,12 @@
 
 import { z } from "zod";
 import { NextRequest } from "next/server";
-import { env } from "@/lib/env";
 import { safeRecall } from "@/lib/hydra";
-import { generateJson, generateJsonWithFallback } from "@/lib/agents/jsonGen";
+import { generateJsonWithFallback } from "@/lib/agents/jsonGen";
 import { models, withModels, getEffectiveTemperature, withTemperature, type ModelOverrides, type ModelKey } from "@/lib/llm";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -48,12 +48,22 @@ const planSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  // M3 · paid multi-agent LLM route — per-IP throttle so an unauthenticated
+  // caller can't burn provider quota / rack up cost in a loop.
+  const rl = rateLimit(`coordinator:ip:${clientIp(req)}`, 10, 60_000);
+  if (!rl.ok) {
+    return Response.json({ ok: false, error: "rate_limited" }, { status: 429, headers: rl.headers });
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return zodErr(parsed.error);
   }
   const { goal, tenantId, identity, models: overrides, temperature } = parsed.data;
-  const tid = tenantId || env.DELRIO_TENANT_ID;
+  // Resolve server-side · this route recalls the tenant's DESKTOP_INDEX and
+  // connector-credential memory entries into the LLM prompt. Trusting a
+  // body-supplied tenantId let any caller read ANOTHER tenant's private file
+  // index + credentials (BOLA read). resolveTenant ignores arbitrary tenantIds.
+  const { tenantId: tid } = await resolveTenant(req, { bodyTenantId: tenantId, intent: "read" });
 
   // Pull recent desktop index + connector credentials so the coordinator has real context.
   const ingestHits = await safeRecall({ tenantId: tid, query: "DESKTOP_INDEX root", topK: 3 });

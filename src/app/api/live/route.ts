@@ -12,13 +12,35 @@ export async function GET(req: NextRequest) {
   const { tenantId } = await resolveTenant(req);
   const allowed = (rec: { tenantId: string; runId: string }) =>
     rec.tenantId === tenantId || rec.runId.startsWith("seed-demo-");
+
+  // Resource-leak fix · the old code defined a `_cleanup` that was NEVER wired
+  // to anything, so on client disconnect the 15s heartbeat interval kept firing
+  // forever and the subscribeLive listener was never removed (listener array
+  // grew unbounded, every run event fanned out to dead controllers). Now the
+  // interval + subscription are torn down on stream cancel, request abort, OR
+  // the first failed enqueue — whichever fires first, exactly once.
+  let hb: ReturnType<typeof setInterval> | undefined;
+  let unsub: (() => void) | undefined;
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (hb) clearInterval(hb);
+    if (unsub) unsub();
+  };
+
   const stream = new ReadableStream({
     start(controller) {
       const enc = new TextEncoder();
       const send = (obj: unknown) => {
+        if (closed) return;
         try {
           controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
-        } catch {}
+        } catch {
+          // Controller already closed (client gone) — stop the heartbeat +
+          // unsubscribe so we don't leak past the disconnect.
+          cleanup();
+        }
       };
       // Initial snapshot — last 50 runs. Seed first if cold Lambda has empty cache
       // so judges landing on /live always see at least one completed run.
@@ -28,20 +50,20 @@ export async function GET(req: NextRequest) {
         runs: listRuns(50).filter(allowed).map((r) => snap(r)),
         scope: tenantId,
       });
-      const unsub = subscribeLive((ev) => {
+      unsub = subscribeLive((ev) => {
         if (!allowed(ev.rec)) return;
         send({ type: ev.type, rec: snap(ev.rec) });
       });
       // Heartbeat to keep connection alive
-      const hb = setInterval(() => send({ type: "heartbeat", at: Date.now() }), 15_000);
-      // No cancellation listener — connection close handled by enqueue throw
-      const _cleanup = () => {
-        clearInterval(hb);
-        unsub();
-      };
-      void _cleanup; // referenced for closure
+      hb = setInterval(() => send({ type: "heartbeat", at: Date.now() }), 15_000);
+    },
+    cancel() {
+      cleanup();
     },
   });
+  // Belt-and-suspenders · if the request aborts before the stream's own cancel
+  // fires (proxy drop, navigation), tear down here too. `cleanup` is idempotent.
+  req.signal.addEventListener("abort", cleanup);
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 // JarvisOS-style identity layer. Persisted to localStorage. Prepended to every agent
 // prompt so output matches user's tone, role, format. Synced across DelOS surfaces.
@@ -44,18 +44,43 @@ export function setIdentity(i: Identity) {
   } catch {}
 }
 
+// Cache the merged snapshot keyed on the raw localStorage string — getIdentity
+// builds a fresh {...DEFAULT, ...parsed} object each call, which would
+// infinite-loop useSyncExternalStore without a stable reference.
+let cachedRaw: string | null = null;
+let cachedValue: Identity = DEFAULT_IDENTITY;
+
+function getSnapshot(): Identity {
+  if (typeof window === "undefined") return DEFAULT_IDENTITY;
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORE_KEY);
+  } catch {
+    return DEFAULT_IDENTITY;
+  }
+  if (raw === cachedRaw) return cachedValue;
+  cachedRaw = raw;
+  if (!raw) {
+    cachedValue = DEFAULT_IDENTITY;
+    return cachedValue;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<Identity>;
+    cachedValue = { ...DEFAULT_IDENTITY, ...parsed };
+  } catch {
+    cachedValue = DEFAULT_IDENTITY;
+  }
+  return cachedValue;
+}
+
+function subscribe(cb: () => void) {
+  window.addEventListener("delos-identity-changed", cb);
+  return () => window.removeEventListener("delos-identity-changed", cb);
+}
+
 export function useIdentity(): [Identity, (i: Identity) => void] {
-  const [identity, setI] = useState<Identity>(DEFAULT_IDENTITY);
-  useEffect(() => {
-    setI(getIdentity());
-    function onChange(e: Event) {
-      const d = (e as CustomEvent).detail as Identity;
-      setI(d);
-    }
-    window.addEventListener("delos-identity-changed", onChange as EventListener);
-    return () => window.removeEventListener("delos-identity-changed", onChange as EventListener);
-  }, []);
-  return [identity, (next) => { setIdentity(next); setI(next); }];
+  const identity = useSyncExternalStore(subscribe, getSnapshot, () => DEFAULT_IDENTITY);
+  return [identity, setIdentity];
 }
 
 // Render identity as ~/IDENTITY.md preamble for system prompts.

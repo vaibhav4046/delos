@@ -3,7 +3,11 @@
 
 const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 const PHONE = /(?:\+?\d{1,3}[\s.-])?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g;
-const CC = /\b(?:\d[ -]*?){13,19}\b/g;
+// ReDoS-safe: a leading digit followed by 12–18 groups of (optional SINGLE
+// separator + digit) = 13–19 digits. The old `(?:\d[ -]*?){13,19}` nested a
+// lazy unbounded `[ -]*?` inside a counted quantifier → catastrophic
+// backtracking on long digit/space strings. This form is linear.
+const CC = /\b\d(?:[ -]?\d){12,18}\b/g;
 const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 const API_KEY = /\b(sk-|gsk_|sk_live_|sk_test_|AIza[a-zA-Z0-9_-]{20,}|xoxb-[a-zA-Z0-9-]+)[A-Za-z0-9_\-.]{8,}/g;
 

@@ -1,6 +1,8 @@
+import { NextRequest } from "next/server";
 import { buildAppFromPrompt } from "@/lib/agents/appBuilder";
 import { safeAddMemory } from "@/lib/hydra";
-import { env } from "@/lib/env";
+import { resolveTenant } from "@/lib/apiAuth";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 import { broadcastLive, recordRunStart, recordEvent } from "@/lib/runLog";
 import { nanoid } from "nanoid";
 import type { RunEvent } from "@/lib/types";
@@ -19,13 +21,24 @@ const DEFAULT_SUB_GOALS = [
   "Tic-tac-toe — 3×3 grid, X vs O, win detection, reset button.",
 ];
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  // M3 · the heaviest unauth route — fans out 5 parallel LLM app-builds,
+  // maxDuration 120s. Per-IP throttle so it can't be looped for cost/DoS.
+  // (The default no-body mission is kept on purpose: it's the signature
+  // "build an OS + launch Doom" demo. The rate limit is the abuse guard.)
+  const rl = rateLimit(`osbuilder:ip:${clientIp(req)}`, 5, 60_000);
+  if (!rl.ok) {
+    return Response.json({ ok: false, error: "rate_limited" }, { status: 429, headers: rl.headers });
+  }
   const body = (await req.json().catch(() => ({}))) as {
     goal?: string;
     subGoals?: string[];
     tenantId?: string;
   };
-  const tenantId = body.tenantId || env.DELRIO_TENANT_ID;
+  // Resolve server-side · os-builder records the run on the tenant's live feed
+  // and persists built apps to its memory graph. A body tenantId is honored
+  // only for reserved test prefixes — never an arbitrary write target (BOLA).
+  const { tenantId } = await resolveTenant(req, { bodyTenantId: body.tenantId, intent: "write" });
   const subGoals = body.subGoals && body.subGoals.length > 0 ? body.subGoals : DEFAULT_SUB_GOALS;
   const goal = body.goal || "Build a desktop OS shell with 5 working apps + auto-launch Doom";
   const runId = `osb-${nanoid(8)}`;

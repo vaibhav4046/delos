@@ -3,6 +3,7 @@ import { Pixelify_Sans, Inter, JetBrains_Mono, Playfair_Display } from "next/fon
 import "./globals.css";
 import "@xterm/xterm/css/xterm.css";
 import { GlobalCmdK } from "@/components/GlobalCmdK";
+import { PwaInstall } from "@/components/PwaInstall";
 
 const pixel = Pixelify_Sans({ subsets: ["latin"], variable: "--font-pixel-google", display: "swap" });
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans-google", display: "swap" });
@@ -24,7 +25,9 @@ export const metadata: Metadata = {
       { url: "/icon.svg?v=3", sizes: "any" },
     ],
     shortcut: "/icon.svg?v=3",
-    apple: "/icon.svg?v=3",
+    // iOS ignores SVG for home-screen icons — must be a real PNG, else Safari
+    // falls back to an ugly page screenshot on Add-to-Home-Screen.
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
   applicationName: "DelOS",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "DelOS" },
@@ -55,6 +58,9 @@ export const viewport: Viewport = {
   themeColor: "#0f0f1b",
   width: "device-width",
   initialScale: 1,
+  // Let the app paint into the notch / Dynamic Island area; components use
+  // env(safe-area-inset-*) to keep chrome clear of cutouts.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -66,6 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen antialiased">
         {children}
         <GlobalCmdK />
+        <PwaInstall />
         <script
           dangerouslySetInnerHTML={{
             __html: `if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); }); }`,

@@ -6,13 +6,11 @@
 
 import { z } from "zod";
 import { NextRequest } from "next/server";
-import { env } from "@/lib/env";
 import { safeAddMemory } from "@/lib/hydra";
-import { getServerSession } from "@/lib/session";
 import { encryptSecret, redactToken } from "@/lib/secrets";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 
 // Connector-credential paste is a target for brute-force probing — cap to
@@ -41,8 +39,12 @@ export async function POST(req: NextRequest) {
     return zodErr(parsed.error);
   }
   const { connector, token, workspace } = parsed.data;
-  const session = await getServerSession();
-  const tenantId = session?.tenantId || env.DELRIO_TENANT_ID;
+  // SECURITY: a connector credential is a secret. Bind it to the caller's
+  // resolved tenant (session → per-IP anon), NEVER the shared `delrio_demo`
+  // seed tenant. Previously an unauthenticated paste fell back to the shared
+  // tenant, so any other guest resolving there could drive connector actions
+  // with the victim's token (cross-tenant credential reuse).
+  const { tenantId } = await resolveTenant(req, { intent: "write" });
 
   // Lightly probe the token so we fail fast if it is obviously wrong.
   let verified = false;

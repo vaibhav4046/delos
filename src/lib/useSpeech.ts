@@ -1,5 +1,10 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
+// M10 · single source of truth for voice parsing. The client fast-path used
+// to run its OWN stripped-down regex matcher (localMatch) that drifted out of
+// sync with the server's richer parser — same phrase parsed differently
+// depending on entry point. Both now call parseVoiceLocal.
+import { parseVoiceLocal } from "@/lib/voiceParser";
 
 type SR = SpeechRecognition;
 
@@ -85,6 +90,8 @@ export function getVoicePrefs(): VoicePrefs {
 export function useVoicePrefs(): [VoicePrefs, (next: VoicePrefs) => void] {
   const [v, setV] = useState<VoicePrefs>(DEFAULTS);
   useEffect(() => {
+    // Hydrate from localStorage on mount, then track cross-tab/app changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setV(readPrefs());
     function onChange() {
       setV(readPrefs());
@@ -131,6 +138,14 @@ let currentAudio: HTMLAudioElement | null = null;
 // /api/tts response landing AFTER mute and starting playback.
 let muteToken = 0;
 
+// Latches true once /api/tts answers 503 (server has no ElevenLabs key) AND
+// the user hasn't supplied their own BYOK key. After that, every speak() with
+// provider "elevenlabs" skips the guaranteed-503 fetch and goes straight to the
+// browser voice — removing ~200-400ms of dead air before each spoken reply,
+// which read as "voice is broken / laggy". Reset by stopSpeaking() never; only
+// a BYOK key in prefs re-enables the premium path.
+let elevenUnavailable = false;
+
 export async function speak(text: string, opts?: { force?: "browser" | "elevenlabs" }) {
   if (typeof window === "undefined") return;
   const prefs = readPrefs();
@@ -138,6 +153,9 @@ export async function speak(text: string, opts?: { force?: "browser" | "elevenla
   stopSpeaking();
   const myToken = ++muteToken;
   if (provider === "elevenlabs") {
+    // Skip the dead round-trip when we already proved the server has no key
+    // and the user hasn't pasted their own. Browser voice is instant.
+    if (elevenUnavailable && !prefs.elevenApiKey) return browserSpeak(text);
     try {
       const r = await fetch("/api/tts", {
         method: "POST",
@@ -153,7 +171,9 @@ export async function speak(text: string, opts?: { force?: "browser" | "elevenla
       // If user muted while we were fetching, bail.
       if (myToken !== muteToken) return;
       if (r.status === 503) {
-        // not configured — fall back
+        // not configured — latch (only when no BYOK key) and fall back so the
+        // next reply skips this fetch entirely.
+        if (!prefs.elevenApiKey) elevenUnavailable = true;
         return browserSpeak(text);
       }
       if (!r.ok) {
@@ -182,6 +202,33 @@ export async function speak(text: string, opts?: { force?: "browser" | "elevenla
 }
 
 function browserSpeak(text: string) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  // Chrome returns an EMPTY getVoices() on the very first call of a page load —
+  // the list is populated async and announced via the `voiceschanged` event.
+  // If we emit immediately we get a silent (or robotic-default) first reply,
+  // which reads as "voice is broken". Guard: when the list is empty, wait for
+  // voiceschanged (with a 300ms safety timeout for browsers that never fire it)
+  // and emit once voices land. Subsequent calls hit the fast synchronous path.
+  const synth = window.speechSynthesis;
+  if (synth.getVoices().length === 0) {
+    let fired = false;
+    const emit = () => {
+      if (fired) return;
+      fired = true;
+      try { synth.removeEventListener("voiceschanged", emit); } catch {}
+      emitUtterance(text);
+    };
+    try { synth.addEventListener("voiceschanged", emit, { once: true }); } catch {}
+    setTimeout(emit, 300);
+    return;
+  }
+  emitUtterance(text);
+}
+
+// Builds + speaks the utterance with the user's chosen (or best-available)
+// voice. Split out of browserSpeak so the Chrome empty-voices guard can defer
+// the emit until voices are ready without duplicating the voice-selection logic.
+function emitUtterance(text: string) {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
   const prefs = readPrefs();
   window.speechSynthesis.cancel();
@@ -341,6 +388,9 @@ export function useBrowserSTT() {
       if (wantRunningRef.current && restartCountRef.current < 30) {
         restartCountRef.current += 1;
         try {
+          // Self-restart: onend fires long after buildRec is defined, so the
+          // forward reference is safe and intended.
+          // eslint-disable-next-line react-hooks/immutability
           const next = buildRec();
           if (next) {
             recRef.current = next;
@@ -398,6 +448,57 @@ export function useBrowserSTT() {
   }, [stopMeter]);
 
   return { state, transcript, interim, error, audioLevel, start, stop, setTranscript };
+}
+
+// Whisper emits canned "training-data" phrases when fed near-silence or pure
+// noise — the model was trained on YouTube captions, so silence decodes to the
+// most common caption strings ("Thank you for watching!", "Please subscribe").
+// These got auto-submitted by the voice loop, firing bogus commands. Drop any
+// transcript that is ONLY one of these (after stripping punctuation/emoji), so
+// an empty/noisy recording yields "" instead of a phantom command.
+const WHISPER_HALLUCINATIONS = new Set([
+  "thank you for watching",
+  "thanks for watching",
+  "thank you for watching!",
+  "thank you",
+  "thank you.",
+  "thanks",
+  "you",
+  "bye",
+  "bye.",
+  "goodbye",
+  "please subscribe",
+  "subscribe",
+  "like and subscribe",
+  "see you next time",
+  "see you in the next video",
+  "i'll see you in the next video",
+  "music",
+  "[music]",
+  "(music)",
+  "applause",
+  "[applause]",
+  "silence",
+  "[silence]",
+  "transcribed by",
+  "okay",
+  "ok",
+  ".",
+]);
+
+function isWhisperHallucination(text: string): boolean {
+  // Normalize: lowercase, strip emoji/music-notes, collapse whitespace, drop
+  // trailing punctuation. A genuine command is almost never one of these exact
+  // strings; a real reply that happens to be "thank you" is acceptable collateral.
+  const norm = text
+    .toLowerCase()
+    .replace(/[♠-➿\u{1f000}-\u{1faff}♪♫♩]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.!?,]+$/g, "")
+    .trim();
+  if (!norm) return true;
+  return WHISPER_HALLUCINATIONS.has(norm);
 }
 
 // Whisper STT (MediaRecorder → /api/stt). Tuned for far-field capture:
@@ -544,7 +645,10 @@ export function useWhisperSTT() {
             setState("error");
             return;
           }
-          setTranscript(j.text ?? "");
+          // Drop Whisper's silence-hallucinations ("Thank you for watching!")
+          // so a quiet/noisy recording doesn't auto-fire a phantom command.
+          const clean = j.text && isWhisperHallucination(j.text) ? "" : (j.text ?? "");
+          setTranscript(clean);
           setState("idle");
         } catch (e) {
           setError(e instanceof Error ? e.message : "transcribe failed");
@@ -564,6 +668,8 @@ export function useWhisperSTT() {
       }
       setError(msg);
     }
+    // Stable identity by design; 'state' is only read for branching, not deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stop = useCallback(() => {
@@ -593,6 +699,8 @@ export function useSpeechToText() {
   const whisper = useWhisperSTT();
   const [provider, setProvider] = useState<"browser" | "whisper">(DEFAULTS.sttProvider);
   useEffect(() => {
+    // Hydrate the chosen STT provider on mount, then track pref changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setProvider(readPrefs().sttProvider);
     function onChange() {
       setProvider(readPrefs().sttProvider);
@@ -651,83 +759,12 @@ export type VoiceAction = {
   chain?: Array<{ intent: VoiceAction["intent"]; app?: string; payload?: string }>;
 };
 
-// Local regex fast-path. Catches "build me X named Y", "open Z", "run cohort
-// on X", "close", "wallpaper", and obvious math/greetings BEFORE we hit the
-// LLM. Cuts latency to ~0ms for the common commands and removes the failure
-// mode where the LLM mis-classifies "build me app" as an "answer" intent.
-// Returns null if no local pattern matches — caller falls through to LLM.
+// Local regex fast-path → delegates to the canonical parseVoiceLocal so the
+// client and server resolve identical intents (M10). parseVoiceLocal returns
+// the narrower voiceParser.VoiceAction union; it is structurally assignable to
+// the superset VoiceAction the voice client uses, so we widen with a cast.
 function localMatch(raw: string): VoiceAction | null {
-  const text = raw.trim();
-  const lower = text.toLowerCase();
-
-  // Greetings → speak directly
-  if (/^(hi|hello|hey|yo|hola|hiya|sup)[\s.,!?]*$/i.test(lower)) {
-    return { intent: "answer", payload: "Hey — what should we build?", reply: "Hey — what should we build?" };
-  }
-
-  // Basic math · "what is 2 + 2" / "calculate 5 times 7" / "23 plus 9"
-  const math = lower.match(/(?:what\s+(?:is|are)\s+)?(\d+(?:\.\d+)?)\s*(plus|minus|times|over|divided\s+by|\+|-|\*|x|\/)\s*(\d+(?:\.\d+)?)/i);
-  if (math) {
-    const a = parseFloat(math[1]);
-    const b = parseFloat(math[3]);
-    const op = math[2].toLowerCase();
-    let v: number | null = null;
-    if (op === "plus" || op === "+") v = a + b;
-    else if (op === "minus" || op === "-") v = a - b;
-    else if (op === "times" || op === "*" || op === "x") v = a * b;
-    else if (op === "over" || op === "divided by" || op === "/") v = b === 0 ? null : a / b;
-    if (v != null) {
-      const r = Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, "");
-      return { intent: "answer", payload: r, reply: r };
-    }
-  }
-
-  // "build me an app/application named/called X" / "build me X" / "create X app"
-  // Strips the conversational shell ("hello hello, please build me…") so the
-  // payload sent to App Builder is just the actual subject.
-  const build = lower.match(/(?:^|[.,!]\s*)(?:please\s+)?(?:can\s+you\s+)?(?:could\s+you\s+)?(?:build|make|create)\s+(?:me\s+)?(?:an?\s+|the\s+)?(?:app(?:lication)?|tool|widget|clone\s+of|website|webapp)?\s*(?:named|called|for)?\s*(.{2,200}?)$/i);
-  if (build) {
-    const subject = build[1].trim().replace(/^["'`]|["'`]$/g, "");
-    if (subject && !/^(it|that|one|this)$/i.test(subject)) {
-      return {
-        intent: "build_app",
-        payload: subject,
-        reply: `Building ${subject.length > 40 ? subject.slice(0, 40) + "…" : subject}.`,
-      };
-    }
-  }
-
-  // "run cohort on X" / "council X" / "race the models on X"
-  const cohort = lower.match(/(?:run\s+(?:a\s+)?cohort|council|race\s+(?:the\s+)?models?)\s+(?:on|about|for|with)?\s+(.{3,200})$/i);
-  if (cohort) {
-    return { intent: "run_cohort", payload: cohort[1].trim(), reply: `Racing the models on ${cohort[1].slice(0, 30)}.` };
-  }
-
-  // "open X" — exact app id pass-through
-  const open = lower.match(/^(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?([a-z0-9 _-]{2,30})(?:\s+app)?[.!?]*$/i);
-  if (open) {
-    const raw = open[1].trim().toLowerCase().replace(/\s+/g, "");
-    const ALIASES: Record<string, string> = {
-      delassistant: "assistant", chat: "assistant", del: "assistant",
-      kanban: "builder", pomodoro: "builder", timer: "builder",
-      doom: "doom", deldoom: "doom",
-      music: "browser", youtube: "browser", google: "browser",
-    };
-    const app = ALIASES[raw] ?? raw;
-    return { intent: "open_app", app, payload: "", reply: `Opening ${app}.` };
-  }
-
-  // "close" / "close this" / "close window"
-  if (/^(close|dismiss|exit)(\s+(this|window|the\s+window))?[.!?]*$/i.test(lower)) {
-    return { intent: "close_window", reply: "Closed." };
-  }
-
-  // "next/change wallpaper"
-  if (/(change|next|cycle|swap)\s+(?:the\s+)?(?:wall\s*paper|background)/i.test(lower)) {
-    return { intent: "change_wallpaper", reply: "Wallpaper changed." };
-  }
-
-  return null;
+  return parseVoiceLocal(raw) as VoiceAction | null;
 }
 
 // Network-resilient command interpreter. Retries up to 2 times on transient

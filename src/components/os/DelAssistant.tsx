@@ -55,7 +55,24 @@ function loadConvs(): Conversation[] {
   try {
     const raw = localStorage.getItem(storeKey());
     if (!raw) return [];
-    return JSON.parse(raw) as Conversation[];
+    const convs = JSON.parse(raw) as Conversation[];
+    // Reconcile orphaned in-flight turns · an assistant message persisted with
+    // empty content means its stream was interrupted by a reload/close before
+    // any delta arrived. The original send()'s finally-block (which would have
+    // swapped in a retry notice) lives in a now-dead JS context, so without
+    // this every such bubble renders as "thinking…" forever. loadConvs runs
+    // only at mount, where no stream can be active, so every empty assistant
+    // bubble here is definitively orphaned → give it a clear interrupted state.
+    return convs.map((c) => ({
+      ...c,
+      messages: Array.isArray(c.messages)
+        ? c.messages.map((m) =>
+            m.role === "assistant" && !m.content?.trim()
+              ? { ...m, content: "(interrupted — a reload cleared this in-flight reply. Ask again to retry.)" }
+              : m,
+          )
+        : [],
+    }));
   } catch {
     return [];
   }
@@ -97,6 +114,14 @@ const SYSTEM_PROMPTS: Record<Mode, string> = {
   research:
     "You are a research assistant. Cite sources inline like [1]. Be factual and current. If you're unsure, say so.",
 };
+
+// Default model for new conversations. Groq's free tier is the fastest
+// (~110-180ms first token) and most generous of the keyed providers, so new
+// chats start there and serve directly — the picker label matches reality. If
+// Groq's quota is ever hit, /api/chat cascades to Mistral then Gemini, so the
+// default is resilient without being a guaranteed-cascade pick (Gemini's
+// 20-req/day free tier would always fall through).
+const DEFAULT_MODEL: ModelKey = "groq:openai/gpt-oss-120b";
 
 export function DelAssistant() {
   const [convs, setConvs] = useState<Conversation[]>([]);
@@ -161,7 +186,7 @@ export function DelAssistant() {
     setConvs(c);
     if (c.length > 0) setActiveId(c[0].id);
     else {
-      const fresh = newConv("chat", "groq:openai/gpt-oss-120b");
+      const fresh = newConv("chat", DEFAULT_MODEL);
       setConvs([fresh]);
       setActiveId(fresh.id);
     }
@@ -190,7 +215,7 @@ export function DelAssistant() {
   }, []);
 
   function startNew(mode: Mode = "chat") {
-    const fresh = newConv(mode, active?.model ?? "groq:openai/gpt-oss-120b");
+    const fresh = newConv(mode, active?.model ?? DEFAULT_MODEL);
     setConvs((p) => [fresh, ...p]);
     setActiveId(fresh.id);
     setInput("");
@@ -337,15 +362,17 @@ export function DelAssistant() {
     if (m) {
       const user = m[1]?.trim();
       try {
-        const r = await fetch(
-          user
-            ? `https://api.github.com/users/${encodeURIComponent(user)}/repos?per_page=10&sort=updated`
-            : "/api/connectors/github/list",
-          { method: user ? "GET" : "POST", headers: { "Content-Type": "application/json" } },
-        );
+        // Always proxy through our server route — never hit api.github.com
+        // from the browser (leaks client IP, can't attach GITHUB_TOKEN). The
+        // route takes an optional `username` to list a specific user's repos.
+        const r = await fetch("/api/connectors/github/list", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(user ? { username: user } : {}),
+        });
         if (!r.ok) return `Could not list GitHub repos — HTTP ${r.status}.`;
-        const j = (await r.json()) as Array<{ full_name: string; description?: string; updated_at?: string }> | { ok?: boolean; repos?: Array<{ full_name: string; description?: string }>; error?: string };
-        const list = Array.isArray(j) ? j : j.repos ?? [];
+        const j = (await r.json()) as { ok?: boolean; repos?: Array<{ full_name: string; description?: string }>; error?: string };
+        const list = j.repos ?? [];
         if (list.length === 0) return "No repos found.";
         const lines = list.slice(0, 10).map((x, i) => `${i + 1}. ${x.full_name}${x.description ? " — " + x.description.slice(0, 80) : ""}`);
         return `★ GitHub repos (${lines.length})\n${lines.join("\n")}`;
@@ -551,7 +578,12 @@ export function DelAssistant() {
               ...c,
               messages: c.messages.map((m) =>
                 m.id === assistId
-                  ? { ...m, content: finalContent, ms: ev.ms, tokens: ev.completionTokens }
+                  // ev.model is the model that ACTUALLY served — after a
+                  // cascade (keyless/failed provider → next candidate) it
+                  // differs from active.model, so record it here to keep the
+                  // "why this answer" footer honest instead of showing the
+                  // requested-but-skipped model.
+                  ? { ...m, content: finalContent, ms: ev.ms, tokens: ev.completionTokens, model: ev.model ?? m.model }
                   : m
               ),
             }));
@@ -983,7 +1015,29 @@ export function DelAssistant() {
               disabled={streaming}
               style={{ minHeight: 40, fontSize: 12 }}
             />
-            <div className="flex flex-col gap-1">
+            {/* SEND is the dominant primary (tall, wide); MIC is a compact
+                secondary tucked beneath with a clear gap so a click aimed at
+                SEND can't land on the mic toggle (was: equal-size buttons 4px
+                apart → frequent misclicks that silently toggled dictation). */}
+            <div className="flex flex-col gap-2">
+              {streaming ? (
+                <button
+                  onClick={stop}
+                  className="btn-pixel danger"
+                  style={{ padding: "12px 14px", fontSize: 12, minWidth: 76 }}
+                >
+                  ■ STOP
+                </button>
+              ) : (
+                <button
+                  onClick={send}
+                  disabled={!input.trim()}
+                  className="btn-pixel success"
+                  style={{ padding: "12px 14px", fontSize: 12, minWidth: 76, fontWeight: 700 }}
+                >
+                  ▶ SEND
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (chatMicActive) chatStt.stop();
@@ -992,24 +1046,10 @@ export function DelAssistant() {
                 disabled={streaming}
                 className={`btn-pixel ${chatMicActive ? "danger" : "ghost"}`}
                 title={chatMicActive ? "stop dictation" : "dictate · say 'draft email to X', 'create notion page', 'list my repos', 'list my drive'"}
-                style={{ padding: "6px 10px", fontSize: 11 }}
+                style={{ padding: "5px 10px", fontSize: 10, opacity: chatMicActive ? 1 : 0.75 }}
               >
-                {chatStt.state === "transcribing" ? "…" : chatMicActive ? "■ MIC" : "🎙 MIC"}
+                {chatStt.state === "transcribing" ? "… listening" : chatMicActive ? "■ stop mic" : "🎙 dictate"}
               </button>
-              {streaming ? (
-                <button onClick={stop} className="btn-pixel danger" style={{ padding: "6px 10px", fontSize: 11 }}>
-                  ■ STOP
-                </button>
-              ) : (
-                <button
-                  onClick={send}
-                  disabled={!input.trim()}
-                  className="btn-pixel success"
-                  style={{ padding: "6px 10px", fontSize: 11 }}
-                >
-                  ▶ SEND
-                </button>
-              )}
             </div>
           </div>
           <div className="flex items-center justify-between mt-1.5 text-[9px] font-mono" style={{ color: "var(--muted)" }}>

@@ -12,7 +12,6 @@ export class AppErrorBoundary extends Component<{ children: ReactNode; appName?:
 
   componentDidCatch(error: Error) {
     // Log to console only — don't crash whole OS
-    // eslint-disable-next-line no-console
     console.error("[delos app crash]", this.props.appName, error);
     // B07 · surface failure as a toast so the user knows the launch failed
     // (instead of staring at a blank window). Toast handler attached at the

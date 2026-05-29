@@ -1,7 +1,7 @@
 // DelOS session reader. Verifies the signed `delos_session` cookie and
 // derives a per-user tenantId so every HydraDB write scopes to that user only.
 
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 
 export type Session = {
@@ -34,6 +34,16 @@ function hmacShort(body: string): string {
   return createHmac("sha256", getSecret()).update(body).digest("base64url").slice(0, 32);
 }
 
+// Constant-time signature compare. A plain `!==` leaks how many leading chars
+// matched via timing, letting an attacker forge a valid sig byte-by-byte.
+// Bail fast on length mismatch (timingSafeEqual throws on unequal lengths).
+function sigEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
 // Stable per-user tenantId derived from email. 12 char base32, prefixed `u_`.
 export function deriveTenant(email: string): string {
   const h = createHash("sha256").update(email.toLowerCase().trim() + getSecret()).digest("hex");
@@ -45,7 +55,7 @@ export function verifySession(raw: string): Session | null {
   if (!raw || !raw.includes(".")) return null;
   const [body, sig] = raw.split(".");
   if (!body || !sig) return null;
-  if (hmacShort(body) !== sig) return null;
+  if (!sigEqual(hmacShort(body), sig)) return null;
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as {
       sub?: string;

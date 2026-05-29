@@ -21,12 +21,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Optional `username` · list a SPECIFIC user's public repos. Proxied here
+  // (was a direct client fetch to api.github.com from DelAssistant, which
+  // leaked the user's IP to GitHub and couldn't attach our token for higher
+  // rate limits). Validate against GitHub's handle grammar before interpolating.
+  const body = (await req.json().catch(() => ({}))) as { username?: unknown };
+  const rawUser = typeof body.username === "string" ? body.username.trim() : "";
+  const username = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(rawUser) ? rawUser : "";
+
   const token = process.env.GITHUB_TOKEN;
-  const url = token
-    ? "https://api.github.com/user/repos?per_page=15&sort=updated"
-    : // Fallback · vaibhav's public repos when no auth token is wired. The
-      // assistant explains the caveat in the response so the user knows.
-      "https://api.github.com/users/vaibhav4046/repos?per_page=15&sort=updated";
+  const url = username
+    ? `https://api.github.com/users/${username}/repos?per_page=15&sort=updated`
+    : token
+      ? "https://api.github.com/user/repos?per_page=15&sort=updated"
+      : // Fallback · vaibhav's public repos when no auth token is wired. The
+        // assistant explains the caveat in the response so the user knows.
+        "https://api.github.com/users/vaibhav4046/repos?per_page=15&sort=updated";
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "DelOS/2.2",
@@ -48,6 +58,15 @@ export async function POST(req: NextRequest) {
       stargazers_count: number;
       private?: boolean;
     }>;
+    // Defensive · GitHub normally returns an array here, but an unexpected
+    // shape (error envelope, HTML error page parsed loosely) would make
+    // `j.map` throw and 500 the route. Guard before mapping.
+    if (!Array.isArray(j)) {
+      return Response.json(
+        { ok: false, error: "github: unexpected response shape" },
+        { status: 502 },
+      );
+    }
     const repos = j.map((r) => ({
       full_name: r.full_name,
       description: r.description ?? undefined,

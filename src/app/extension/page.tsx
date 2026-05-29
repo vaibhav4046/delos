@@ -98,7 +98,7 @@ export default function ExtensionPage() {
             <div className="card-pixel">
               <div className="font-pixel text-sm mb-1" style={{ color: "var(--accent)" }}>Hand off to DelOS</div>
               <p className="font-mono text-[11px]" style={{ color: "var(--muted)" }}>
-                'Send to DelOS' button on any tab → opens delrio.vercel.app/os with the page pre-loaded.
+                &apos;Send to DelOS&apos; button on any tab → opens delrio.vercel.app/os with the page pre-loaded.
               </p>
             </div>
           </div>

@@ -20,6 +20,18 @@ const WINDOW_MS = 60_000;
 type CacheVal = { at: number; base: string; rates: Record<string, number>; source: string };
 const CACHE = new Map<string, CacheVal>();
 const TTL_MS = 60 * 60_000; // 1 hour
+const MAX_CACHE_ENTRIES = 200;
+
+// Bound cache memory · evict oldest insertion when full (Map keeps insertion
+// order). Stops many distinct base|symbols combinations from growing the
+// cache without limit across a long-lived warm Lambda.
+function cacheSet(key: string, val: CacheVal) {
+  if (CACHE.size >= MAX_CACHE_ENTRIES && !CACHE.has(key)) {
+    const oldest = CACHE.keys().next().value;
+    if (oldest !== undefined) CACHE.delete(oldest);
+  }
+  CACHE.set(key, val);
+}
 
 async function tryFrankfurter(base: string, syms: string[]): Promise<{ rates: Record<string, number>; source: string } | null> {
   try {
@@ -64,7 +76,11 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "rate limited" }, { status: 429, headers: lim.headers });
   }
   const u = new URL(req.url);
-  const base = (u.searchParams.get("base") || "USD").toUpperCase().slice(0, 3);
+  const rawBase = (u.searchParams.get("base") || "USD").toUpperCase().slice(0, 3);
+  // Validate the ISO-4217-shaped code · a non-[A-Z]{3} `base` (e.g. "1';--")
+  // would be interpolated straight into upstream provider URLs. Fall back to
+  // USD rather than forwarding garbage.
+  const base = /^[A-Z]{3}$/.test(rawBase) ? rawBase : "USD";
   const rawSyms = (u.searchParams.get("symbols") || "EUR,GBP,INR,JPY,CAD,AUD,CNY,CHF").toUpperCase();
   const syms = rawSyms.split(",").map((s) => s.trim()).filter((s) => /^[A-Z]{3}$/.test(s)).slice(0, 12);
 
@@ -80,13 +96,19 @@ export async function GET(req: NextRequest) {
     (await tryErApi(base)) ||
     (await tryExchangeHost(base, syms));
   if (!provider) {
-    return Response.json({ error: "all FX providers failed" }, { status: 502 });
+    // All 3 upstream rate providers are down → transient dependency outage.
+    // 503 Service Unavailable + Retry-After is the honest, retryable signal
+    // (502 implies one specific bad gateway; this is "try again shortly").
+    return Response.json(
+      { error: "all FX providers failed", retryAfterSec: 60 },
+      { status: 503, headers: { "Retry-After": "60" } },
+    );
   }
   // Trim to requested symbols when provider returns the full set.
   const trimmed: Record<string, number> = {};
   for (const s of syms) {
     if (typeof provider.rates[s] === "number") trimmed[s] = provider.rates[s];
   }
-  CACHE.set(cacheKey, { at: Date.now(), base, rates: trimmed, source: provider.source });
+  cacheSet(cacheKey, { at: Date.now(), base, rates: trimmed, source: provider.source });
   return Response.json({ base, rates: trimmed, source: provider.source });
 }

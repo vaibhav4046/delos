@@ -82,10 +82,10 @@ const SLIDES: Slide[] = [
     eyebrow: "★ THE PROOF",
     title: "Real APIs. Zero mocks. Live evidence.",
     bullets: [
-      "/api/eval · multi-task multi-model harness · live LLM calls",
+      "/api/run · live orchestrator · drift + replan · SSE event stream",
       "/api/health · 8/9 upstreams alive · groq · mistral · gemini · hydradb · mcp",
       "/api/stats · single source of truth · live drift · live replans/run",
-      "/api/improve · self-improvement loop · learnings recalled by future runs",
+      "/api/coordinator · multi-agent plan · grounded in HydraDB recall",
     ],
     accent: "var(--pipe)",
     cta: { label: "See /play live →", href: "/play" },

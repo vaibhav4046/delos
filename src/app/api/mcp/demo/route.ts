@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -74,6 +75,15 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // tools/call makes outbound fetches (wiki, crypto, weather, ip-geo…) — same
+  // egress-amplification surface as /api/tool. Cap to 30/min per IP.
+  const lim = rateLimit(`mcpdemo:ip:${clientIp(req)}`, 30, 60_000);
+  if (!lim.ok) {
+    return Response.json(
+      { jsonrpc: "2.0", id: 0, error: { code: -32029, message: "rate limited" } },
+      { status: 429, headers: lim.headers },
+    );
+  }
   let body: RpcReq;
   try {
     body = (await req.json()) as RpcReq;

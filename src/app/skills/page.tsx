@@ -128,7 +128,7 @@ export default function SkillsPage() {
             <li>VoiceApp checks <code>requiresApproval(intent)</code> against the skill manifest</li>
             <li>If required → <code>ApprovalGate</code> modal pops with risk-colored border + payload preview</li>
             <li>User taps ✓ YES → intent dispatches on OS bus. Auto-deny after 60s.</li>
-            <li>User taps ✗ NO → bus event suppressed. Voice agent speaks "denied" toast.</li>
+            <li>User taps ✗ NO → bus event suppressed. Voice agent speaks &quot;denied&quot; toast.</li>
             <li>Audit log captures every decision (runLog + HydraDB).</li>
           </ol>
         </section>

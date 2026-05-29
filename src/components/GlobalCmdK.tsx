@@ -27,8 +27,11 @@ export function GlobalCmdK() {
   const [active, setActive] = useState(true);
 
   useEffect(() => {
-    // Don't double-bind when /os is mounted (it has its own palette)
+    // Don't double-bind when /os is mounted (it has its own palette). The
+    // route check needs window.location, so it runs on mount rather than as a
+    // lazy initializer (which would mismatch the SSR render).
     if (typeof window !== "undefined" && window.location.pathname.startsWith("/os")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActive(false);
       return;
     }

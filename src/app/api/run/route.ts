@@ -6,11 +6,9 @@ import type { ChaosKind, RunEvent } from "@/lib/types";
 import { z } from "zod";
 import { recordRunStart, recordEvent, broadcastLive, getRun, flushRunSnapshot } from "@/lib/runLog";
 import { recordRunStats } from "@/lib/stats";
-import { env } from "@/lib/env";
-import { getServerSession } from "@/lib/session";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
-import { zodErr, bindRun } from "@/lib/apiAuth";
+import { resolveTenant, zodErr, bindRun } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -81,16 +79,29 @@ export async function POST(req: NextRequest) {
 
   const extraTools = mcpServers && mcpServers.length > 0 ? await buildMcpTools(mcpServers) : [];
 
-  // Per-user scoping: signed-in user's tenantId always overrides client-sent value.
-  // Prevents tenant ID spoofing across users.
-  const session = await getServerSession();
-  const effectiveTenant = session?.tenantId || tenantId || env.DELRIO_TENANT_ID;
+  // Per-user scoping · resolveTenant is session-first, then honors a body
+  // tenantId ONLY for reserved test prefixes (qa_/demo_/…), then per-IP anon
+  // scope. Closes anon tenant-spoofing: previously a caller with no session
+  // could pass ANY tenantId and run under (and write run-summary memory to /
+  // appear on the live feed of) that tenant.
+  const { tenantId: effectiveTenant } = await resolveTenant(req, { bodyTenantId: tenantId, intent: "write" });
   let resolvedRunId: string | null = null;
 
   const stream = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder();
-      const send = (obj: unknown) => controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      // Guard every enqueue · once the client disconnects, the controller is
+      // closed and enqueue throws. Latch `closed` and swallow so a mid-stream
+      // disconnect doesn't surface as an unhandled stream error.
+      let closed = false;
+      const send = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
       try {
         await withModels(overrides, async () => withTemperature(temperature, async () => {
           for await (const ev of orchestrate({
@@ -100,6 +111,8 @@ export async function POST(req: NextRequest) {
             maxSteps,
             extraTools,
             tenantId: effectiveTenant,
+            // Stop the cascade when the browser closes the SSE connection.
+            signal: req.signal,
           }) as AsyncIterable<RunEvent>) {
             // First event is always `meta` with runId — establish log record
             if (ev.t === "meta" && !resolvedRunId) {
@@ -129,7 +142,6 @@ export async function POST(req: NextRequest) {
           // Reuse the sanitizer used elsewhere; if it returns an enum string
           // we expand it back to a user-facing sentence here so the stream
           // never just says "rate_limited" with nothing else.
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { sanitizeProviderError } = await import("@/lib/agents/jsonGen");
           const code = sanitizeProviderError(rawMsg);
           const M: Record<string, string> = {
@@ -189,7 +201,9 @@ export async function POST(req: NextRequest) {
           } catch {}
         }
         send(doneEv);
-        controller.close();
+        try {
+          controller.close();
+        } catch {}
       }
     },
   });

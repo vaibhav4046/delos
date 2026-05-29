@@ -69,7 +69,11 @@ export async function POST(req: NextRequest) {
     const body = await req.clone().json().catch(() => null);
     if (body && typeof body.tenantId === "string") bodyTenantId = body.tenantId;
   } catch {}
-  const { tenantId } = await resolveTenant(req, { bodyTenantId });
+  // intent:"read" — seed is the ONE sanctioned writer of `delrio_demo` data,
+  // so it must let resolveTenant honor a client-supplied guest tenant (which
+  // the fail-closed default would otherwise route to anon-IP scope). The
+  // explicit allowlist guard below still restricts writes to demo/QA scopes.
+  const { tenantId } = await resolveTenant(req, { bodyTenantId, intent: "read" });
   // Hard-block seeding into a regular user tenant. Was polluting
   // anon_*/account tenants with the demo graph so the user's actual
   // pinned facts got drowned in seed text (2026-05-25 brutal-QA P0:

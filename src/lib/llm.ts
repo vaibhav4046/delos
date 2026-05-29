@@ -34,16 +34,23 @@ export function buildModels(overrides?: ModelOverrides) {
   const planner = resolveModel(overrides?.planner ?? DEFAULTS.planner);
   const executor = resolveModel(overrides?.executor ?? DEFAULTS.executor);
   const critic = resolveModel(overrides?.critic ?? DEFAULTS.critic);
-  // Cross-provider fallback ladder for autonomous routes. Order = Mistral
-  // (separate quota from Groq, fast, reliable on this account) → Mistral-
-  // small (in case mistral-large is throttled too) → Gemini Flash (1M tok/
-  // day, free). When Groq 429s the circuit-breaker in jsonGen.ts shelves
-  // it for 10 minutes and we hop straight to Mistral. With this list
-  // /api/run / coordinator / build-app never hard-fail on Groq quota.
+  // Cross-provider fallback ladder for autonomous routes. CRITICAL: the chain
+  // must span at least TWO independent provider accounts so no single account's
+  // quota/outage can take the whole cascade down. Order interleaves them:
+  //   mistral-large → groq(gpt-oss-20b) → mistral-small → groq(gpt-oss-120b)
+  //   → gemini-flash
+  // So after a Mistral fault the very next hop is GROQ (a fully independent
+  // account, proven-healthy on the /api/chat path), not another Mistral SKU
+  // that shares the same exhausted quota. Previously this chain was Mistral-
+  // only + Gemini; when the breaker shelved the Mistral family and Gemini's
+  // free quota was dry, the autonomous cascade had NO working provider and
+  // hard-failed in ~5ms — a self-inflicted outage while Mistral was healthy.
   const fallback = mistral("mistral-small-latest");
   const fallbackChain: LanguageModel[] = [
     mistral("mistral-large-latest"),
+    groq("openai/gpt-oss-20b"),
     mistral("mistral-small-latest"),
+    groq("openai/gpt-oss-120b"),
     google("gemini-2.5-flash"),
   ];
   return {

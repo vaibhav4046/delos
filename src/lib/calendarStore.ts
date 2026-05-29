@@ -30,8 +30,19 @@ export function listEvents(tenantId: string, fromMs?: number, toMs?: number): Ca
     .sort((a, b) => a.startAt - b.startAt);
 }
 
+const MAX_EVENTS_PER_TENANT = 500;
+const MAX_TENANTS = 1000;
+
 export function createEvent(tenantId: string, input: Omit<CalendarEvent, "id" | "createdAt" | "source"> & { source?: CalendarEvent["source"] }): CalendarEvent {
-  const list = store.get(key(tenantId)) ?? [];
+  const k = key(tenantId);
+  // Bound tenant count · evict the oldest tenant bucket when a brand-new tenant
+  // would exceed the cap. Stops unbounded Map growth from many distinct anon
+  // tenants over a long-lived process.
+  if (!store.has(k) && store.size >= MAX_TENANTS) {
+    const oldestTenant = store.keys().next().value;
+    if (oldestTenant !== undefined) store.delete(oldestTenant);
+  }
+  const list = store.get(k) ?? [];
   const event: CalendarEvent = {
     ...input,
     source: input.source ?? "manual",
@@ -39,7 +50,9 @@ export function createEvent(tenantId: string, input: Omit<CalendarEvent, "id" | 
     createdAt: Date.now(),
   };
   list.push(event);
-  store.set(key(tenantId), list);
+  // Bound per-tenant events · keep the most recent MAX_EVENTS_PER_TENANT.
+  if (list.length > MAX_EVENTS_PER_TENANT) list.splice(0, list.length - MAX_EVENTS_PER_TENANT);
+  store.set(k, list);
   return event;
 }
 

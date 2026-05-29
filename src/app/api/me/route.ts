@@ -24,8 +24,20 @@ export async function GET(req: NextRequest) {
   // from our own UI (Referer or Origin header matches host). Stops a
   // direct curl probe from pulling email even with the cookie.
   const host = req.headers.get("host") || "";
-  const origin = req.headers.get("origin") || req.headers.get("referer") || "";
-  const sameOrigin = host && (origin.includes(host) || origin.startsWith("http://localhost"));
+  const originHeader = req.headers.get("origin") || req.headers.get("referer") || "";
+  // Exact host match · parse the Origin/Referer as a URL and compare its host
+  // to ours. The old substring check (`origin.includes(host)`) was bypassable
+  // with a domain that merely CONTAINS our host (e.g. http://evil-localhost.com
+  // includes "localhost"). Exact equality also covers real dev, where host ===
+  // the Origin host (localhost:3210).
+  let sameOrigin = false;
+  if (originHeader && host) {
+    try {
+      sameOrigin = new URL(originHeader).host === host;
+    } catch {
+      sameOrigin = false;
+    }
+  }
   if (!sameOrigin) {
     return Response.json({ ok: true, signedIn: true });
   }

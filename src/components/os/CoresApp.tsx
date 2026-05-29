@@ -83,6 +83,8 @@ export function CoresApp() {
     return () => clearInterval(t);
   }, []);
 
+  // Ticks once a second (see effect above) so uptime stays live at render.
+  // eslint-disable-next-line react-hooks/purity
   const uptimeMs = Date.now() - Math.min(...Object.values(cores).map((c) => c.uptimeStart));
   const uptimeStr = formatUptime(uptimeMs);
   const busyCount = Object.values(cores).filter((c) => c.status === "BUSY").length;
@@ -110,7 +112,7 @@ export function CoresApp() {
             ● CLUSTER · {busyCount} ACTIVE · UPTIME {uptimeStr}
           </span>
           <span className="font-mono" style={{ fontSize: 9, color: "var(--muted)" }}>
-            // CORE ALLOCATION
+            {"// CORE ALLOCATION"}
           </span>
         </div>
 

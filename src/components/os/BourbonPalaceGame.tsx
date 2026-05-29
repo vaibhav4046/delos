@@ -396,7 +396,6 @@ export function BourbonPalaceGame() {
     return () => {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, gameOver, win]);
 
   return (

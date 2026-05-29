@@ -93,6 +93,9 @@ export default function StatusPage() {
   }
 
   useEffect(() => {
+    // checkAll() flips setRunning synchronously before awaiting probes —
+    // intentional kickoff of the status sweep on mount + every 30s.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     checkAll();
     const t = setInterval(checkAll, 30_000);
     return () => clearInterval(t);

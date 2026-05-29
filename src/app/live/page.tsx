@@ -108,11 +108,15 @@ export default function LivePage() {
               </thead>
               <tbody>
                 {runs.map((r) => {
+                  // Realtime clock reads — the table re-renders on a timer to keep
+                  // elapsed/just-ended fresh; render-time Date.now() is intentional.
+                  // eslint-disable-next-line react-hooks/purity
                   const elapsed = (r.endedAt ?? Date.now()) - r.startedAt;
                   const live = !r.endedAt;
                   // Just-finished pulse — highlight rows that ended within 10s so
                   // the /live feed visibly signals "this happened now". Otherwise
                   // judges see a static table and miss the realtime claim.
+                  // eslint-disable-next-line react-hooks/purity
                   const justEnded = !!(r.endedAt && Date.now() - r.endedAt < 10_000);
                   return (
                     <tr

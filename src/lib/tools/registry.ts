@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import type { ToolResult } from "../types";
 
 export type Tool<TArgs = unknown, TOut = unknown> = {
@@ -52,6 +52,15 @@ export class ToolRegistry {
       const data = await tool.run(parsed, ctx);
       return { ok: true, data };
     } catch (e) {
+      // Don't leak the raw multiline ZodError blob (CWE-209) — arg-validation
+      // failures collapse to a compact "field: message" list. This is the
+      // single choke-point for every tool, so /api/tool and the orchestrator
+      // both stop echoing the stringified Zod issue array. Runtime errors fall
+      // through to their plain message.
+      if (e instanceof ZodError) {
+        const issues = e.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+        return { ok: false, error: `invalid args — ${issues}` };
+      }
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   }

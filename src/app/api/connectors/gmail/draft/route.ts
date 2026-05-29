@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   if (!lim.ok) return Response.json({ ok: false, error: "rate limited" }, { status: 429, headers: lim.headers });
   const parsed = Req.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return zodErr(parsed.error);
-  const { tenantId, source } = await resolveTenant(req);
+  const { tenantId } = await resolveTenant(req);
   // Demo simulator · when no Google OAuth session AND GMAIL_DEMO_MODE
   // is enabled (or user is on guest session), return a happy-path
   // response with a fake draftId + Gmail URL. Lets judges see the
