@@ -364,7 +364,10 @@ img[src$=".svg"] { image-rendering: pixelated; }
 @media (max-width: 768px) {
   .btn-pixel { padding: 10px 14px; font-size: 12px; }
   .card-pixel { padding: 12px; }
-  .input-pixel { padding: 8px 10px; font-size: 13px; }
+  /* 16px floor: iOS Safari auto-zooms the viewport when a focused input is
+     under 16px — this fires on the sign-in email field (the headline install
+     platform's worst moment). 16px disables the zoom. */
+  .input-pixel { padding: 8px 10px; font-size: 16px; }
   .pill { font-size: 10px; padding: 1px 6px; }
   /* Stop long monospace strings (commit hashes, tool output, JSON
      blobs) from pushing the page wider than the viewport. Reported
@@ -996,16 +999,11 @@ header.glass-header {
 }
 .app-themed code { font-family: ui-monospace, "JetBrains Mono", monospace !important; color: var(--muted) !important; }
 
-/* Dock + windows must remain opaque enough to read against any wallpaper */
-[data-app-dock], footer.dock-glass {
+/* Dock must remain opaque enough to read against any wallpaper */
+[data-app-dock] {
   background: rgba(var(--bg-rgb), 0.88) !important;
   backdrop-filter: blur(14px) saturate(170%);
   -webkit-backdrop-filter: blur(14px) saturate(170%);
-}
-
-/* Window content always opaque — no wallpaper bleed-through */
-[data-window-content], .window-content-opaque {
-  background: var(--surface) !important;
 }
 
 /* ===========================

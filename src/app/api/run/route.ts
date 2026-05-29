@@ -9,6 +9,7 @@ import { recordRunStats } from "@/lib/stats";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 import { resolveTenant, zodErr, bindRun } from "@/lib/apiAuth";
+import { frameForThread } from "@/lib/swarmContext";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -50,6 +51,10 @@ const bodySchema = z.object({
   tenantId: z.string().min(1).max(120).optional(),
   temperature: z.number().min(0).max(1.5).optional(),
   identity: z.string().max(2000).optional(),
+  // Swarm context · when a run is launched from a chat thread, the client
+  // passes that thread's id so the run nests under the thread's context frame
+  // and inherits its recursive window. Optional — bare runs get a root frame.
+  threadId: z.string().min(1).max(120).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -70,7 +75,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return zodErr(parsed.error);
   }
-  const { goal: rawGoal, chaos, interrupt, maxSteps, models, mcpServers, tenantId, temperature, identity } = parsed.data;
+  const { goal: rawGoal, chaos, interrupt, maxSteps, models, mcpServers, tenantId, temperature, identity, threadId } = parsed.data;
   // JarvisOS: prepend identity preamble so every agent's outputs match the user's tone, format, role.
   const goal = identity ? `${identity}\n---\nUSER GOAL:\n${rawGoal}` : rawGoal;
   const overrides: ModelOverrides | undefined = models
@@ -85,6 +90,10 @@ export async function POST(req: NextRequest) {
   // could pass ANY tenantId and run under (and write run-summary memory to /
   // appear on the live feed of) that tenant.
   const { tenantId: effectiveTenant } = await resolveTenant(req, { bodyTenantId: tenantId, intent: "write" });
+  // Resolve (or lazily create) the thread's swarm-context frame so this run
+  // nests under it. Frame keys are tenant-scoped, so a spoofed threadId can
+  // only ever touch the caller's OWN context tree.
+  const swarmFrameId = threadId ? frameForThread({ tenantId: effectiveTenant, threadId }).id : undefined;
   let resolvedRunId: string | null = null;
 
   const stream = new ReadableStream({
@@ -111,6 +120,7 @@ export async function POST(req: NextRequest) {
             maxSteps,
             extraTools,
             tenantId: effectiveTenant,
+            swarmFrameId,
             // Stop the cascade when the browser closes the SSE connection.
             signal: req.signal,
           }) as AsyncIterable<RunEvent>) {

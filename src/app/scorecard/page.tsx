@@ -1,5 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Wordmark } from "@/components/Logo";
+
+// Server component — can export metadata directly (no "use client").
+export const metadata: Metadata = {
+  title: "Scorecard — DelOS",
+  description: "Feature-by-feature status of the DelOS agent platform.",
+};
 
 type Row = { track: string; feature: string; where: string; href?: string; status: "🟢" | "🟡" | "🔴" };
 
@@ -10,6 +17,15 @@ const ROWS: Row[] = [
   { track: "Memory", feature: "Memory browser UI", where: "/memory", href: "/memory", status: "🟢" },
   { track: "Memory", feature: "Auto-seed 12 graph-shaped memories", where: "/api/memory route", href: "/api/memory", status: "🟢" },
   { track: "Memory", feature: "Fuzzy word-overlap fallback recall", where: "src/lib/hydra.ts:safeRecall", status: "🟢" },
+  // Swarm Context
+  { track: "Swarm Context", feature: "Recursive shared context window (frame tree)", where: "src/lib/swarmContext.ts", status: "🟢" },
+  { track: "Swarm Context", feature: "Context API — live state snapshot", where: "/api/context/state", href: "/api/context/state", status: "🟢" },
+  { track: "Swarm Context", feature: "Cross-thread recall (token-budgeted, ranked)", where: "/api/context/recall", status: "🟢" },
+  { track: "Swarm Context", feature: "Orchestrator + chat wired into the window", where: "src/lib/orchestrator.ts:runFrame", status: "🟢" },
+  { track: "Swarm Context", feature: "Context Inspector — live tree + token bars", where: "/os context app", status: "🟢" },
+  { track: "Swarm Context", feature: "Continue-anywhere — resume any thread w/ recall", where: "src/components/os/DelAssistant.tsx:resumeFrom", status: "🟢" },
+  { track: "Swarm Context", feature: "Self-updating memory — every turn persists", where: "src/lib/swarmContext.ts:persistTurn", status: "🟢" },
+  { track: "Swarm Context", feature: "…and beyond — aged items fold to summaries", where: "src/lib/swarmContext.ts:foldFrame", status: "🟢" },
   // Tools
   { track: "Tools", feature: "Typed local registry (6 tools)", where: "/api/tools/list", href: "/api/tools/list", status: "🟢" },
   { track: "Tools", feature: "Bundled MCP server (11 tools)", where: "/api/mcp/demo", href: "/api/mcp/demo", status: "🟢" },

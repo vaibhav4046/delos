@@ -84,6 +84,8 @@ const appEnum = z.enum([
   "settings", "about", "claude", "chatgpt", "perplexity",
   // M23 · app ids the rich intents route to (reminders/schedule/notifs/recall).
   "widgets", "schedule", "notifications", "memoryBrowser",
+  // SC6 · swarm-context inspector ("open context", "show the context window").
+  "context",
 ]);
 const actionSchema = z.object({
   intent: intentEnum,
@@ -397,6 +399,7 @@ Map this to ONE action. Available intents:
    • sysinfo — System info ("system info", "specs")
    • snake / tictactoe / minesweeper / game2048 / doom / memory — games ("snake", "tic tac toe", "minesweeper", "2048", "doom", "memory match")
    • settings — Settings ("settings", "preferences", "config")
+   • context — Context Inspector, the live swarm context window ("context", "context inspector", "context window", "swarm context", "show the context")
    • about — About DelOS ("about", "version", "info")
    • claude / chatgpt / perplexity — retro AI chat apps.
 - run_mission: open terminal AND immediately run the mission. payload = the goal sentence.

@@ -72,10 +72,14 @@ export async function POST(req: NextRequest) {
           use_speaker_boost: true,
         },
       }),
+      // Don't ride the full 30s maxDuration on an upstream hang; the client
+      // falls back to browser SpeechSynthesis on any non-200.
+      signal: AbortSignal.timeout(12_000),
     });
     if (!r.ok) {
-      const errText = await r.text().catch(() => "");
-      return Response.json({ error: `elevenlabs ${r.status}: ${errText.slice(0, 240)}` }, { status: 502 });
+      // Don't reflect the raw provider body back to the client (noisy, can echo
+      // upstream detail) — a generic code is enough to trigger the TTS fallback.
+      return Response.json({ error: "tts_provider_error", status: r.status }, { status: 502 });
     }
     const buf = await r.arrayBuffer();
     return new Response(buf, {
@@ -86,6 +90,12 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    // AbortSignal.timeout → TimeoutError; surface as 504 so the client knows to
+    // fall back rather than retry. Everything else is a generic upstream fail.
+    const timedOut = e instanceof Error && e.name === "TimeoutError";
+    return Response.json(
+      { error: timedOut ? "tts_timeout" : "tts_request_failed" },
+      { status: timedOut ? 504 : 500 },
+    );
   }
 }

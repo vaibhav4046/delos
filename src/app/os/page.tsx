@@ -48,6 +48,9 @@ const OssLibraryApp = lazy(() => import("@/components/os/OssLibraryApp").then((m
 // Memory Browser · sleek interactive memory dashboard. Distinct from
 // the Memory Match game (which keeps the "memory" key). 2026-05-25.
 const MemoryBrowserApp = lazy(() => import("@/components/os/MemoryBrowserApp").then((m) => ({ default: m.MemoryBrowserApp })));
+// Context Inspector · live view of the recursive swarm-context tree (frames,
+// depth, token budget, folded summaries, items by source).
+const ContextInspectorApp = lazy(() => import("@/components/os/ContextInspectorApp").then((m) => ({ default: m.ContextInspectorApp })));
 // CROWN-2 · parallel coding-agent fleet with isolated tenants + xterm
 // terminals per agent. Direct response to MissionControl's Agent Fleet.
 const AgentFleetApp = lazy(() => import("@/components/os/AgentFleetApp").then((m) => ({ default: m.AgentFleetApp })));
@@ -303,6 +306,19 @@ const SYSTEM_APPS: Record<string, DockItem> = {
       content: <L label="agent fleet"><AgentFleetApp /></L>,
     }),
   },
+  context: {
+    id: "context",
+    label: "Context",
+    icon: "Network",
+    spawn: () => ({
+      id: "context",
+      title: "Context Inspector · swarm window",
+      icon: "Network",
+      width: 560,
+      height: 600,
+      content: <L label="context inspector"><ContextInspectorApp /></L>,
+    }),
+  },
   notifications: {
     id: "notifications",
     label: "Notifications",
@@ -454,10 +470,12 @@ export default function OSPage() {
   const [_cursor] = useCursor(); // apply cursor attribute on mount
   const [viewport, setViewport] = useState({ width: 1600, height: 900 });
   const vp = useViewport();
-  // On mobile + tablet, force every open window to behave as maximized so the
-  // OS reads like a phone-OS shell (one full-screen app at a time, bottom dock).
-  // Drag/resize controls on Window are disabled when this flag is true.
-  const forceMaximize = vp.mobile;
+  // On mobile + touch-tablet, force every open window to behave as maximized so
+  // the OS reads like a phone-OS shell (one full-screen app at a time, bottom
+  // dock). Drag/resize controls on Window are disabled when this flag is true.
+  // Touch tablets (iPad, coarse pointer ≥640px) get the phone shell too; a
+  // narrow *fine-pointer* desktop window stays floating/draggable.
+  const forceMaximize = vp.mobile || (vp.tablet && vp.touch);
   const [portalOpen, setPortalOpen] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [session, setSession] = useState<{ signedIn?: boolean; email?: string; tenantId?: string } | null>(null);
@@ -1057,8 +1075,8 @@ export default function OSPage() {
       "assistant", "identity", "arena", "voice",
       // Builders (5) · agentFleet added · parallel agents w/ isolated tenants
       "builder", "agentFleet", "codebase", "cores", "mission",
-      // Tools (7) · memoryBrowser surfaces save-state across runs
-      "memoryBrowser", "notifications", "schedule", "widgets", "ingest", "terminal", "browser", "marketplace", "oss", "analytics",
+      // Tools · memoryBrowser surfaces save-state; context = live swarm window
+      "memoryBrowser", "context", "notifications", "schedule", "widgets", "ingest", "terminal", "browser", "marketplace", "oss", "analytics",
       // Files & notes (5)
       "files", "notes", "calendar", "calc", "sysinfo",
       // Games (6)

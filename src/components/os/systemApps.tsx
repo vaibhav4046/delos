@@ -175,6 +175,16 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
     broadcastAgent("executor", "tool");
     broadcastAgent("critic", "thinking");
     broadcastAgent("memory", "thinking");
+    // Stall watchdog: a dead upstream (provider hang, dropped proxy connection)
+    // leaves reader.read() pending forever and the run stuck "running". 45s of
+    // total inactivity — generous because the agent loop has legit gaps while
+    // tools execute between SSE events; each event re-arms it.
+    const STALL_MS = 45_000;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => ctrl.abort(), STALL_MS);
+    };
     try {
       const res = await fetch("/api/run", {
         method: "POST",
@@ -186,9 +196,11 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
+      armStall();
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        armStall(); // got an event — reset inactivity timer
         buf += dec.decode(value, { stream: true });
         const parts = buf.split("\n\n");
         buf = parts.pop() ?? "";
@@ -224,6 +236,7 @@ export function Terminal({ onAnswer }: { onAnswer?: (text: string) => void }) {
         push({ kind: "stderr", text: `✗ ${(e as Error).message}` });
       }
     } finally {
+      if (stallTimer) clearTimeout(stallTimer);
       setRunning(false);
       broadcastAgent("planner", "done");
       broadcastAgent("executor", "done");
@@ -637,19 +650,33 @@ export function MissionControl() {
     if (osbRunning) return;
     setOsbRunning(true);
     setOsbProgress({ materialized: 0, agents: 0, tokens: 0, usd: 0, lastEvent: "starting…" });
+    // Stall watchdog: this builder spins up whole apps between SSE events, so a
+    // dead upstream would otherwise pin the UI in "running" indefinitely. 60s of
+    // total silence is generous (app materialization is the slow step); every
+    // event re-arms it. The fetch had no AbortController before, so add one.
+    const ctrl = new AbortController();
+    const STALL_MS = 60_000;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => ctrl.abort(), STALL_MS);
+    };
     try {
       const res = await fetch("/api/os-builder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenantId: getTenantId() }),
+        signal: ctrl.signal,
       });
       if (!res.body) throw new Error("no stream");
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
+      armStall();
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        armStall(); // got an event — reset inactivity timer
         buf += dec.decode(value, { stream: true });
         const parts = buf.split("\n\n");
         buf = parts.pop() ?? "";
@@ -693,8 +720,10 @@ export function MissionControl() {
         }
       }
     } catch (e) {
-      window.dispatchEvent(new CustomEvent("toast", { detail: { text: `os-builder failed: ${(e as Error).message}`, tone: "bad" } }));
+      const stalled = (e as Error).name === "AbortError";
+      window.dispatchEvent(new CustomEvent("toast", { detail: { text: stalled ? "os-builder stalled — no response, stopped." : `os-builder failed: ${(e as Error).message}`, tone: "bad" } }));
     } finally {
+      if (stallTimer) clearTimeout(stallTimer);
       setOsbRunning(false);
     }
   }
@@ -1064,6 +1093,18 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
         }),
       );
     }
+    // Stall watchdog: a dead upstream (provider hang, proxy drops the
+    // connection without FIN) would otherwise pin the build in "busy" forever.
+    // The server has its own deadline so this is a client-side backstop; 90s of
+    // TOTAL inactivity is very generous because a single large production file
+    // can take a while to generate, and every SSE event re-arms it.
+    const ctrl = new AbortController();
+    const STALL_MS = 90_000;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => ctrl.abort(), STALL_MS);
+    };
     try {
       // Production mode path · routes to /api/codegen-app-stream for a
       // real multi-file React/Next project streamed FILE-BY-FILE into
@@ -1090,15 +1131,18 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
             previousProject: lastProject ?? undefined,
             errorContext: errorFeedback || undefined,
           }),
+          signal: ctrl.signal,
         });
         if (!r.body) throw new Error("no stream");
         const reader = r.body.getReader();
         const dec = new TextDecoder();
         let buf = "";
         let streamErr: string | null = null;
+        armStall();
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          armStall(); // got an SSE event — reset inactivity timer
           buf += dec.decode(value, { stream: true });
           const parts = buf.split("\n\n");
           buf = parts.pop() ?? "";
@@ -1260,7 +1304,10 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
         broadcastAgent("memory", "idle");
       }, 1200);
     } catch (e) {
-      const msg = (e as Error).message;
+      // Watchdog-triggered abort surfaces as AbortError — give it a clear
+      // "stalled" message instead of the raw "operation was aborted".
+      const stalled = (e as Error).name === "AbortError";
+      const msg = stalled ? "Build stalled — no response from the model, stopped." : (e as Error).message;
       setErr(msg);
       setStage("idle");
       broadcastAgent("planner", "idle");
@@ -1268,9 +1315,10 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
       // BUG-2 fix · surface the failure as a toast so users don't see the
       // button just flip back to "BUILD APP" with nothing happening.
       try {
-        window.dispatchEvent(new CustomEvent("toast", { detail: { text: `Build failed: ${msg.slice(0, 80)}`, tone: "bad" } }));
+        window.dispatchEvent(new CustomEvent("toast", { detail: { text: stalled ? msg : `Build failed: ${msg.slice(0, 80)}`, tone: "bad" } }));
       } catch {}
     } finally {
+      if (stallTimer) clearTimeout(stallTimer);
       clearTimeout(tStage1);
       clearTimeout(tStage2);
       setBusy(false);

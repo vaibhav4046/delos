@@ -23,7 +23,9 @@ export default function SharePage() {
     } catch {
       // ignore — fall through to /os either way
     }
-    router.replace("/os");
+    // guest=1 so a cold share-into-installed-PWA lands in the OS (which then
+    // opens Del Assistant pre-filled) instead of bouncing off the auth wall.
+    router.replace("/os?guest=1");
   }, [router]);
 
   return (

@@ -30,6 +30,11 @@ export type RunEvent =
   | { t: "metric"; key: string; value: number; at: number }
   | { t: "usage"; role: "planner" | "executor" | "critic" | "appBuilder" | "subagent"; model: string; promptTokens: number; completionTokens: number; ms: number; at: number }
   | { t: "subagent"; id: string; goal: string; status: "spawn" | "done" | "fail"; result?: string; at: number }
+  // Swarm-context collection · surfaces the recursive context window the engine
+  // assembled for this run (frame id, tokens spent, recursion depth reached,
+  // cross-thread memory hits folded in, total items). Powers the Context
+  // Inspector's live run view and the chat's "context used" affordance.
+  | { t: "context"; frameId: string; tokensUsed: number; depthReached: number; memoryHits: number; itemCount: number; at: number }
   | { t: "answer"; text: string; at: number }
   | { t: "error"; message: string; at: number };
 

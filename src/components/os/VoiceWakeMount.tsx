@@ -75,6 +75,20 @@ export function VoiceWakeMount() {
     function onWake(ev: Event) {
       const d = (ev as CustomEvent).detail as { phrase: string };
       if (!d?.phrase) return;
+      // SC6 · "continue last thread" is handled client-side — the freshest
+      // conversation lives in Del Assistant's state, not on the server. Open
+      // the assistant, then fire the resume-last intent it listens for.
+      const p = d.phrase.toLowerCase();
+      if (
+        /\b(continue|resume|pick up|carry on)\b/.test(p) &&
+        /\b(last|previous|prior|where (?:i|we) left|my )?\s*(thread|chat|conversation|where (?:i|we) left off)\b/.test(p)
+      ) {
+        launchApp("assistant");
+        setTimeout(() => window.dispatchEvent(new CustomEvent("delos-intent", { detail: { kind: "assistant.resumeLast" } })), 450);
+        speak("Continuing your last thread.");
+        toast("voice · continuing last thread", "ok");
+        return;
+      }
       fetch("/api/voice-command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

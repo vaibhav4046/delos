@@ -161,10 +161,15 @@ export function Window({
   const targetX = maximized ? 0 : win.x;
   const targetY = maximized ? 48 : win.y;
   const targetW = maximized ? vw : Math.max(240, win.width);
-  // Reserve top bar (48px) + dock + dock-magnification headroom (~104px total)
-  // so maximized windows never hide their own bottom controls (chat input, send)
-  // behind the dock. Was 56 — Del Assistant input was clipped at 1440x900.
-  const targetH = maximized ? vh - 48 - 104 : Math.max(180, win.height);
+  // Reserve top bar (48px) + dock + dock-magnification headroom so maximized
+  // windows never hide their own bottom controls (chat input, send) behind the
+  // dock. Fine pointer needs ~104px (dock magnifies on hover; was 56 — Del
+  // Assistant input clipped at 1440x900). Coarse pointer (touch) has no
+  // magnification, so the static dock only needs ~56px — reclaim the rest for
+  // the maximized app, which matters most on short phone viewports.
+  const coarse = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  const bottomReserve = coarse ? 56 : 104;
+  const targetH = maximized ? vh - 48 - bottomReserve : Math.max(180, win.height);
 
   return (
     <>

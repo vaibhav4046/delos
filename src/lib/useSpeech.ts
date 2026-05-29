@@ -583,7 +583,10 @@ export function useWhisperSTT() {
         const HARD_CAP_MS = 12_000;      // belt-and-suspenders max recording length
         const recordStartAt = Date.now();
         function tick() {
-          if (state === "idle" || !recRef.current || recRef.current.state !== "recording") return;
+          // NB: read the live recorder state via the ref — never the `state`
+          // closure, which is frozen at "idle" (start() has [] deps) and would
+          // short-circuit VAD so the mic never auto-stops.
+          if (!recRef.current || recRef.current.state !== "recording") return;
           analyser.getByteFrequencyData(data);
           let sum = 0;
           for (let i = 0; i < data.length; i++) sum += data[i];
@@ -669,7 +672,6 @@ export function useWhisperSTT() {
       setError(msg);
     }
     // Stable identity by design; 'state' is only read for branching, not deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stop = useCallback(() => {

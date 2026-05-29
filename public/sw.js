@@ -9,7 +9,7 @@
 //   • Cross-origin         → passthrough to the browser.
 // Bump CACHE to invalidate the precache after a deploy.
 
-const CACHE = "delrio-v4";
+const CACHE = "delrio-v5";
 const OFFLINE_URL = "/offline.html";
 const SHELL = [
   "/",
@@ -74,11 +74,16 @@ self.addEventListener("fetch", (e) => {
         try {
           const preload = await e.preloadResponse;
           if (preload) {
-            caches.open(CACHE).then((c) => c.put(req, preload.clone())).catch(() => {});
+            // Never cache a redirected navigation: an authed route that 307s to
+            // /auth/signin would otherwise poison the cached shell, so an offline
+            // user gets the sign-in page under /os instead of the app.
+            if (!preload.redirected) {
+              caches.open(CACHE).then((c) => c.put(req, preload.clone())).catch(() => {});
+            }
             return preload;
           }
           const net = await fetch(req);
-          if (net && net.ok && net.type === "basic") {
+          if (net && net.ok && net.type === "basic" && !net.redirected) {
             caches.open(CACHE).then((c) => c.put(req, net.clone())).catch(() => {});
           }
           return net;

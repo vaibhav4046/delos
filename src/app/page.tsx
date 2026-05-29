@@ -64,6 +64,7 @@ export default async function Home() {
         <StatBar stats={stats} />
         <Pillars />
         <HowItWorks />
+        <SwarmContext />
         <DesktopShowcase apps={stats.apps} />
         <RealWorldUses />
         <UseCases />
@@ -339,6 +340,47 @@ function HowItWorks() {
             </div>
           ))}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function SwarmContext() {
+  const cards = [
+    { g: "⊹", t: "Recursive frames", d: "Every chat, run, and sub-agent is a node in one context tree. Children inherit the parent window; parents see what children learned. Depth is unbounded." },
+    { g: "⌕", t: "Cross-thread recall", d: "Ask once, recall everywhere. Search the whole swarm window across every thread and run you own — token-budgeted, ranked by relevance." },
+    { g: "⟳", t: "Self-updating memory", d: "Each turn persists into the shared window automatically. Long-term HydraDB memory folds in on recall — no save button, no copy-paste." },
+    { g: "∞", t: "…and beyond", d: "Aged items fold into compact summaries so the window never overflows. The engine keeps the signal and drops the noise as context grows." },
+  ];
+  return (
+    <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-20">
+      <div className="mb-10 max-w-3xl">
+        <span className="pill pill-muted" style={{ fontSize: 10 }}>★ SWARM CONTEXT</span>
+        <h2 className="font-pixel text-3xl sm:text-4xl mt-4 mb-3 tracking-wider">
+          one window, <span style={{ color: "var(--accent)" }}>recursive</span>.
+        </h2>
+        <p className="text-[color:var(--muted)] text-sm sm:text-base">
+          A shared context window that spans message threads and the whole agent swarm. It remembers across chats,
+          recalls on demand, and updates memory on every turn. Watch it live in the Context Inspector.
+        </p>
+      </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {cards.map((c) => (
+          <div key={c.t} className="card-pixel">
+            <div
+              className="font-pixel text-2xl flex items-center justify-center mb-3"
+              style={{ width: 40, height: 40, background: "var(--surface-2)", color: "var(--accent)", border: "2px solid var(--accent)", boxShadow: "2px 2px 0 var(--shadow)" }}
+            >
+              {c.g}
+            </div>
+            <div className="font-pixel text-base sm:text-lg mb-1 tracking-wider" style={{ color: "var(--fg)" }}>{c.t}</div>
+            <p className="text-xs sm:text-sm text-[color:var(--muted)] leading-relaxed">{c.d}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Link href="/os?guest=1&app=context" className="btn-pixel success text-xs sm:text-sm">★ Open Context Inspector</Link>
+        <span className="pill pill-info" style={{ fontSize: 9 }}>BOLA-safe · per-tenant isolated</span>
       </div>
     </section>
   );

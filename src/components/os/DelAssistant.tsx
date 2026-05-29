@@ -126,6 +126,9 @@ const DEFAULT_MODEL: ModelKey = "groq:openai/gpt-oss-120b";
 export function DelAssistant() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Ref mirror of convs so the voice "continue last thread" intent (fired from
+  // the OS bus, []-deps effect) always resumes the freshest conversation.
+  const convsRef = useRef<Conversation[]>([]);
   const [input, setInput] = useState("");
   // Voice mic · Whisper-large-v3 STT for autonomous MCP actions
   // (Gmail draft / Notion create / GitHub list / GDrive list). On
@@ -164,6 +167,11 @@ export function DelAssistant() {
         setTimeout(() => {
           void actuallySend(d.text!.trim());
         }, 80);
+      } else if (d?.kind === "assistant.resumeLast") {
+        // Voice "continue last thread" · resume the most-recently-updated
+        // conversation into a fresh thread seeded with recalled swarm context.
+        const latest = [...convsRef.current].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        if (latest) setTimeout(() => void resumeFrom(latest), 80);
       }
     }
     window.addEventListener("delos-intent", onIntent as EventListener);
@@ -171,6 +179,12 @@ export function DelAssistant() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [showSidebar, setShowSidebar] = useState(true);
+  // Cross-thread recall · search the recursive swarm-context window across ALL
+  // of this user's threads/runs. Powers "continue anywhere" and the sidebar
+  // recall box.
+  const [recallQ, setRecallQ] = useState("");
+  const [recallHits, setRecallHits] = useState<Array<{ source: string; text: string; threadId?: string; at: number }> | null>(null);
+  const [recallBusy, setRecallBusy] = useState(false);
   // Autonomous mode: when on, every user turn first hits /api/coordinator. The plan's
   // open_app actions dispatch into the OS intent bus; remaining actions are summarized
   // back to chat so the user sees what was done without lifting a finger.
@@ -199,6 +213,7 @@ export function DelAssistant() {
   // where deltas arrived but updateActive matched against a stale conv id.
   const activeIdRef = useRef<string | null>(null);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+  useEffect(() => { convsRef.current = convs; }, [convs]);
 
   // Persist convs whenever they change
   useEffect(() => {
@@ -228,6 +243,62 @@ export function DelAssistant() {
       if (id === activeId) setActiveId(next[0]?.id ?? null);
       return next;
     });
+  }
+
+  // Continue-anywhere · spin up a BRAND NEW thread seeded with the recursive
+  // context recalled from a past conversation. The new thread owns its own id
+  // going forward, but starts with a recap so the user (and the model, via the
+  // server-side recall on the next turn) picks up exactly where they left off.
+  async function resumeFrom(conv: Conversation) {
+    const fresh = newConv(conv.mode, conv.model);
+    fresh.title = `↪ ${conv.title}`.slice(0, 60);
+    const noteId = `m-${Date.now()}-resume`;
+    fresh.messages = [{ id: noteId, role: "system", content: "Recalling where we left off…", ts: Date.now(), mode: conv.mode }];
+    setConvs((p) => [fresh, ...p]);
+    setActiveId(fresh.id);
+    setInput("");
+    setPendingClarify(null);
+    const anchorQuery =
+      [...conv.messages].reverse().find((m) => m.role === "user")?.content?.slice(0, 400) || conv.title;
+    try {
+      const r = await fetch("/api/context/recall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: anchorQuery, threadId: conv.id, tokenBudget: 1600, maxDepth: 8 }),
+      });
+      const data = (await r.json().catch(() => null)) as { hints?: string[]; items?: unknown[]; memoryHits?: number } | null;
+      const hints = (data?.hints ?? []).slice(0, 10);
+      const body = hints.length
+        ? `↪ Resuming from "${conv.title}" — recalled ${hints.length} context item${hints.length === 1 ? "" : "s"} from the swarm window:\n\n${hints.map((h) => `• ${h}`).join("\n")}\n\nAsk your next question and I'll continue with this context.`
+        : `↪ Resuming from "${conv.title}" — no prior context was found to recall. Start typing and I'll pick it up from here.`;
+      setConvs((p) => p.map((c) => (c.id === fresh.id ? { ...c, messages: c.messages.map((m) => (m.id === noteId ? { ...m, content: body } : m)) } : c)));
+    } catch {
+      setConvs((p) => p.map((c) => (c.id === fresh.id ? { ...c, messages: c.messages.map((m) => (m.id === noteId ? { ...m, content: `↪ Resuming from "${conv.title}" — context recall failed; continuing fresh.` } : m)) } : c)));
+    }
+  }
+
+  // Cross-thread recall search · query the recursive window across every thread
+  // and run this user owns. Results are clickable → drop into the composer.
+  async function runRecallSearch() {
+    const q = recallQ.trim();
+    if (!q) {
+      setRecallHits(null);
+      return;
+    }
+    setRecallBusy(true);
+    try {
+      const r = await fetch("/api/context/recall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, tokenBudget: 1200 }),
+      });
+      const data = (await r.json().catch(() => null)) as { items?: Array<{ source: string; text: string; threadId?: string; at: number }> } | null;
+      setRecallHits(data?.items ?? []);
+    } catch {
+      setRecallHits([]);
+    } finally {
+      setRecallBusy(false);
+    }
   }
 
   function setMode(mode: Mode) {
@@ -543,6 +614,12 @@ export function DelAssistant() {
         system: SYSTEM_PROMPTS[active.mode],
         withSearch: active.mode === "research",
         searchMcpUrl: active.mode === "research" && typeof window !== "undefined" ? `${window.location.origin}/api/mcp/demo` : undefined,
+        // Swarm context · the conversation id is a stable thread key. The server
+        // recalls this thread's recursive context window (plus cross-thread
+        // memory) into the system prompt and persists both turns. This is what
+        // lets a chat "remember" across threads and seed continue-anywhere.
+        threadId: active.id,
+        mode: active.mode,
       }),
       signal: ctrl.signal,
     });
@@ -551,9 +628,35 @@ export function DelAssistant() {
     const dec = new TextDecoder();
     let buf = "";
     let acc = "";
+    // Stall watchdog: a dead upstream (provider hangs mid-stream, proxy drops
+    // the connection without FIN) leaves reader.read() pending forever and the
+    // UI stuck in "streaming". Re-arm a 30s inactivity timer on every chunk; if
+    // nothing arrives in that window, mark an empty bubble and abort so the
+    // catch in sendMessage runs and streaming state clears. First-token latency
+    // on cold free tiers is well under 30s, and each delta resets the timer, so
+    // a slow-but-alive stream never trips it.
+    const STALL_MS = 30_000;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    const armStall = () => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        updateActive((c) => ({
+          ...c,
+          messages: c.messages.map((m) =>
+            m.id === assistId && !m.content.trim()
+              ? { ...m, content: "(no response — the stream stalled. Try again.)" }
+              : m
+          ),
+        }));
+        ctrl.abort();
+      }, STALL_MS);
+    };
+    armStall();
+    try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      armStall(); // got bytes — reset the inactivity timer
       buf += dec.decode(value, { stream: true });
       const parts = buf.split("\n\n");
       buf = parts.pop() ?? "";
@@ -600,6 +703,9 @@ export function DelAssistant() {
           }
         } catch {}
       }
+    }
+    } finally {
+      if (watchdog) clearTimeout(watchdog);
     }
   }
 
@@ -791,6 +897,15 @@ export function DelAssistant() {
 
   const All = Icons as unknown as Record<string, React.ComponentType<{ size?: number; color?: string }>>;
   const sortedConvs = [...convs].sort((a, b) => b.updatedAt - a.updatedAt);
+  const SRC_DOT: Record<string, string> = {
+    user: "var(--accent)",
+    assistant: "var(--accent-2)",
+    agent: "#7CE3B0",
+    subagent: "#9AD0FF",
+    tool: "#C9A8FF",
+    memory: "#FFC76B",
+    system: "var(--muted)",
+  };
 
   if (!active) {
     return <div className="p-4 text-xs text-[color:var(--muted)]">Loading…</div>;
@@ -816,6 +931,57 @@ export function DelAssistant() {
           >
             <Icons.Plus size={12} /> NEW CHAT
           </button>
+
+          {/* Cross-thread recall · search the recursive swarm window across every thread */}
+          <div className="mt-2 flex items-center gap-1">
+            <div className="flex-1 flex items-center gap-1 px-1.5 py-1" style={{ background: "var(--surface)", border: "1px solid var(--surface-2)" }}>
+              <Icons.Search size={10} color="var(--muted)" />
+              <input
+                value={recallQ}
+                onChange={(e) => setRecallQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void runRecallSearch(); } }}
+                placeholder="recall across threads…"
+                className="flex-1 bg-transparent outline-none font-mono text-[10px]"
+                style={{ color: "var(--fg)", minWidth: 0 }}
+              />
+              {recallQ && (
+                <button
+                  onClick={() => { setRecallQ(""); setRecallHits(null); }}
+                  style={{ cursor: "pointer", lineHeight: 0 }}
+                  title="Clear"
+                >
+                  <Icons.X size={10} color="var(--muted)" />
+                </button>
+              )}
+            </div>
+          </div>
+          {recallBusy && (
+            <div className="text-[10px] font-mono px-1 py-0.5" style={{ color: "var(--muted)" }}>
+              searching swarm…
+            </div>
+          )}
+          {recallHits && !recallBusy && (
+            <div className="flex flex-col gap-0.5 mt-0.5 mb-1">
+              {recallHits.length === 0 && (
+                <div className="text-[10px] font-mono px-1" style={{ color: "var(--muted)" }}>no matches</div>
+              )}
+              {recallHits.slice(0, 12).map((h, i) => (
+                <button
+                  key={`${h.at}-${i}`}
+                  onClick={() => { setInput(h.text); setRecallHits(null); setRecallQ(""); }}
+                  className="w-full text-left flex items-start gap-1 px-1.5 py-1 transition-colors hover:bg-[color:var(--surface-2)]"
+                  style={{ cursor: "pointer", borderLeft: `2px solid ${SRC_DOT[h.source] ?? "var(--muted)"}` }}
+                  title={`${h.source}${h.threadId ? ` · ${h.threadId.slice(0, 8)}` : ""} — click to reuse`}
+                >
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: SRC_DOT[h.source] ?? "var(--muted)", marginTop: 4, flexShrink: 0 }} />
+                  <span className="font-mono text-[10px] flex-1" style={{ color: "var(--muted)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                    {h.text}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="font-pixel text-[9px] tracking-widest mt-2 mb-1 px-1" style={{ color: "var(--muted)" }}>
             RECENT
           </div>
@@ -841,14 +1007,27 @@ export function DelAssistant() {
                     {c.title}
                   </span>
                 </button>
-                <button
-                  onClick={() => deleteConv(c.id)}
-                  className="absolute right-0 top-0 bottom-0 px-1.5 opacity-0 group-hover:opacity-100"
-                  style={{ background: "var(--surface-2)", cursor: "pointer" }}
-                  title="Delete"
+                <div
+                  className="absolute right-0 top-0 bottom-0 flex items-stretch opacity-0 group-hover:opacity-100"
+                  style={{ background: "var(--surface-2)" }}
                 >
-                  <Icons.Trash2 size={9} color="var(--danger)" />
-                </button>
+                  <button
+                    onClick={() => void resumeFrom(c)}
+                    className="px-1.5 flex items-center"
+                    style={{ cursor: "pointer" }}
+                    title="Continue in a new thread with recalled context"
+                  >
+                    <Icons.CornerDownLeft size={9} color="var(--accent)" />
+                  </button>
+                  <button
+                    onClick={() => deleteConv(c.id)}
+                    className="px-1.5 flex items-center"
+                    style={{ cursor: "pointer" }}
+                    title="Delete"
+                  >
+                    <Icons.Trash2 size={9} color="var(--danger)" />
+                  </button>
+                </div>
               </div>
             );
           })}

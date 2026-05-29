@@ -7,6 +7,7 @@ import { critique } from "./agents/critic";
 import { runQuickAgent } from "./agents/quick";
 import type { LLMUsage } from "./agents/jsonGen";
 import { ensureTenant, safeAddMemory, safeRecall } from "./hydra";
+import { createFrame, getFrame, addItem, collectContext } from "./swarmContext";
 import { env } from "./env";
 import { makeToolPolicy } from "./resilience";
 import { popSteer } from "./steerStore";
@@ -27,6 +28,10 @@ export type RunOptions = {
   // goes away the route aborts this, so we stop starting new steps and burning
   // LLM calls on a run nobody is listening to. Checked at the top of each step.
   signal?: AbortSignal;
+  // Swarm-context parent frame · when a run is launched from a chat thread (or
+  // another run), the caller passes that frame's id so this run nests under it
+  // in the recursive context tree. collectContext climbs from here.
+  swarmFrameId?: string;
 };
 
 type Role = "planner" | "executor" | "critic" | "appBuilder" | "subagent";
@@ -128,6 +133,20 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   const tenantId = opts.tenantId ?? env.DELRIO_TENANT_ID;
   await ensureTenant(tenantId);
 
+  // Swarm context · this run owns a frame in the recursive context tree. If the
+  // caller passed a parent frame (a chat thread, or another run), nest under it
+  // so collectContext can climb the chain ("recursive, and beyond"). Sub-agents
+  // spawned below in turn nest under THIS frame.
+  const parentFrame = opts.swarmFrameId ? getFrame(opts.swarmFrameId) : undefined;
+  const runFrame = createFrame({
+    tenantId,
+    kind: "run",
+    label: opts.goal.slice(0, 80),
+    parentId: parentFrame?.id,
+    threadId: parentFrame?.threadId,
+  });
+  addItem(runFrame.id, { source: "user", text: opts.goal });
+
   const exactFacts = extractExactFacts(goal);
   if (exactFacts.length > 0) {
     for (const fact of exactFacts) {
@@ -152,6 +171,31 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
     return;
   }
 
+  // Recursive swarm-context window · climb this run's frame chain (parent
+  // thread/run + folded ancestor summaries + sibling sub-agent notes) and fold
+  // it into the planner's hints alongside semantic memory. includeMemory:false
+  // because the safeRecall above already covers long-term memory this tenant.
+  const swarm = await collectContext({
+    frameId: runFrame.id,
+    tenantId,
+    query: goal,
+    includeMemory: false,
+  });
+  if (swarm.hints.length > 0) {
+    // Rank swarm hints ahead of raw recall — they're the live, structured
+    // context for THIS conversation, not just fuzzy semantic matches.
+    memHits.unshift(...swarm.hints.map((text) => ({ text, score: 1 })));
+  }
+  yield {
+    t: "context",
+    frameId: runFrame.id,
+    tokensUsed: swarm.tokensUsed,
+    depthReached: swarm.depthReached,
+    memoryHits: swarm.memoryHits,
+    itemCount: swarm.items.length,
+    at: Date.now(),
+  };
+
   const registry = buildRegistry();
   if (opts.extraTools) for (const t of opts.extraTools) registry.register(t);
   const tools = registry.list();
@@ -175,7 +219,14 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
   // --- Sub-agent fan-out ---
   if (plan.subgoals && plan.subgoals.length > 0) {
     const subIds = plan.subgoals.map((_, i) => `sub-${runId}-${i}`);
+    // Each sub-agent gets its OWN frame nested under this run — that's the
+    // recursion made concrete (run → sub-agent). Their goals + answers become
+    // context items, so a later step (or the inspector) can climb back up.
+    const subFrames = plan.subgoals.map((g) =>
+      createFrame({ tenantId, kind: "subagent", parentId: runFrame.id, label: g.slice(0, 80) }),
+    );
     for (let i = 0; i < plan.subgoals.length; i++) {
+      addItem(subFrames[i].id, { source: "subagent", text: `goal: ${plan.subgoals[i]}` });
       yield { t: "subagent", id: subIds[i], goal: plan.subgoals[i], status: "spawn", at: Date.now() };
     }
     const settled = await Promise.allSettled(
@@ -185,9 +236,11 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
     for (let i = 0; i < settled.length; i++) {
       const s = settled[i];
       if (s.status === "fulfilled") {
+        addItem(subFrames[i].id, { source: "subagent", text: s.value });
         pushScratch(scratch, `subagent[${i}] answered "${plan.subgoals[i].slice(0, 60)}": ${s.value.slice(0, 200)}`);
         yield { t: "subagent", id: subIds[i], goal: plan.subgoals[i], status: "done", result: s.value.slice(0, 240), at: Date.now() };
       } else {
+        addItem(subFrames[i].id, { source: "system", text: `failed: ${String(s.reason).slice(0, 200)}` });
         yield { t: "subagent", id: subIds[i], goal: plan.subgoals[i], status: "fail", result: String(s.reason).slice(0, 200), at: Date.now() };
       }
     }
@@ -521,6 +574,9 @@ export async function* orchestrate(opts: RunOptions): AsyncGenerator<RunEvent> {
     for (const e of drain()) yield e;
   }
   yield { t: "answer", text: answer, at: Date.now() };
+  // Fold the run's answer back into its frame so a follow-up run on the same
+  // thread (and the Context Inspector) sees what this run concluded.
+  addItem(runFrame.id, { source: "agent", text: answer });
 
   yield { t: "phase", phase: "store", at: Date.now() };
   const memText = `Run completed for goal: "${originalGoal}". Final answer: ${answer.slice(0, 200)}. Tools used: ${toolHistory.map((t) => t.tool).join(", ")}.`;

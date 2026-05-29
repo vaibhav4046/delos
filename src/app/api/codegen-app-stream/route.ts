@@ -268,6 +268,13 @@ export async function POST(req: NextRequest) {
   const startedAt = Date.now();
   const isOverDeadline = () => Date.now() - startedAt > DEADLINE_MS;
 
+  // Client-disconnect latch. When the browser closes the EventSource, the
+  // response stream is cancelled and req.signal aborts — flip `closed` so the
+  // generation loop bails instead of running the full ~80s provider cascade
+  // (and burning LLM quota) for a consumer that's already gone.
+  let closed = false;
+  req.signal?.addEventListener("abort", () => { closed = true; });
+
   const stackHint =
     stack === "nextjs"
       ? "Next.js 16 App Router + React 19 + TypeScript + Tailwind v4 + Server Components where useful"
@@ -314,9 +321,14 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       const enc = new TextEncoder();
       const send = (obj: unknown) => {
+        if (closed) return;
         try {
           controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
-        } catch {}
+        } catch {
+          // Enqueue throws once the consumer is gone — latch closed so the
+          // generation loop stops issuing LLM calls.
+          closed = true;
+        }
       };
       try {
         send({ t: "plan_start", prompt: userPrompt, tier, uiStyle, at: Date.now() });
@@ -421,6 +433,7 @@ Always include app/page.tsx and a README.md.
 Return JSON only:
 { "name":"…","description":"…","stack":"${stackHint}","files":[{"path":"app/page.tsx","purpose":"…","language":"tsx"},…] }`;
 
+        if (closed) return; // client already gone — don't even plan
         const rawPlan = await callJson(planPrompt, "Respond with ONE JSON object only. No prose, no markdown fences.", 4000);
         const plan = JSON.parse(rawPlan) as {
           name: string;
@@ -553,6 +566,7 @@ Output JSON: { "path":"${f.path}","content":"…escaped source…","language":"$
         }
 
         for (let i = 0; i < plan.files.length; i += WRITE_PARALLEL) {
+          if (closed) break; // consumer disconnected — stop burning provider quota
           if (isOverDeadline()) {
             send({ t: "deadline_hit", written: fileResults.length, total: plan.files.length, at: Date.now() });
             break;
@@ -673,6 +687,11 @@ Output JSON: { "path":"${f.path}","content":"…escaped source…","language":"$
           controller.close();
         } catch {}
       }
+    },
+    cancel() {
+      // Consumer (the browser EventSource) went away — latch closed so the
+      // in-flight generation loop stops issuing provider calls.
+      closed = true;
     },
   });
 

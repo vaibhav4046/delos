@@ -1,11 +1,11 @@
 {
   "id": "/os",
-  "name": "Del Rio — Agents Under Pressure",
+  "name": "DelOS — agents that flow under pressure",
   "short_name": "DelOS",
   "description": "Browser-OS where multi-agent orchestration is wired in by default — memory, tools, recovery, adaptation. Agents build the apps live.",
   "lang": "en",
   "dir": "ltr",
-  "start_url": "/os?source=pwa",
+  "start_url": "/os?source=pwa&guest=1",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
@@ -22,8 +22,9 @@
     { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" }
   ],
   "shortcuts": [
-    { "name": "Launch DelOS", "short_name": "DelOS", "url": "/os", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
-    { "name": "Del Assistant", "short_name": "Assistant", "url": "/os?app=assistant", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Launch DelOS", "short_name": "DelOS", "url": "/os?guest=1", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Del Assistant", "short_name": "Assistant", "url": "/os?app=assistant&guest=1", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Context Inspector", "short_name": "Context", "url": "/os?app=context&guest=1", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
     { "name": "Chaos Demo", "short_name": "Play", "url": "/play", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
     { "name": "Live Feed", "short_name": "Live", "url": "/live", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ],

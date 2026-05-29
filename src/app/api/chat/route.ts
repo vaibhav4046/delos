@@ -5,7 +5,8 @@ import { resolveModel, type ModelKey } from "@/lib/llm";
 import { callTool, listTools } from "@/lib/mcp/client";
 import { rateLimit, clientIp } from "@/lib/rateLimit";
 
-import { zodErr } from "@/lib/apiAuth";
+import { resolveTenant, zodErr } from "@/lib/apiAuth";
+import { frameForThread, collectContext, persistTurn } from "@/lib/swarmContext";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -37,6 +38,12 @@ const bodySchema = z.object({
   system: z.string().max(2000).optional(),
   withSearch: z.boolean().default(false),
   searchMcpUrl: z.string().url().optional(),
+  // Swarm context · when present, this chat turn participates in the recursive
+  // context window: the server recalls prior cross-thread context into the
+  // system prompt and persists both turns to the thread frame + long-term
+  // memory. Omitted → stateless chat (unchanged behavior).
+  threadId: z.string().min(1).max(120).optional(),
+  mode: z.string().max(40).optional(),
 });
 
 // Cascade order: agents "flow under pressure". When the requested model's
@@ -112,7 +119,39 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return zodErr(parsed.error);
   }
-  const { messages, model, system, withSearch, searchMcpUrl } = parsed.data;
+  const { messages, model, system, withSearch, searchMcpUrl, threadId, mode } = parsed.data;
+
+  // Swarm-context prep · resolve tenant server-side (never trusted from body)
+  // and recall the recursive cross-thread context window for this turn. Done
+  // BEFORE the stream so first-token latency pays at most ONE recall.
+  const lastUserContent = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  let swarmTenant: string | null = null;
+  let swarmFrameId: string | null = null;
+  let swarmHints: string[] = [];
+  let swarmStats = { tokensUsed: 0, depthReached: 0, memoryHits: 0, itemCount: 0 };
+  if (threadId) {
+    try {
+      const { tenantId } = await resolveTenant(req, { intent: "write" });
+      swarmTenant = tenantId;
+      const frame = frameForThread({ tenantId, threadId });
+      swarmFrameId = frame.id;
+      const collected = await collectContext({
+        frameId: frame.id,
+        tenantId,
+        query: lastUserContent,
+        tokenBudget: 900,
+      });
+      swarmHints = collected.hints.slice(0, 12);
+      swarmStats = {
+        tokensUsed: collected.tokensUsed,
+        depthReached: collected.depthReached,
+        memoryHits: collected.memoryHits,
+        itemCount: collected.items.length,
+      };
+    } catch {
+      // Context is best-effort — never block a chat on a recall failure.
+    }
+  }
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -149,13 +188,31 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const finalSystem = [system, searchContext ? `\nRelevant context from web search:\n${searchContext}` : ""]
+        // Recursive swarm-context block · prior turns from THIS thread, folded
+        // ancestor summaries, and cross-thread memory the engine deemed
+        // relevant. Injected silently so the model stays consistent without
+        // narrating its memory.
+        if (swarmFrameId) {
+          send({ t: "context", frameId: swarmFrameId, ...swarmStats });
+        }
+        const contextBlock = swarmHints.length
+          ? `Shared context recalled from this user's prior threads and runs (most relevant first). Use it silently to stay consistent; do not mention it unless asked:\n${swarmHints.map((h) => `- ${h}`).join("\n")}`
+          : "";
+
+        const finalSystem = [
+          system,
+          contextBlock,
+          searchContext ? `\nRelevant context from web search:\n${searchContext}` : "",
+        ]
           .filter(Boolean)
           .join("\n");
 
         const candidates = candidateModels(model);
         let streamed = false;
         let lastErr: unknown = null;
+        // Accumulate the assistant's visible text so we can persist the turn
+        // into swarm context once the stream completes.
+        let assistantText = "";
 
         for (const cand of candidates) {
           // Stop cascading the moment the client goes away.
@@ -193,7 +250,10 @@ export async function POST(req: NextRequest) {
                   streamed = true;
                   sawText = true;
                 }
-                if (part.text) send({ t: "delta", text: part.text });
+                if (part.text) {
+                  assistantText += part.text;
+                  send({ t: "delta", text: part.text });
+                }
               } else if (part.type === "error") {
                 throw part.error; // → catch below; cascades if nothing streamed yet
               } else if (part.type === "finish") {
@@ -230,6 +290,20 @@ export async function POST(req: NextRequest) {
 
         if (!streamed && lastErr) {
           send({ t: "error", message: friendlyErr(lastErr) });
+        }
+
+        // Persist this exchange into the recursive context window so later
+        // turns — in this thread or any other — can recall it. Best-effort:
+        // a memory write must NEVER surface as a chat error.
+        if (threadId && swarmTenant && streamed && assistantText.trim()) {
+          try {
+            if (lastUserContent.trim()) {
+              await persistTurn({ tenantId: swarmTenant, threadId, role: "user", text: lastUserContent, mode });
+            }
+            await persistTurn({ tenantId: swarmTenant, threadId, role: "assistant", text: assistantText, mode });
+          } catch {
+            // swallow — context persistence is non-critical
+          }
         }
       } catch (e) {
         send({ t: "error", message: e instanceof Error ? e.message : String(e) });

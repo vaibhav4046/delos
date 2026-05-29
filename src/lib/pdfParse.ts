@@ -16,7 +16,7 @@
 // the 90% case — judge demos, hackathon submissions, contracts, etc.
 
 import zlib from "node:zlib";
-import { assertPublicHttpUrl } from "./safeUrl";
+import { assertPublicHttpUrl, safeFetch } from "./safeUrl";
 
 const STREAM_OPEN = Buffer.from("stream\n");
 const STREAM_OPEN_CR = Buffer.from("stream\r\n");
@@ -106,19 +106,14 @@ export function parsePdfBuffer(buf: ArrayBuffer | Buffer): { text: string; pages
 
 export async function parsePdfFromUrl(url: string, maxBytes = 5 * 1024 * 1024): Promise<{ text: string; pages: number; bytes: number; url: string }> {
   // SSRF guard: validate the initial URL and every redirect hop against the
-  // public-host allowlist. We follow redirects manually (fetch's redirect:
-  // "follow" would chase a 302 → http://169.254.169.254 metadata endpoint
-  // without re-validation) re-checking Location each time.
+  // public-host allowlist AND DNS-resolve each hostname so a public name whose
+  // A/AAAA record points at 169.254.169.254 / 10.x can't slip through
+  // (DNS-rebind). safeFetch does the name-shape check + per-IP validation +
+  // timeout; we follow redirects manually, re-validating every Location.
   let current = assertPublicHttpUrl(url).toString();
   let r: Response | null = null;
   for (let hop = 0; hop < 5; hop++) {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 8000);
-    try {
-      r = await fetch(current, { redirect: "manual", signal: ctl.signal });
-    } finally {
-      clearTimeout(t);
-    }
+    r = await safeFetch(current, { redirect: "manual", timeoutMs: 8000 });
     if (r.status >= 300 && r.status < 400) {
       const loc = r.headers.get("location");
       if (!loc) break;
