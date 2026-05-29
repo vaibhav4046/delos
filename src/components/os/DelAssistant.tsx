@@ -933,14 +933,18 @@ export function DelAssistant() {
           </button>
 
           {/* Cross-thread recall · search the recursive swarm window across every thread */}
-          <div className="mt-2 flex items-center gap-1">
+          <div className="font-pixel text-[9px] tracking-widest mt-2 mb-1 px-1" style={{ color: "var(--muted)" }}>
+            RECALL · ALL THREADS
+          </div>
+          <div className="flex items-center gap-1">
             <div className="flex-1 flex items-center gap-1 px-1.5 py-1" style={{ background: "var(--surface)", border: "1px solid var(--surface-2)" }}>
               <Icons.Search size={10} color="var(--muted)" />
               <input
                 value={recallQ}
                 onChange={(e) => setRecallQ(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void runRecallSearch(); } }}
-                placeholder="recall across threads…"
+                placeholder="search every thread + memory…"
+                aria-label="Search across all threads and memory"
                 className="flex-1 bg-transparent outline-none font-mono text-[10px]"
                 style={{ color: "var(--fg)", minWidth: 0 }}
               />
@@ -1008,22 +1012,24 @@ export function DelAssistant() {
                   </span>
                 </button>
                 <div
-                  className="absolute right-0 top-0 bottom-0 flex items-stretch opacity-0 group-hover:opacity-100"
+                  className="absolute right-0 top-0 bottom-0 flex items-stretch opacity-70 group-hover:opacity-100 transition-opacity"
                   style={{ background: "var(--surface-2)" }}
                 >
                   <button
                     onClick={() => void resumeFrom(c)}
                     className="px-1.5 flex items-center"
                     style={{ cursor: "pointer" }}
-                    title="Continue in a new thread with recalled context"
+                    title="Resume · continue in a new thread with recalled context"
+                    aria-label="Resume this conversation in a new thread with recalled context"
                   >
-                    <Icons.CornerDownLeft size={9} color="var(--accent)" />
+                    <Icons.CornerDownLeft size={10} color="var(--accent)" />
                   </button>
                   <button
                     onClick={() => deleteConv(c.id)}
                     className="px-1.5 flex items-center"
                     style={{ cursor: "pointer" }}
                     title="Delete"
+                    aria-label="Delete this conversation"
                   >
                     <Icons.Trash2 size={9} color="var(--danger)" />
                   </button>

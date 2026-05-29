@@ -113,7 +113,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   let body: { query?: string; input?: string; topK?: number } = {};
   try {
-    body = (await req.json()) as { query?: string; input?: string; topK?: number };
+    const j = await req.json();
+    // literal `null`/arrays parse without throwing — keep {} default so body.* never derefs null (was a 500)
+    if (j && typeof j === "object" && !Array.isArray(j)) body = j as { query?: string; input?: string; topK?: number };
   } catch {}
   // B12 · accept `input` alias for `query`.
   const q = (body.input ?? body.query ?? "recent runs").slice(0, 240);

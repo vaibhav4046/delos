@@ -90,6 +90,10 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ jsonrpc: "2.0", id: 0, error: { code: -32700, message: "Parse error" } }, { status: 400 });
   }
+  // literal `null`/array/primitive bodies parse without throwing — reject before destructure (was a 500)
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return Response.json({ jsonrpc: "2.0", id: 0, error: { code: -32600, message: "Invalid Request" } }, { status: 400 });
+  }
   const { id, method, params } = body;
   if (method === "initialize") {
     return ok(id, { protocolVersion: "2024-11-05", serverInfo: { name: "DelOS Demo MCP", version: "0.2.0" }, capabilities: { tools: {} } });

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pushSteer } from "@/lib/steerStore";
 import { getRun, getRunAsync } from "@/lib/runLog";
 import { resolveTenant, zodErr, getRunTenant  } from "@/lib/apiAuth";
+import { rateLimit, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,15 @@ const bodySchema = z
   });
 
 export async function POST(req: NextRequest) {
+  // Rate-limit: steer can optimistically enqueue into any well-formed runId when no
+  // run→tenant binding is visible to this Lambda (cross-region cold start). nanoid
+  // unguessability already makes targeted injection infeasible; the throttle closes
+  // brute-enumeration of the optimistic path. (R4 brutal-QA, security MED.)
+  const ip = clientIp(req);
+  const lim = rateLimit(`steer:ip:${ip}`, 20, 60_000);
+  if (!lim.ok) {
+    return Response.json({ ok: false, error: "rate_limited" }, { status: 429, headers: lim.headers });
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return zodErr(parsed.error);

@@ -482,15 +482,27 @@ export default function OSPage() {
 
   // Bootstrap: fetch /api/me, lock per-user tenantId, decide whether to show OnboardingPortal.
   useEffect(() => {
+    // Guests (landing CTA appends ?guest=1) and deep-links (?app=<key>, e.g. the
+    // Context Inspector shortcut) want to land straight in the OS / target app —
+    // don't gate them behind the onboarding portal, which otherwise covered the
+    // desktop AND masked the deep-link on first run. (R4 brutal-QA, UX HIGH.)
+    let skipPortal = false;
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      skipPortal = sp.get("guest") === "1" || !!sp.get("app");
+    } catch {}
+    const maybeOpenPortal = () => {
+      if (!skipPortal && !hasOnboarded()) setPortalOpen(true);
+    };
     fetch("/api/me?profile=full", { credentials: "include" })
       .then((r) => r.json())
       .then((d: { signedIn?: boolean; email?: string; tenantId?: string }) => {
         setSession(d);
         if (d?.tenantId) setTenantIdGlobal(d.tenantId);
-        if (!hasOnboarded()) setPortalOpen(true);
+        maybeOpenPortal();
       })
       .catch(() => {
-        if (!hasOnboarded()) setPortalOpen(true);
+        maybeOpenPortal();
       });
   }, []);
 

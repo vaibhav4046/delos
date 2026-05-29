@@ -84,7 +84,8 @@ export async function POST(req: NextRequest) {
   if (!lim.ok) {
     return Response.json({ error: "rate_limited" }, { status: 429, headers: lim.headers });
   }
-  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawBody = await req.json().catch(() => ({}));
+  const body = (rawBody && typeof rawBody === "object" && !Array.isArray(rawBody) ? rawBody : {}) as Record<string, unknown>;
   if (typeof body.input === "string" && !body.prompt) body.prompt = body.input;
   const parsed = Req.safeParse(body);
   if (!parsed.success) return Response.json({ error: "bad_request" }, { status: 400 });

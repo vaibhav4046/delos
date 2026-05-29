@@ -209,7 +209,8 @@ export async function POST(req: NextRequest) {
   // BYOK · user can paste their own OpenRouter key in Settings · header
   // takes precedence over server env. Server-side key is the safety net.
   const userOpenRouterKey = req.headers.get("x-byok-openrouter") || undefined;
-  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawBody = await req.json().catch(() => ({}));
+  const body = (rawBody && typeof rawBody === "object" && !Array.isArray(rawBody) ? rawBody : {}) as Record<string, unknown>;
   // Field unification
   if (typeof body.input === "string" && !body.task) body.task = body.input;
   const parsed = Req.safeParse(body);
