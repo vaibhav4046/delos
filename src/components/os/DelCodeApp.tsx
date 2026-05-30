@@ -240,6 +240,12 @@ export function DelCodeApp() {
 
   const activeFile = useMemo(() => files.find((f) => f.path === activePath) ?? null, [files, activePath]);
   const activeLang = activeFile ? detectLang(activeFile.path) : "txt";
+  // ▶ PREVIEW · same-origin URL the live-preview iframe points at. null = editor
+  // is showing; non-null = the running app is showing. We use a URL (not srcDoc)
+  // because a srcDoc iframe inherits the page's strict CSP and the bundled
+  // React/Babel/Tailwind CDN scripts get blocked → blank pane. The route serves
+  // its own permissive CSP, so navigating to it actually runs.
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
   function openFile(path: string) {
     setActivePath(path);
@@ -281,6 +287,40 @@ export function DelCodeApp() {
       window.dispatchEvent(new CustomEvent("toast", { detail: { text: `↓ ${format.toUpperCase()} downloaded`, tone: "ok" } }));
     } catch (e) {
       window.dispatchEvent(new CustomEvent("toast", { detail: { text: `export error: ${(e as Error).message.slice(0, 60)}`, tone: "bad" } }));
+    }
+  }
+  // ▶ PREVIEW · bundle the entire project into ONE runnable HTML doc and mount
+  // it in a sandboxed iframe so the user actually SEES the generated app run —
+  // not just its source. This was the headline gap: production builds streamed
+  // code into DelCode but there was no way to render the result. Reuses the
+  // same isomorphic bundler as the .html export so preview == downloaded HTML.
+  async function openPreview() {
+    if (!files.length) {
+      window.dispatchEvent(new CustomEvent("toast", { detail: { text: "Build or open a project first to preview.", tone: "warn" } }));
+      return;
+    }
+    const hasReact = files.some((f) => /\.(t|j)sx$/.test(f.path));
+    if (!hasReact) {
+      window.dispatchEvent(new CustomEvent("toast", { detail: { text: "Preview needs a React/JSX project (.tsx). Use ▶ RUN for single-file scripts.", tone: "warn" } }));
+      return;
+    }
+    const G = globalThis as unknown as { __delos_delcode_pending?: { name?: string } };
+    const name = G.__delos_delcode_pending?.name ?? "DelOS app";
+    try {
+      termPush("sys", "▶ preview · bundling + rendering in sandboxed iframe…");
+      // Bundle server-side and load via a token URL — the route ships a
+      // permissive CSP so the CDN React/Babel/Tailwind actually run (a srcDoc
+      // iframe would inherit the page's strict CSP and render blank).
+      const r = await fetch("/api/codegen-app/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, files: files.map((f) => ({ path: f.path, content: f.content })) }),
+      });
+      const j = (await r.json()) as { ok?: boolean; token?: string; error?: string };
+      if (!r.ok || !j.ok || !j.token) throw new Error(j.error ?? `HTTP ${r.status}`);
+      setPreviewSrc(`/api/codegen-app/preview?token=${encodeURIComponent(j.token)}`);
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("toast", { detail: { text: `preview error: ${(e as Error).message.slice(0, 60)}`, tone: "bad" } }));
     }
   }
   function closeTab(path: string) {
@@ -630,7 +670,8 @@ export function DelCodeApp() {
             >
               {activeFile?.dirty ? "💾 SAVE" : "✓ SAVED"}
             </button>
-            <button onClick={() => runCmd("run")} title="Run active file" style={{ background: "#1f6feb", color: "#fff", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}>▶ RUN</button>
+            <button onClick={openPreview} title="Render the whole project as a live app in a sandboxed iframe" style={{ background: "#238636", color: "#fff", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer", fontWeight: 700 }}>▶ PREVIEW</button>
+            <button onClick={() => runCmd("run")} title="Run the active file as a script in the terminal" style={{ background: "#1f6feb", color: "#fff", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}>▶ RUN</button>
             {/* W03 · download buttons · backend persists the codegen project
                 under its id; we read the latest project id from the global
                 pending payload set by VibeCode's stream consumer. */}
@@ -650,8 +691,26 @@ export function DelCodeApp() {
             </button>
           </div>
         </div>
-        {/* Editor body · gutter + textarea */}
-        {activeFile ? (
+        {/* Live preview pane · sandboxed iframe running the bundled app.
+            Takes over the editor body when previewHtml is set. */}
+        {previewSrc ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", background: "#161b22", borderBottom: "1px solid #30363d" }}>
+              <span style={{ fontSize: 10, color: "#3fb950", fontWeight: 700 }}>● LIVE PREVIEW</span>
+              <span style={{ fontSize: 10, color: "#8b949e" }}>sandboxed iframe · React + Tailwind</span>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                <button onClick={openPreview} title="Re-render from current files" style={{ background: "#30363d", color: "#c9d1d9", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}>↻ REFRESH</button>
+                <button onClick={() => setPreviewSrc(null)} title="Back to code" style={{ background: "#1f6feb", color: "#fff", border: "none", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}>✕ CLOSE</button>
+              </div>
+            </div>
+            <iframe
+              title="App preview"
+              src={previewSrc}
+              sandbox="allow-scripts allow-popups allow-modals allow-forms"
+              style={{ flex: 1, width: "100%", border: "none", background: "#fff" }}
+            />
+          </div>
+        ) : /* Editor body · gutter + textarea */ activeFile ? (
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: "44px 1fr", overflow: "hidden", position: "relative" }}>
             <div
               ref={lineGutterRef}

@@ -8,29 +8,29 @@ import { MemoryDashboard } from "@/components/memory/MemoryDashboard";
 
 // `getTenantId` lives in systemApps and is set at OS boot. We read it
 // after mount to avoid SSR hydration mismatch.
-// R11b · default to `delrio_demo` so guest mode never sees an empty
+// R11b · default to `demo_guest` so guest mode never sees an empty
 // dashboard. Server-side autoSeedIfEmpty fires for guest-prefixed tenants
 // and the EmptyState's useEffect-seed branch will hit before the user
 // even notices the initial render.
 function readTenant(): string {
-  if (typeof window === "undefined") return "delrio_demo";
+  if (typeof window === "undefined") return "demo_guest";
   try {
     const G = window as unknown as { __delos_tenant?: string };
     if (G.__delos_tenant) return G.__delos_tenant;
     const raw = window.localStorage.getItem("delos.tenant");
     if (raw) return raw;
   } catch {}
-  return "delrio_demo";
+  return "demo_guest";
 }
 
 export function MemoryBrowserApp() {
   // Set the default tenant SYNCHRONOUSLY (not after mount) so the
-  // dashboard's first load() fires against `delrio_demo`, triggering
+  // dashboard's first load() fires against `demo_guest`, triggering
   // server-side auto-seed + populating local on the first paint. Was:
   // null on first render then setTenant() in useEffect, which produced
   // a 0/0 flash before the second render kicked in.
   const [tenant, setTenant] = useState<string>(() => {
-    if (typeof window === "undefined") return "delrio_demo";
+    if (typeof window === "undefined") return "demo_guest";
     return readTenant();
   });
   useEffect(() => {

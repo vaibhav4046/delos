@@ -175,6 +175,20 @@ export function VoiceApp() {
       return;
     }
 
+    // "unknown" intent WITH a friendly reply (greetings, chit-chat, anything the
+    // classifier couldn't map) — speak it directly instead of silently hopping
+    // to the coordinator. Was a dead-end: the reply was discarded and the
+    // coordinator (often `all_providers_failed` on a greeting) rendered nothing.
+    if (action && action.intent === "unknown" && action.reply) {
+      setTurns((t) => [...t, { role: "agent", text: action!.reply, at: Date.now() }]);
+      const prefs = getVoicePrefs();
+      if (prefs.autoSpeak !== false) {
+        setPhase("speaking");
+        await speak(action.reply);
+      }
+      return;
+    }
+
     // FALLBACK: coordinator for complex multi-step / ambiguous tasks.
     const r = await fetch("/api/coordinator", {
       method: "POST",
@@ -185,21 +199,31 @@ export function VoiceApp() {
         models: getModelOverrides(),
       }),
     });
+    // /api/coordinator returns { ok, plan: { summary, rationale, actions }, contextUsed }
+    // — NOT a top-level summary/actions. Reading the top level made every
+    // coordinator-routed voice command a silent no-op. Read from plan.
     const j = (await r.json()) as {
-      summary?: string;
-      actions?: Array<{ kind: string; target?: string; detail: string }>;
+      ok?: boolean;
+      plan?: { summary?: string; rationale?: string; actions?: Array<{ kind: string; target?: string; detail: string }> };
       error?: string;
     };
-    if (j.error) {
-      setTurns((t) => [...t, { role: "agent", text: `coordinator error: ${j.error}`, at: Date.now() }]);
+    if (!r.ok || j.error || !j.plan) {
+      const msg = j.error ?? `coordinator unavailable (${r.status})`;
+      setTurns((t) => [...t, { role: "agent", text: `coordinator error: ${msg}`, at: Date.now() }]);
+      const prefs = getVoicePrefs();
+      if (prefs.autoSpeak !== false) {
+        setPhase("speaking");
+        await speak(msg);
+      }
       return;
     }
-    if (j.summary) {
-      setTurns((t) => [...t, { role: "agent", text: j.summary!, at: Date.now() }]);
+    const plan = j.plan;
+    if (plan.summary) {
+      setTurns((t) => [...t, { role: "agent", text: plan.summary!, at: Date.now() }]);
     }
     setPhase("executing");
-    if (j.actions?.length) {
-      for (const a of j.actions) {
+    if (plan.actions?.length) {
+      for (const a of plan.actions) {
         setTurns((t) => [
           ...t,
           { role: "action", text: `${a.kind}${a.target ? "·" + a.target : ""} — ${a.detail}`, at: Date.now() },
@@ -208,11 +232,11 @@ export function VoiceApp() {
         await new Promise((res) => setTimeout(res, 180));
       }
     }
-    if (j.summary) {
+    if (plan.summary) {
       const prefs = getVoicePrefs();
       if (prefs.autoSpeak !== false) {
         setPhase("speaking");
-        await speak(j.summary);
+        await speak(plan.summary);
       }
     }
   }

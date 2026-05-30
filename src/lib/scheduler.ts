@@ -155,9 +155,17 @@ export async function defaultDispatcher(
       return { ok: r.ok, note: r.ok ? `draft saved to gmail` : `gmail draft ${r.status}` };
     }
     case "read_email": {
-      const r = await fetch(url(`/api/connectors/gmail/list?tenantId=${encodeURIComponent(action.tenantId)}&max=5`));
-      const j = (await r.json().catch(() => ({}))) as { items?: Array<{ subject?: string }>; error?: string };
-      const count = j.items?.length ?? 0;
+      // gmail/list is POST { q, limit } → { ok, count, messages } and is
+      // session-gated. The old GET with ?max=5 hit a 405 (route is POST-only)
+      // and read j.items (route returns `messages`/`count`), so the "Daily
+      // email digest" template recorded ✗ gmail 405 on every fire.
+      const r = await fetch(url("/api/connectors/gmail/list"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q: "", limit: 5, tenantId: action.tenantId }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { count?: number; messages?: Array<{ subject?: string }>; error?: string };
+      const count = j.count ?? j.messages?.length ?? 0;
       return { ok: r.ok, note: r.ok ? `${count} threads scanned` : j.error ?? `gmail ${r.status}` };
     }
     case "notion_page": {

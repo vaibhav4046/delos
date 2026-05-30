@@ -11,8 +11,11 @@ export function AnalyticsApp() {
   const [achievements, setAchievements] = useState<string[]>([]);
 
   useEffect(() => {
-    const tid = getTenantId();
-    fetch(`/api/memory?q=Run+completed${tid ? `&tenantId=${encodeURIComponent(tid)}` : ""}&topK=50`)
+    // Fall back to the same guest tenant the Memory Browser uses (`demo_guest`,
+    // a per-caller reserved scope that auto-seeds) so guest Analytics reflects
+    // the seeded demo runs instead of reading an empty anon-IP scope.
+    const tid = getTenantId() || "demo_guest";
+    fetch(`/api/memory?q=Run+completed&tenantId=${encodeURIComponent(tid)}&topK=50`)
       .then((r) => r.json())
       .then((j: { local?: LocalMem[] }) => setRuns(j.local ?? []))
       .catch(() => {});

@@ -12,7 +12,7 @@ import * as Icons from "lucide-react";
 // dance for connectors that aren't configured server-side yet.
 
 type Connector = {
-  id: "email" | "notion" | "github";
+  id: "gmail" | "notion" | "github";
   label: string;
   description: string;
   icon: string;
@@ -23,7 +23,10 @@ type Connector = {
 
 const CONNECTORS: Connector[] = [
   {
-    id: "email",
+    // id MUST match the server connector id ("gmail") — /api/connectors returns
+    // the email provider under `gmail`, so id:"email" left status[...] undefined
+    // and the card was permanently stuck on "paste only".
+    id: "gmail",
     label: "Email · Gmail",
     description: "Index recent threads. Voice agent drafts replies in your tone, lands in Gmail Drafts.",
     icon: "Mail",
@@ -79,22 +82,29 @@ export function IngestApp() {
     if (!text) return;
     setBusy(c.id);
     try {
-      // Push the paste into HydraDB so future runs can recall it.
-      await fetch("/api/memory/seed", {
+      // Push the paste into HydraDB so future runs can recall it. Targets
+      // /api/memory/write (persists to the resolved signed-in/anon tenant) —
+      // NOT /api/memory/seed, which ignores the body and only ever writes its
+      // own canned demo set, returning 403 for a real tenant. The old call
+      // was wrapped in `.catch(()=>{})` and the success toast fired
+      // unconditionally, so every ingest was a silent no-op that LIED.
+      const r = await fetch("/api/memory/write", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // /api/memory/seed normally seeds canned demo memories; here we
-          // also pass a body tenantId only when it's a reserved-prefix
-          // tenant. We omit tenantId entirely so the server uses the
-          // signed-in or anon-IP scope — that's the right home for an
-          // ingest event.
-          memories: [{ text: `[${c.id}] ${text.slice(0, 400)}`, tags: ["ingest", c.id], source: c.id }],
+          text: `[${c.id}] ${text.slice(0, 400)}`,
+          tags: ["ingest", c.id],
         }),
-      }).catch(() => {});
+      });
+      if (!r.ok) {
+        window.dispatchEvent(new CustomEvent("toast", { detail: { text: `ingest failed (${r.status}) · try again`, tone: "bad" } }));
+        return;
+      }
       setMemoryByTag((p) => ({ ...p, [c.id]: [text.slice(0, 80), ...(p[c.id] ?? [])].slice(0, 6) }));
       setPasted((p) => ({ ...p, [c.id]: "" }));
       window.dispatchEvent(new CustomEvent("toast", { detail: { text: `✓ remembered from ${c.label}`, tone: "ok" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("toast", { detail: { text: `ingest error: ${(e as Error).message.slice(0, 60)}`, tone: "bad" } }));
     } finally {
       setBusy(null);
     }

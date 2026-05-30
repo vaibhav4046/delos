@@ -8,52 +8,9 @@
 import { NextRequest } from "next/server";
 import JSZip from "jszip";
 import { getProject, type CodegenProject } from "@/lib/codegenProjectStore";
+import { bundleProjectToHtml } from "@/lib/previewBundle";
 
 export const runtime = "nodejs";
-
-function escapeHtml(s: string): string {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c),
-  );
-}
-
-function bundleToSingleHtml(p: CodegenProject): string {
-  const tsxFiles = p.files.filter((f) => f.path.endsWith(".tsx"));
-  const tsFiles = p.files.filter((f) => f.path.endsWith(".ts") && !f.path.endsWith(".tsx"));
-  const orderedScripts = [...tsFiles, ...tsxFiles];
-  const scriptBlocks = orderedScripts
-    .map(
-      (f) =>
-        `<script type="text/babel" data-presets="env,react,typescript" data-path="${escapeHtml(f.path)}">\n${f.content}\n</script>`,
-    )
-    .join("\n\n");
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${escapeHtml(p.name)} — DelOS export</title>
-  <script src="https://unpkg.com/react@19/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@19/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>html,body{margin:0;background:#0a0a0a;color:#e5e5e5;font-family:ui-sans-serif,system-ui;}</style>
-</head>
-<body>
-  <div id="root"></div>
-${scriptBlocks}
-  <script type="text/babel" data-presets="env,react,typescript">
-    try {
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      const PageCmp = (typeof Page !== 'undefined' && Page) || (() => React.createElement('main', { className: 'p-8' }, 'DelOS export · entry point not detected'));
-      root.render(React.createElement(PageCmp));
-    } catch (e) {
-      document.getElementById('root').innerHTML = '<pre style="padding:24px;color:#fda4af;">' + (e && e.message) + '</pre>';
-    }
-  </script>
-</body>
-</html>`;
-}
 
 async function bundle(format: string, project: CodegenProject): Promise<Response> {
   const safeName = project.name.replace(/[^a-z0-9-]+/gi, "-") || "delos-export";
@@ -72,7 +29,7 @@ async function bundle(format: string, project: CodegenProject): Promise<Response
     });
   }
   if (format === "html") {
-    return new Response(bundleToSingleHtml(project), {
+    return new Response(bundleProjectToHtml(project.files, project.name), {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Content-Disposition": `attachment; filename="${safeName}.html"`,

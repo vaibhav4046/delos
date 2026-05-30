@@ -10,7 +10,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 function applySecurityHeaders(res: NextResponse, pathname: string): NextResponse {
   res.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
-  res.headers.set("X-Frame-Options", "DENY");
+  // The codegen live-preview is framed by the DelCode IDE on the same origin —
+  // DENY would block our own iframe. Allow SAMEORIGIN for that one route; every
+  // other surface stays DENY (clickjacking protection). The route ships its own
+  // permissive CSP with `frame-ancestors 'self'` to bound who can embed it.
+  res.headers.set("X-Frame-Options", pathname === "/api/codegen-app/preview" ? "SAMEORIGIN" : "DENY");
   res.headers.set("X-Content-Type-Options", "nosniff");
   res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   res.headers.set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(self), payment=()");
