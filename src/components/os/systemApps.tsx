@@ -1444,6 +1444,59 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
           <div className="text-[10px] font-mono mt-1" style={{ color: "var(--accent)" }}>transcribing your voice…</div>
         )}
       </div>
+
+      {/* ── Sticky build bar ────────────────────────────────────────────────
+          Primary BUILD APP action + LIVE progress, pinned right under the
+          prompt so the user never has to scroll past the template gallery to
+          start a build or watch it code. (User feedback: build button was
+          buried below the cockpits; progress + results weren't visible.) */}
+      <div style={{ position: "sticky", top: 0, zIndex: 6, background: "var(--bg)", paddingTop: 4, paddingBottom: 6, marginTop: 2 }}>
+        <button
+          onClick={() => build()}
+          disabled={busy || !prompt.trim()}
+          className="btn-pixel"
+          style={{
+            background: "var(--accent)",
+            color: "var(--on-accent)",
+            width: "100%",
+            padding: "9px 12px",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: busy ? "wait" : prompt.trim() ? "pointer" : "not-allowed",
+            opacity: busy ? 0.75 : prompt.trim() ? 1 : 0.5,
+          }}
+          title={busy ? "Building…" : "Generate this app with the agent"}
+        >
+          {busy ? `◌ BUILDING${stage !== "idle" ? " · " + stage.toUpperCase() : "…"}` : "★ BUILD APP"}
+        </button>
+        {/* Live progress · plan → file-by-file. Visible the moment a build starts. */}
+        {(busy || codeProgress) && (
+          <div className="font-mono mt-1.5" style={{ fontSize: 9.5, color: "var(--accent)", lineHeight: 1.4 }}>
+            {codeProgress
+              ? `${codeProgress.status}${codeProgress.total ? ` · ${codeProgress.index}/${codeProgress.total}` : ""}${codeProgress.path && codeProgress.path !== "(plan)" ? ` · ${codeProgress.path}` : ""}`
+              : `working… · ${stage}`}
+          </div>
+        )}
+        {/* Per-file checklist · the live "agent is coding" view, inline so it's
+            seen without opening the IDE. */}
+        {fileChecklist.length > 0 && (
+          <div className="mt-1.5 space-y-0.5" style={{ maxHeight: 132, overflowY: "auto" }}>
+            {fileChecklist.map((row) => (
+              <div key={row.path} className="font-mono flex items-center gap-1.5" style={{ fontSize: 9, color: "var(--muted)" }}>
+                <span style={{ width: 12, textAlign: "center", color: row.status === "done" ? "var(--success)" : row.status === "writing" ? "var(--accent)" : row.status === "skipped" ? "var(--danger)" : row.status === "retried" ? "var(--warn)" : "var(--muted)" }}>
+                  {row.status === "done" ? "✓" : row.status === "writing" ? "▸" : row.status === "skipped" ? "✕" : row.status === "retried" ? "↻" : "·"}
+                </span>
+                <span className="truncate" style={{ color: row.status === "writing" ? "var(--fg)" : "var(--muted)" }}>{row.path}</span>
+                {row.bytes ? <span style={{ marginLeft: "auto", opacity: 0.7 }}>{Math.round(row.bytes / 100) / 10}k</span> : null}
+              </div>
+            ))}
+          </div>
+        )}
+        {err && (
+          <div className="font-mono mt-1" style={{ fontSize: 9.5, color: "var(--danger)" }}>⚠ {err.slice(0, 120)}</div>
+        )}
+      </div>
+
       <div className="flex flex-wrap gap-1">
         {presets.map((p) => (
           <button
