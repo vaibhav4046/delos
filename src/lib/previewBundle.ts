@@ -71,7 +71,11 @@ function rewriteImports(src: string): string {
   s = s.replace(/^\s*import\s*["'][^"']*["']\s*;?\s*$/gm, ""); // side-effect (css etc)
   s = s.replace(/^\s*export\s+[\s\S]*?from\s*["'][^"']*["']\s*;?\s*$/gm, "");
   s = s.replace(/^\s*import\s+([\s\S]*?)\s+from\s*["']([^"']+)["']\s*;?\s*$/gm, (_m, clause: string, mod: string) => {
-    if (/^[./]/.test(mod) || mod === "react" || mod === "react-dom" || mod === "react-dom/client") return "";
+    // Local modules (relative OR the `@/` / `~/` path aliases) are dropped — the
+    // real declarations live in the flattened shared scope. Only `@/…` (alias),
+    // NOT `@scope/pkg` (npm), counts as local. Shimming an alias import would
+    // re-declare a symbol that already exists → "already declared" → blank.
+    if (/^[./]/.test(mod) || /^[@~]\//.test(mod) || mod === "react" || mod === "react-dom" || mod === "react-dom/client") return "";
     return shimClause(clause.trim(), mod);
   });
   return s;
@@ -112,8 +116,17 @@ function stripExports(src: string, fileIdx: number): { code: string; defaultName
       return `const __Default_${fileIdx} = `;
     });
   }
-  // Named exports: drop the keyword, keep the declaration.
-  s = s.replace(/^\s*export\s+(?=(?:async\s+)?(?:function|class|const|let|var)\b)/gm, "");
+  // `export type { ... }` type-only re-exports — drop.
+  s = s.replace(/^\s*export\s+type\s*\{[^}]*\}\s*;?\s*$/gm, "");
+  // Named exports — drop the `export` keyword, keep the declaration. Includes
+  // the TS-only forms (interface / type / enum / namespace / abstract class /
+  // declare): their leftover `export` is a hard SyntaxError in the classic
+  // script scope we run in (it blanks the WHOLE preview), and Babel's
+  // typescript preset then strips the type declarations themselves.
+  s = s.replace(
+    /^(\s*)export\s+(?=(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:interface|type|enum|namespace|class|function|const|let|var)\b)/gm,
+    "$1",
+  );
   // `export { ... }` statement lines — drop.
   s = s.replace(/^\s*export\s*\{[^}]*\}\s*;?\s*$/gm, "");
 
@@ -159,6 +172,26 @@ export function htmlEscape(s: string): string {
   );
 }
 
+// Rename duplicate top-level declarations across the flattened bundle. Real
+// multi-file output often has several `export default function Page` (one per
+// route) or repeated helpers; after export-stripping they become duplicate
+// `function Page` / `const X` in one scope → a SyntaxError that blanks the whole
+// preview. Keep the first of each name (cross-file refs resolve to it) and
+// rename later declarations so they don't collide. `var` is skipped — JS allows
+// var redeclaration, so the import shims never throw.
+function dedupeTopLevel(src: string): string {
+  const seen = new Set<string>();
+  const n: Record<string, number> = {};
+  return src.replace(
+    /^(export\s+)?(default\s+)?(async\s+)?(function|class|const|let)\s+([A-Za-z0-9_$]+)/gm,
+    (m, exp, def, asy, kw, name) => {
+      if (!seen.has(name)) { seen.add(name); return m; }
+      n[name] = (n[name] ?? 1) + 1;
+      return `${exp ?? ""}${def ?? ""}${asy ?? ""}${kw} ${name}__d${n[name]}`;
+    },
+  );
+}
+
 /**
  * Bundle a codegen project into one self-contained, runnable HTML document.
  * Renders the detected entry component (app/page default export) into #root.
@@ -197,18 +230,20 @@ export function bundleProjectToHtml(files: PreviewFile[], name = "DelOS app"): s
     ? `(typeof ${entryName} !== 'undefined' && ${entryName})`
     : "false";
 
-  const mergedSource = escapeForScript(transformed.join("\n\n"));
+  const mergedSource = escapeForScript(dedupeTopLevel(transformed.join("\n\n")));
 
   // React hook + Next shims so stripped imports don't leave undefined refs.
   const preamble = `
 const { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useReducer, useContext, createContext, useId, useTransition, useDeferredValue, forwardRef, memo, Fragment, Children, cloneElement, isValidElement, Suspense, createElement } = React;
-// Minimal next/* shims for previewing Next-flavored output.
-const Image = (props) => { const { src, alt, width, height, fill, priority, ...rest } = props || {}; return React.createElement('img', { src: typeof src === 'object' && src ? src.src : src, alt: alt || '', width, height, ...rest }); };
-const Link = ({ href, children, ...rest }) => React.createElement('a', { href: typeof href === 'object' ? '#' : href, ...rest }, children);
-const useRouter = () => ({ push(){}, replace(){}, back(){}, forward(){}, refresh(){}, prefetch(){} });
-const usePathname = () => '/';
-const useSearchParams = () => new URLSearchParams();
-const dynamic = (loader) => (props) => React.createElement('div', null, '');
+// Minimal next/* shims. Declared with var (not const) so a generated file that
+// imports e.g. useRouter from next/navigation (rebound to var useRouter via the
+// shim) does not collide — a const here would SyntaxError and blank the preview.
+var Image = (props) => { const { src, alt, width, height, fill, priority, ...rest } = props || {}; return React.createElement('img', { src: typeof src === 'object' && src ? src.src : src, alt: alt || '', width, height, ...rest }); };
+var Link = ({ href, children, ...rest }) => React.createElement('a', { href: typeof href === 'object' ? '#' : href, ...rest }, children);
+var useRouter = () => ({ push(){}, replace(){}, back(){}, forward(){}, refresh(){}, prefetch(){} });
+var usePathname = () => '/';
+var useSearchParams = () => new URLSearchParams();
+var dynamic = (loader) => (props) => React.createElement('div', null, '');
 // ── Universal third-party import shims ───────────────────────────────────
 // Generated apps routinely import framer-motion, lucide-react, clsx, recharts,
 // next/*, toast libs, etc. Those imports are stripped + rebound to these shims
@@ -219,13 +254,16 @@ const __passthrough = (props) => React.createElement('div', __cleanProps(props),
 const __motion = new Proxy({}, { get: (_t, tag) => (props) => React.createElement(typeof tag==='string'?tag:'div', __cleanProps(props), props && props.children) });
 const __icon = (props) => { var s=(props&&props.size)||16; return React.createElement('span', { className:(props&&props.className)||'', 'aria-hidden':'true', style:{ display:'inline-block', width:s, height:s, verticalAlign:'middle' } }); };
 function __cx(){ var out=[]; for(var i=0;i<arguments.length;i++){ var a=arguments[i]; if(!a) continue; if(typeof a==='string'||typeof a==='number') out.push(String(a)); else if(Array.isArray(a)) out.push(__cx.apply(null,a)); else if(typeof a==='object'){ for(var k in a){ if(a[k]) out.push(k); } } } return out.join(' '); }
-const __noop = new Proxy(function(){ return ''; }, { get: () => __noop, apply: () => '' });
+// Infinitely call-/access-safe: __noop() and __noop.x.y() never throw
+// "is not a function" — they keep returning __noop. Covers unknown shimmed
+// utilities used in chains (e.g. storage().get().whatever).
+const __noop = new Proxy(function(){ return __noop; }, { get: () => __noop, apply: () => __noop });
 function __shim(mod, name){
   if(mod==='framer-motion'){ if(name==='AnimatePresence') return (p) => React.createElement(React.Fragment, null, p && p.children); if(name==='motion'||name==='m') return __motion; if(name==='useAnimation'||name==='useAnimationControls') return () => ({ start:()=>Promise.resolve(), stop(){}, set(){} }); if(name==='useInView') return () => true; if(name==='useScroll') return () => ({ scrollYProgress:{ on(){}, get:()=>0 } }); if(name==='useTransform'||name==='useMotionValue'||name==='useSpring'||name==='useMotionValueEvent') return (v) => v; return __passthrough; }
   if(mod==='lucide-react' || mod.indexOf('react-icons')>=0 || mod.indexOf('heroicons')>=0 || mod.indexOf('react-feather')>=0 || mod.indexOf('@radix-ui/react-icons')>=0) return __icon;
   if(mod==='clsx'||mod==='classnames'||mod==='tailwind-merge'||name==='clsx'||name==='cn'||name==='cx'||name==='twMerge'||name==='classNames') return __cx;
   if(mod==='recharts'||mod.indexOf('chart')>=0) return __passthrough;
-  if(mod.indexOf('next/')===0){ if(mod==='next/image') return Image; if(mod==='next/link') return Link; if(mod==='next/dynamic') return () => __passthrough; if(name==='useRouter') return useRouter; if(name==='usePathname') return usePathname; if(name==='useSearchParams') return useSearchParams; if(name==='default') return __passthrough; return __noop; }
+  if(mod.indexOf('next/')===0){ if(mod==='next/image') return Image; if(mod==='next/link') return Link; if(mod==='next/dynamic') return () => __passthrough; if(name==='useRouter') return useRouter; if(name==='usePathname') return usePathname; if(name==='useSearchParams') return useSearchParams; if(name==='useParams') return () => ({}); if(name==='useSelectedLayoutSegment'||name==='useSelectedLayoutSegments') return () => null; if(name==='redirect'||name==='notFound'||name==='permanentRedirect') return () => {}; if(name==='default') return __passthrough; return __noop; }
   if(mod==='react-hot-toast'||mod==='sonner'){ if(name==='Toaster') return __passthrough; var t=function(){return '';}; t.success=function(){};t.error=function(){};t.loading=function(){};t.dismiss=function(){};t.custom=function(){}; return t; }
   if(name==='default') return __passthrough;
   if(/^[A-Z]/.test(name)) return __passthrough;
@@ -282,8 +320,30 @@ ${cssBlocks}
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-presets="react,typescript">
+<script id="__delsrc" type="text/plain">
 ${runner}
+</script>
+<script>
+// Manual transform (not the auto text/babel handler) so we can force TSX mode —
+// otherwise Babel parses TS generics like \`useState<Foo>()\` /
+// \`(e: KeyboardEvent<HTMLInputElement>)\` as JSX and throws. Compile + runtime
+// errors are shown in #root instead of silently blanking the preview.
+(function () {
+  function showErr(label, e) {
+    var pre = document.createElement('pre');
+    pre.style.cssText = 'padding:20px;color:#fda4af;white-space:pre-wrap;font:12px ui-monospace,monospace';
+    pre.textContent = label + '\\n' + String((e && e.stack) || e);
+    var r = document.getElementById('root'); if (r) { r.innerHTML = ''; r.appendChild(pre); }
+  }
+  try {
+    var src = document.getElementById('__delsrc').textContent;
+    var out = Babel.transform(src, {
+      filename: 'app.tsx',
+      presets: [['typescript', { isTSX: true, allExtensions: true }], ['react', { runtime: 'classic' }]],
+    }).code;
+    try { (0, eval)(out); } catch (e) { showErr('Preview runtime error:', e); }
+  } catch (e) { showErr('Preview build error:', e); }
+})();
 </script>
 </body>
 </html>`;
