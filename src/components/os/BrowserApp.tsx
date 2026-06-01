@@ -287,13 +287,15 @@ export function BrowserApp() {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  // Many sites set X-Frame-Options: DENY. We can't reliably detect inside iframe,
-  // but we use a 4-sec timeout heuristic: if iframe hasn't fired onload, show fallback.
+  // Many sites set X-Frame-Options: DENY. We can't reliably detect inside the
+  // iframe, so this is a soft heuristic: if onload hasn't fired in 9s the site
+  // is *probably* blocking (or very slow). 4.5s was too eager and false-flagged
+  // perfectly embeddable-but-slow sites as "blocked".
   useEffect(() => {
     if (!loading) return;
     const t = setTimeout(() => {
-      if (loading) setIframeError("Site may block embedding (X-Frame-Options). Use 'Open in tab'.");
-    }, 4500);
+      if (loading) setIframeError("Taking a while — the site may block embedding. Try 'Open in tab'.");
+    }, 9000);
     return () => clearTimeout(t);
   }, [loading, url]);
 

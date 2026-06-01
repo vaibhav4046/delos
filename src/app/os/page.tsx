@@ -978,7 +978,11 @@ export default function OSPage() {
           }
           break;
         case "change_wallpaper": {
-          const idx = WALLPAPERS.findIndex((w) => w.id === wallpaper);
+          // Read the CURRENT wallpaper via getWallpaper() — the `wallpaper`
+          // state var is closed over from a []-deps effect and goes stale, so
+          // a compound-voice "change wallpaper" cycled from the mount-time
+          // value instead of the live one.
+          const idx = WALLPAPERS.findIndex((w) => w.id === getWallpaper());
           setWallpaperGlobal(WALLPAPERS[(idx + 1) % WALLPAPERS.length].id);
           break;
         }
