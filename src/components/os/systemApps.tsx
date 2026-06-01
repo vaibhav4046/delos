@@ -1310,8 +1310,15 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
       const msg = stalled ? "Build stalled — no response from the model, stopped." : (e as Error).message;
       setErr(msg);
       setStage("idle");
-      broadcastAgent("planner", "idle");
-      broadcastAgent("executor", "idle");
+      // Flash cores red on a real failure — lights CRSH + the "auto-patch
+      // reroute" animation in the Cores app (an advertised feature that never
+      // fired because nothing emitted "error"). Reset to idle after the anim.
+      broadcastAgent("executor", "error");
+      broadcastAgent("planner", "error");
+      setTimeout(() => {
+        broadcastAgent("planner", "idle");
+        broadcastAgent("executor", "idle");
+      }, 1400);
       // BUG-2 fix · surface the failure as a toast so users don't see the
       // button just flip back to "BUILD APP" with nothing happening.
       try {

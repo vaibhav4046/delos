@@ -30,7 +30,7 @@ export function onIntent<K extends AppIntent["kind"]>(
 }
 
 // Broadcast agent activity for AgentPulse widget — non-blocking
-export function broadcastAgent(id: string, status: "thinking" | "tool" | "done" | "idle") {
+export function broadcastAgent(id: string, status: "thinking" | "tool" | "done" | "idle" | "error") {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent("delos-agent-activity", { detail: { id, status } }));
 }
