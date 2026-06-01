@@ -37,16 +37,43 @@ const NEXT_CONFIG_IDENTS = [
   "generateViewport",
 ];
 
-function stripImports(src: string): string {
+// Turn one import clause + module into shim `const` bindings so a stripped
+// third-party import (framer-motion, lucide-react, clsx, recharts, next/*, …)
+// doesn't leave undefined identifiers that crash the render. `__shim` /
+// `__shimNS` are defined in the runtime preamble.
+function shimClause(clause: string, mod: string): string {
+  const m = JSON.stringify(mod);
+  const decls: string[] = [];
+  // `var` (not const) so the same symbol imported in multiple files doesn't
+  // throw "Identifier already declared" in the merged single-scope bundle.
+  const ns = clause.match(/\*\s+as\s+([A-Za-z0-9_$]+)/);
+  if (ns) decls.push(`var ${ns[1]} = __shimNS(${m});`);
+  const named = clause.match(/\{([^}]*)\}/);
+  if (named) {
+    for (const part of named[1].split(",").map((x) => x.trim()).filter(Boolean)) {
+      const asM = part.match(/^([A-Za-z0-9_$]+)\s+as\s+([A-Za-z0-9_$]+)$/);
+      if (asM) decls.push(`var ${asM[2]} = __shim(${m}, ${JSON.stringify(asM[1])});`);
+      else if (/^[A-Za-z0-9_$]+$/.test(part)) decls.push(`var ${part} = __shim(${m}, ${JSON.stringify(part)});`);
+    }
+  }
+  const def = clause.match(/^\s*([A-Za-z0-9_$]+)\s*(?:,|$)/);
+  if (def && def[1] !== "type") decls.push(`var ${def[1]} = __shim(${m}, "default");`);
+  return decls.join(" ");
+}
+
+// Rewrite a file's import statements: local + react/react-dom imports are
+// dropped (the flattened shared scope + UMD globals + hook preamble cover
+// them); every other module is converted to shim bindings so the preview never
+// blanks on an undefined third-party symbol.
+function rewriteImports(src: string): string {
   let s = src;
-  // Multiline + single-line ES imports: `import ... from '...'`, side-effect
-  // `import '...'`, and `import type ...`. The `[^;]*?` with the `from`/quote
-  // anchors keeps it from eating past the statement.
   s = s.replace(/^\s*import\s+type\s+[^;\n]*?;?\s*$/gm, "");
-  s = s.replace(/^\s*import\s+[\s\S]*?from\s*["'][^"']*["']\s*;?\s*$/gm, "");
-  s = s.replace(/^\s*import\s*["'][^"']*["']\s*;?\s*$/gm, "");
-  // `export ... from '...'` re-exports — drop.
+  s = s.replace(/^\s*import\s*["'][^"']*["']\s*;?\s*$/gm, ""); // side-effect (css etc)
   s = s.replace(/^\s*export\s+[\s\S]*?from\s*["'][^"']*["']\s*;?\s*$/gm, "");
+  s = s.replace(/^\s*import\s+([\s\S]*?)\s+from\s*["']([^"']+)["']\s*;?\s*$/gm, (_m, clause: string, mod: string) => {
+    if (/^[./]/.test(mod) || mod === "react" || mod === "react-dom" || mod === "react-dom/client") return "";
+    return shimClause(clause.trim(), mod);
+  });
   return s;
 }
 
@@ -155,7 +182,7 @@ export function bundleProjectToHtml(files: PreviewFile[], name = "DelOS app"): s
 
   const transformed: string[] = [];
   sources.forEach((f, i) => {
-    const noImports = stripImports(f.content);
+    const noImports = rewriteImports(f.content);
     const { code, defaultName } = stripExports(noImports, i);
     // Drop "use client" / "use server" directives.
     const clean = code.replace(/^\s*["']use (client|server)["']\s*;?\s*$/gm, "");
@@ -182,6 +209,29 @@ const useRouter = () => ({ push(){}, replace(){}, back(){}, forward(){}, refresh
 const usePathname = () => '/';
 const useSearchParams = () => new URLSearchParams();
 const dynamic = (loader) => (props) => React.createElement('div', null, '');
+// ── Universal third-party import shims ───────────────────────────────────
+// Generated apps routinely import framer-motion, lucide-react, clsx, recharts,
+// next/*, toast libs, etc. Those imports are stripped + rebound to these shims
+// so an undefined symbol never blanks the whole preview.
+const __MOTION_PROPS = { animate:1, initial:1, exit:1, transition:1, variants:1, whileHover:1, whileTap:1, whileFocus:1, whileInView:1, whileDrag:1, layout:1, layoutId:1, drag:1, dragConstraints:1, dragElastic:1, dragMomentum:1, custom:1, viewport:1, transformTemplate:1, onAnimationComplete:1, onAnimationStart:1, onViewportEnter:1, onViewportLeave:1 };
+function __cleanProps(p){ if(!p||typeof p!=='object') return p; var o={}; for(var k in p){ if(!__MOTION_PROPS[k]) o[k]=p[k]; } return o; }
+const __passthrough = (props) => React.createElement('div', __cleanProps(props), props && props.children);
+const __motion = new Proxy({}, { get: (_t, tag) => (props) => React.createElement(typeof tag==='string'?tag:'div', __cleanProps(props), props && props.children) });
+const __icon = (props) => { var s=(props&&props.size)||16; return React.createElement('span', { className:(props&&props.className)||'', 'aria-hidden':'true', style:{ display:'inline-block', width:s, height:s, verticalAlign:'middle' } }); };
+function __cx(){ var out=[]; for(var i=0;i<arguments.length;i++){ var a=arguments[i]; if(!a) continue; if(typeof a==='string'||typeof a==='number') out.push(String(a)); else if(Array.isArray(a)) out.push(__cx.apply(null,a)); else if(typeof a==='object'){ for(var k in a){ if(a[k]) out.push(k); } } } return out.join(' '); }
+const __noop = new Proxy(function(){ return ''; }, { get: () => __noop, apply: () => '' });
+function __shim(mod, name){
+  if(mod==='framer-motion'){ if(name==='AnimatePresence') return (p) => React.createElement(React.Fragment, null, p && p.children); if(name==='motion'||name==='m') return __motion; if(name==='useAnimation'||name==='useAnimationControls') return () => ({ start:()=>Promise.resolve(), stop(){}, set(){} }); if(name==='useInView') return () => true; if(name==='useScroll') return () => ({ scrollYProgress:{ on(){}, get:()=>0 } }); if(name==='useTransform'||name==='useMotionValue'||name==='useSpring'||name==='useMotionValueEvent') return (v) => v; return __passthrough; }
+  if(mod==='lucide-react' || mod.indexOf('react-icons')>=0 || mod.indexOf('heroicons')>=0 || mod.indexOf('react-feather')>=0 || mod.indexOf('@radix-ui/react-icons')>=0) return __icon;
+  if(mod==='clsx'||mod==='classnames'||mod==='tailwind-merge'||name==='clsx'||name==='cn'||name==='cx'||name==='twMerge'||name==='classNames') return __cx;
+  if(mod==='recharts'||mod.indexOf('chart')>=0) return __passthrough;
+  if(mod.indexOf('next/')===0){ if(mod==='next/image') return Image; if(mod==='next/link') return Link; if(mod==='next/dynamic') return () => __passthrough; if(name==='useRouter') return useRouter; if(name==='usePathname') return usePathname; if(name==='useSearchParams') return useSearchParams; if(name==='default') return __passthrough; return __noop; }
+  if(mod==='react-hot-toast'||mod==='sonner'){ if(name==='Toaster') return __passthrough; var t=function(){return '';}; t.success=function(){};t.error=function(){};t.loading=function(){};t.dismiss=function(){};t.custom=function(){}; return t; }
+  if(name==='default') return __passthrough;
+  if(/^[A-Z]/.test(name)) return __passthrough;
+  return __noop;
+}
+function __shimNS(mod){ return new Proxy({}, { get: (_t, name) => __shim(mod, String(name)) }); }
 `.trim();
 
   const runner = `

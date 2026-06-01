@@ -11,7 +11,11 @@ export const runtime = "nodejs";
 // Total budget is short · the deterministic parser handles 90%+ of intents in
 // microseconds, LLM only fires on novel asks, and we hard-cap that branch at
 // 8s internally (see Promise.race below) so Vercel's maxDuration is never hit.
-export const maxDuration = 10;
+// 25s headroom · the deterministic parser answers commands instantly; this
+// only bounds the best-effort LLM classify for freeform questions, whose hard
+// timeout is 16s. Was 10s, which clipped the cascade at 8s and timed out
+// novel questions/greetings into "didn't catch that". (Vercel caps per plan.)
+export const maxDuration = 25;
 
 // Voice command is LLM-backed; uncapped traffic is a Groq-token wallet attack.
 // 40/min per IP comfortably exceeds any human cadence and bounds wallet burn.
@@ -480,7 +484,7 @@ Output JSON: { "intent": "...", "app": "...", "payload": "...", "reply": "..." }
         voiceTimer = setTimeout(() => {
           voiceAc.abort();
           reject(new Error("voice_command_timeout"));
-        }, 8_000);
+        }, 16_000);
       }),
     ]);
     if (voiceTimer) clearTimeout(voiceTimer);

@@ -25,21 +25,30 @@ import { storeProject, slugifyName } from "@/lib/codegenProjectStore";
 import { resolveTenant, zodErr } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
-export const maxDuration = 90;
+// 300s upper bound for real multi-file LLM generation. Vercel caps this per
+// plan (Hobby 60s / Pro 300s); locally it is uncapped. The app-level
+// DEADLINE_MS below is the real budget governor.
+export const maxDuration = 300;
 
 const CODEGEN_LIMIT_PER_MIN = 6;
 const CODEGEN_WINDOW_MS = 60_000;
-// 80s deadline + Vercel 90s function cap leaves 10s for response close.
-const DEADLINE_MS = 80_000;
+// App-level generation budget. Was 80s (sized for the old Vercel 90s cap),
+// which bailed mid-build on production/same-to-same tiers BEFORE 3 real files
+// landed → it threw → fell back to the canned playbook scaffold ("dead code").
+// 240s lets a full 6-10 file app generate for real. The per-file timeout + the
+// client's per-event stall watchdog keep a genuinely hung provider from
+// pinning it open.
+const DEADLINE_MS = 240_000;
 // 3-wide writes · default plan capped at 6-8 files so 3-wide
 // finishes 2-3 batches inside the 80s window. Was 2-wide which left
 // the third file in 5-file plans stranded against the deadline.
 const WRITE_PARALLEL = 3;
 const BATCH_SLEEP_MS = 50;
-// 22s per-file · 30s was too generous and let one slow file eat the
-// budget for the rest. 22s catches genuine stalls without skipping
-// production-quality components.
-const FILE_TIMEOUT_MS = 22_000;
+// 45s per-file · 22s was too tight and timed out the larger components
+// (full pages with 15+ mock rows + states), which then skipped to the
+// fallback scaffold. 45s lets a real production component finish; the
+// retry branch still uses a tighter budget.
+const FILE_TIMEOUT_MS = 45_000;
 
 const bodySchema = z.object({
   prompt: z.string().min(5).max(1200),
@@ -59,6 +68,12 @@ const bodySchema = z.object({
     .optional(),
   // Build tier · drives complexity floor + file count.
   tier: z.enum(["prototype", "production", "same-to-same"]).optional(),
+  // Opt-in instant deterministic playbook (zero-LLM canned template). Default
+  // OFF so every build runs the real LLM codegen and produces tailored code —
+  // the playbook short-circuit made matched prompts (investor CRM, AML, …)
+  // emit a generic "dead" scaffold. The LLM-failure fallback below still
+  // engages a playbook so a build never hangs. Set true only for fast demos.
+  deterministic: z.boolean().optional(),
   tenantId: z.string().min(1).max(120).optional(),
   // Refine path · prior project drops in here so the model patches files
   // in place rather than rebuilding from scratch.
@@ -261,6 +276,8 @@ export async function POST(req: NextRequest) {
   const stack = parsed.data.stack ?? "nextjs";
   const tier = parsed.data.tier ?? "production";
   const uiStyle = parsed.data.uiStyle ?? "modern-saas";
+  // Real LLM codegen is the default; the deterministic playbook is opt-in.
+  const deterministicMode = parsed.data.deterministic === true;
   // Resolve server-side · the stream persists the generated project to memory
   // under this tenant (safeAddMemory ×3 below). A body tenantId is honored only
   // for reserved test prefixes, never as an arbitrary write target (BOLA).
@@ -337,7 +354,7 @@ export async function POST(req: NextRequest) {
         // Match against domain playbook before any LLM call. If matched,
         // stream the playbook files deterministically (sub-3s, zero LLM tokens)
         // and return early. Coverage repair runs inline.
-        const playbook = buildDomainPlaybook(userPrompt, stackHint);
+        const playbook = deterministicMode ? buildDomainPlaybook(userPrompt, stackHint) : null;
         if (playbook) {
           const { project, domain } = playbook;
           const coverage = scoreCoverage(userPrompt, project.files);
@@ -514,7 +531,7 @@ Output JSON only:
             const raw = await callOnce(
               writePrompt,
               "Respond with ONE JSON object only. No prose. Production-quality code, never stubs.",
-              3500,
+              5200,
               FILE_TIMEOUT_MS,
             );
             const obj = JSON.parse(raw) as { path?: string; content?: string; language?: string };
@@ -548,8 +565,8 @@ Output JSON: { "path":"${f.path}","content":"…escaped source…","language":"$
               const raw2 = await callOnce(
                 retryPrompt,
                 "Respond ONLY with one JSON object.",
-                2200,
-                Math.min(FILE_TIMEOUT_MS, 18_000),
+                3600,
+                Math.min(FILE_TIMEOUT_MS, 30_000),
               );
               const obj = JSON.parse(raw2) as { path?: string; content?: string; language?: string };
               const content = stripStubs(obj.content ?? "");
