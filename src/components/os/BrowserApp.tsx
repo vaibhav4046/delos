@@ -7,6 +7,22 @@ type Bookmark = { id: string; title: string; url: string; category?: BookmarkCat
 type BookmarkCategory = "delos" | "search" | "ai" | "finance" | "edu" | "tools" | "games" | "productivity";
 type SearchHit = { title: string; url: string; snippet: string };
 
+// DuckDuckGo snippets arrive HTML-entity-encoded (e.g. `Friday Night Funkin&#x27;`,
+// `&amp;`). Rendering them as JSX text children shows the raw entities literally
+// because React does not decode entities in text content. Decode first.
+function decodeEntities(s: string): string {
+  if (!s) return "";
+  if (typeof document === "undefined") {
+    // SSR fallback · handle the common ones without a DOM.
+    return s
+      .replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
+  }
+  const el = document.createElement("textarea");
+  el.innerHTML = s;
+  return el.value;
+}
+
 const DEFAULT_BOOKMARKS: Bookmark[] = [
   // DelOS core
   { id: "del", title: "DelOS", url: "/", category: "delos" },
@@ -467,7 +483,7 @@ function SearchView({
           <div className="font-pixel text-[11px] tracking-widest" style={{ color: "var(--accent)" }}>
             ★ INSTANT ANSWER
           </div>
-          <p className="font-mono text-[12px] leading-relaxed">{answer}</p>
+          <p className="font-mono text-[12px] leading-relaxed">{decodeEntities(answer)}</p>
         </div>
       )}
 
@@ -496,7 +512,7 @@ function SearchView({
                     className="font-mono text-[11px] leading-relaxed mt-1"
                     style={{ color: "var(--fg)" }}
                   >
-                    {h.snippet.slice(0, 240)}
+                    {decodeEntities(h.snippet).slice(0, 240)}
                   </div>
                 </button>
               </li>
