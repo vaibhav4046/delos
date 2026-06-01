@@ -1469,6 +1469,30 @@ export function AppBuilder({ onBuilt }: { onBuilt: (spec: AppSpec) => void }) {
         >
           {busy ? `◌ BUILDING${stage !== "idle" ? " · " + stage.toUpperCase() : "…"}` : "★ BUILD APP"}
         </button>
+        {/* One-click result · appears the moment a production build has files.
+            ▶ PREVIEW opens DelCode on THIS project and auto-renders the running
+            app (no hunting for FULL IDE → PREVIEW). Directly answers the user's
+            "I can't see the results". */}
+        {(lastProject || streamingFiles.length > 0) && !busy && (
+          <div className="flex gap-1.5 mt-1.5">
+            <button
+              onClick={() => { openDelCodeWithProject(); setTimeout(() => window.dispatchEvent(new CustomEvent("delos-delcode-preview")), 500); }}
+              className="btn-pixel"
+              style={{ flex: 1, background: "var(--success)", color: "#04130a", fontSize: 11, fontWeight: 700, padding: "7px 10px", cursor: "pointer" }}
+              title="Render the generated app live"
+            >
+              ▶ PREVIEW APP
+            </button>
+            <button
+              onClick={openDelCodeWithProject}
+              className="btn-pixel"
+              style={{ background: "var(--surface-2)", color: "var(--fg)", fontSize: 11, padding: "7px 10px", cursor: "pointer" }}
+              title="Open the full DelCode IDE on this project"
+            >
+              ⌘ OPEN IDE
+            </button>
+          </div>
+        )}
         {/* Live progress · plan → file-by-file. Visible the moment a build starts. */}
         {(busy || codeProgress) && (
           <div className="font-mono mt-1.5" style={{ fontSize: 9.5, color: "var(--accent)", lineHeight: 1.4 }}>

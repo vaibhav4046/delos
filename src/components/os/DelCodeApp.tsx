@@ -246,6 +246,10 @@ export function DelCodeApp() {
   // React/Babel/Tailwind CDN scripts get blocked → blank pane. The route serves
   // its own permissive CSP, so navigating to it actually runs.
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  // VibeCode's "▶ PREVIEW APP" button dispatches `delos-delcode-preview` after
+  // launching this IDE on a fresh project. Files load asynchronously, so latch
+  // the request and fire openPreview() once they've arrived (race-safe).
+  const [pendingPreview, setPendingPreview] = useState(false);
 
   function openFile(path: string) {
     setActivePath(path);
@@ -323,6 +327,21 @@ export function DelCodeApp() {
       window.dispatchEvent(new CustomEvent("toast", { detail: { text: `preview error: ${(e as Error).message.slice(0, 60)}`, tone: "bad" } }));
     }
   }
+  // Listen for VibeCode's one-click preview request.
+  useEffect(() => {
+    const onReq = () => setPendingPreview(true);
+    window.addEventListener("delos-delcode-preview", onReq as EventListener);
+    return () => window.removeEventListener("delos-delcode-preview", onReq as EventListener);
+  }, []);
+  // Fire the preview once files have actually loaded (handles the launch race).
+  useEffect(() => {
+    if (!pendingPreview || files.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPendingPreview(false);
+    void openPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPreview, files.length]);
+
   function closeTab(path: string) {
     setOpenPaths((p) => {
       const remaining = p.filter((x) => x !== path);
